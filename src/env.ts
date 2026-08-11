@@ -130,7 +130,6 @@ const EnvBaseSchema = z.object({
   // Note that Gemini's own ceilings (an 8,192-token input cap) sit BELOW this
   // tripwire for dense non-Latin text, so such an input fails later, at
   // synthesis, through the normal provider-failure path rather than here (§7.1).
-  TTS_MAX_TEXT_LENGTH: z.coerce.number().int().positive().default(20_000),
 
   // ── Feature flags (EN_FEATURE_*) ──────────────────────────────────────
   // One flat boolean env var per optional feature, under a dedicated
