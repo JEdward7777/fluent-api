@@ -97,7 +97,6 @@ const EnvSchema = z.object({
   // Note that Gemini's own ceilings (an 8,192-token input cap) sit BELOW this
   // tripwire for dense non-Latin text, so such an input fails later, at
   // synthesis, through the normal provider-failure path rather than here (§7.1).
-  TTS_MAX_TEXT_LENGTH: z.coerce.number().int().positive().default(20_000),
 
   // ── Async USFM export storage (Cloudflare R2, S3-compatible) ───────
   // Optional: when the three R2 credentials are unset the async export
