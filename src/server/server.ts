@@ -59,7 +59,16 @@ export function createServer() {
       credentials: true,
       // Expose set-auth-token so clients can read the Bearer token from the
       // BetterAuth bearer() plugin response header after sign-in.
-      exposeHeaders: ['set-auth-token'],
+      //
+      // `Retry-After` is exposed for the source-TTS admission path (§6.1/§9.2).
+      // It is not a CORS-safelisted response header, so without this line the
+      // browser hides it from JS entirely: the TTS client's 503 probe reads
+      // `null` and silently falls back to its default backoff, which makes the
+      // service's `TTS_RETRY_AFTER_SECONDS` dial inert for every browser.
+      // Measured in Firefox before the fix — the server said 5 s, the client
+      // waited its 2 s fallback, three times, and gave up. Only a real browser
+      // could show this: httpx and the API tests read the header fine.
+      exposeHeaders: ['set-auth-token', 'Retry-After'],
     })
   );
 
