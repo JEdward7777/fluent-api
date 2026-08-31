@@ -1,0 +1,1 @@
+ALTER TABLE "bibles" ADD COLUMN "aquifer_bible_id" integer;

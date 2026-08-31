@@ -226,6 +226,16 @@ export const bibles = pgTable(
     abbreviation: varchar('abbreviation', { length: 50 }).notNull().unique(),
     provider: bibleProviderEnum('provider').notNull().default('dbl'),
     externalId: varchar('external_id', { length: 255 }),
+    // Aquifer's own Bible id (the `{id}` in Aquifer's `GET /bibles/{id}/texts`), when this
+    // Bible is known to correspond to one. Nullable and purely additive: when it is NULL,
+    // Aquifer resolution falls back to the abbreviation/name match it has always used, so
+    // rows that predate this column behave exactly as before. Set it to pin a Bible to a
+    // specific Aquifer publication and remove the guesswork -- see matchAquiferBible().
+    //
+    // Deliberately NOT folded into provider/externalId: `bible_provider` has only the value
+    // 'dbl', and a Bible can legitimately have both a DBL externalId and an Aquifer id, which
+    // a single provider/externalId pair cannot express.
+    aquiferBibleId: integer('aquifer_bible_id'),
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
