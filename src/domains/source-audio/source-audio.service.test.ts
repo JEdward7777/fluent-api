@@ -40,6 +40,8 @@ const fluentBible: Bible = {
   provider: 'dbl',
   externalId: null,
   aquiferBibleId: null,
+  ttsLicenseStatus: 'unknown',
+  licenseNotice: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };

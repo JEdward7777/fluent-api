@@ -2,6 +2,10 @@ import { z } from '@hono/zod-openapi';
 
 import type { insertBiblesSchema, patchBiblesSchema, selectBiblesSchema } from '@/db/schema';
 
+import { ttsLicenseStatusEnum } from '@/db/schema';
+
+export const ttsLicenseStatusSchema = z.enum(ttsLicenseStatusEnum.enumValues);
+
 // ─── DB-derived types ─────────────────────────────────────────────
 
 export type Bible = z.infer<typeof selectBiblesSchema>;
@@ -14,6 +18,8 @@ export const bibleResponseSchema = z.object({
   abbreviation: z.string(),
   languageId: z.number().int(),
   provider: z.string(),
+  ttsLicenseStatus: ttsLicenseStatusSchema.optional(),
+  licenseNotice: z.string().nullable().optional(),
 });
 
 export type BibleResponse = z.infer<typeof bibleResponseSchema>;

@@ -13,6 +13,8 @@ function toBibleResponse(bible: Bible): BibleResponse {
     abbreviation: bible.abbreviation,
     languageId: bible.languageId,
     provider: bible.provider,
+    ttsLicenseStatus: bible.ttsLicenseStatus,
+    licenseNotice: bible.licenseNotice,
   };
 }
 
