@@ -39,6 +39,7 @@ import '@/domains/playback-audio/playback-audio.route';
 import '@/domains/self/settings/self-settings.route';
 import '@/domains/aquifer-resources/aquifer-resources.route';
 import '@/domains/youversion/youversion.route';
+import '@/domains/assistant/assistant.route';
 configureOpenAPI(server);
 
 export default server;
