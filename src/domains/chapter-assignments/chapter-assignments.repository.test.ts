@@ -336,7 +336,13 @@ describe('chapter-assignments.repository claim helpers', () => {
       };
       mockUpdateChain.returning.mockResolvedValueOnce([record]);
 
-      const result = await repo.submitPeerCheckIfEligible(1, 7, submittedTime, mockTx());
+      const result = await repo.submitPeerCheckIfEligible(
+        1,
+        7,
+        'community_review',
+        submittedTime,
+        mockTx()
+      );
 
       expect(result).toEqual(record);
       expect(mockUpdateChain.set).toHaveBeenCalledWith({
@@ -349,7 +355,13 @@ describe('chapter-assignments.repository claim helpers', () => {
     it('returns null when another submitter already won the race', async () => {
       mockUpdateChain.returning.mockResolvedValueOnce([]);
 
-      const result = await repo.submitPeerCheckIfEligible(1, 7, new Date(), mockTx());
+      const result = await repo.submitPeerCheckIfEligible(
+        1,
+        7,
+        'community_review',
+        new Date(),
+        mockTx()
+      );
 
       expect(result).toBeNull();
     });
@@ -363,7 +375,7 @@ describe('chapter-assignments.repository claim helpers', () => {
         },
       ]);
 
-      await repo.submitPeerCheckIfEligible(1, 7, new Date(), mockTx());
+      await repo.submitPeerCheckIfEligible(1, 7, 'community_review', new Date(), mockTx());
 
       expect(ne).toHaveBeenCalledWith(chapter_assignments.assignedUserId, 7);
       expect(mockUpdateChain.where).toHaveBeenCalledWith([

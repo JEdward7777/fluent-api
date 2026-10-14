@@ -11,6 +11,7 @@ import * as chapterAssignmentService from '@/domains/chapter-assignments/chapter
 import { ProjectPolicy } from '@/domains/projects/project.policy';
 import * as projectService from '@/domains/projects/projects.service';
 import { resolveIsProjectMember } from '@/domains/projects/users/project-users.service';
+import { getWorkflowStagesByProjectId } from '@/domains/projects/workflow-stages/workflow-stages.repository';
 import { ErrorMessages, getHttpStatus } from '@/lib/types';
 
 import type { VerseAudioIdSource } from './verse-audio.types';
@@ -165,7 +166,9 @@ export function requireEditVerseAudioAccess(source: VerseAudioIdSource) {
       );
     }
 
-    if (!ChapterAssignmentPolicy.edit(policyUser, assignmentResult.data, isProjectMember)) {
+    const stages = await getWorkflowStagesByProjectId(assignmentResult.data.projectId);
+
+    if (!ChapterAssignmentPolicy.edit(policyUser, assignmentResult.data, isProjectMember, stages)) {
       return c.json({ message: NOT_FOUND_MESSAGE }, HttpStatusCodes.NOT_FOUND);
     }
 
