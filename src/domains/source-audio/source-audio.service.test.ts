@@ -94,7 +94,7 @@ describe('getChapterSourceAudio', () => {
     vi.clearAllMocks();
     vi.mocked(biblesRepo.getById).mockResolvedValue(ok(fluentBible));
     vi.mocked(getBookByCode).mockResolvedValue(
-      ok({ id: 41, code: 'MRK', eng_display_name: 'Mark' })
+      ok({ id: 41, code: 'MRK', eng_display_name: 'Mark', updatedAt: null })
     );
   });
 
@@ -529,7 +529,7 @@ describe('legacy source and manifest isolation from explicit playback selections
     vi.clearAllMocks();
     vi.mocked(biblesRepo.getById).mockResolvedValue(ok({ ...fluentBible, audioResourceId: 999 }));
     vi.mocked(getBookByCode).mockResolvedValue(
-      ok({ id: 41, code: 'MRK', eng_display_name: 'Mark' })
+      ok({ id: 41, code: 'MRK', eng_display_name: 'Mark', updatedAt: null })
     );
   });
   it('keeps linked windowless DBL ahead of Aquifer despite a selected recording FK', async () => {
