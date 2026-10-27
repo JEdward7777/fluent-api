@@ -1,6 +1,6 @@
 import { eq, gte, ilike, or, sql } from 'drizzle-orm';
 
-import type { Result } from '@/lib/types';
+import type { DbTransaction, Result } from '@/lib/types';
 
 import { db } from '@/db';
 import { bibles, languages } from '@/db/schema';
@@ -22,9 +22,9 @@ export async function getAll(updatedAfter?: Date): Promise<Result<Bible[]>> {
   }
 }
 
-export async function getById(id: number): Promise<Result<Bible>> {
+export async function getById(id: number, tx?: DbTransaction): Promise<Result<Bible>> {
   try {
-    const [bible] = await db.select().from(bibles).where(eq(bibles.id, id)).limit(1);
+    const [bible] = await (tx ?? db).select().from(bibles).where(eq(bibles.id, id)).limit(1);
     if (!bible) return err(ErrorCode.BIBLE_NOT_FOUND);
     return ok(bible);
   } catch (error) {

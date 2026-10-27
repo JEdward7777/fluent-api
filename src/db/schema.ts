@@ -25,7 +25,7 @@ import {
 import { createSchemaFactory } from 'drizzle-zod';
 export const userStatusEnum = pgEnum('user_status', ['invited', 'verified', 'inactive']);
 export const scriptDirectionEnum = pgEnum('script_direction', ['ltr', 'rtl']);
-export const bibleProviderEnum = pgEnum('bible_provider', ['dbl']);
+export const bibleProviderEnum = pgEnum('bible_provider', ['dbl', 'aquifer', 'youversion']);
 // Publication license, global to the Bible (not a tenant/user grant). TTS_USE is the RBAC axis.
 export const ttsLicenseStatusEnum = pgEnum('tts_license_status', [
   'allowed',
@@ -241,7 +241,7 @@ export const bibles = pgTable(
       .$onUpdate(() => sql`next_catalogue_watermark()`),
   },
   (table) => [
-    // DBL identity: a given provider + externalId pair maps to exactly one row.
+    // Provider identity: a given provider + externalId pair maps to exactly one row.
     // Partial: only rows with a non-null externalId are covered (seed data has none).
     uniqueIndex('idx_bibles_provider_external_id')
       .on(table.provider, table.externalId)

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { findGrantsByUserId } from '@/domains/user-roles/user-roles.repository';
 import { getUserByEmail } from '@/domains/users/users.service';
 import { auth } from '@/lib/auth';
+import { PERMISSIONS } from '@/lib/permissions';
 import { ok } from '@/lib/types';
 import { server } from '@/server/server';
 
@@ -127,4 +128,69 @@ describe('get /bibles', () => {
     expect(res.status).toBe(400);
     expect(bibleService.getAllBibles).not.toHaveBeenCalled();
   });
+});
+
+describe('superAdmin provider-aware Bible writes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authenticate();
+    vi.mocked(findGrantsByUserId).mockResolvedValue(
+      ok([
+        {
+          orgId: null,
+          projectId: null,
+          permissions: new Set([PERMISSIONS.ROLE_ASSIGN_ORG_MANAGER]),
+        },
+      ])
+    );
+  });
+
+  const base = { name: 'Test', abbreviation: 'TEST', languageId: 1 };
+  const response = {
+    id: 1,
+    ...base,
+    provider: 'dbl',
+    ttsLicenseStatus: 'unknown' as const,
+    hasAudio: false,
+    textBibleKey: null,
+    selectedRecordingKey: null,
+    updatedAt: null,
+  };
+
+  it.each(['dbl', 'aquifer', 'youversion'] as const)(
+    'POST and PATCH accept explicit %s',
+    async (provider) => {
+      vi.mocked(bibleService.createBible).mockResolvedValue(ok({ ...response, provider }));
+      vi.mocked(bibleService.updateBible).mockResolvedValue(ok({ ...response, provider }));
+      for (const method of ['POST', 'PATCH']) {
+        const input =
+          method === 'POST'
+            ? { ...base, provider, externalId: '1' }
+            : { provider, externalId: '1' };
+        const result = await server.request(method === 'POST' ? '/bibles' : '/bibles/1', {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        });
+        expect(result.status).toBe(method === 'POST' ? 201 : 200);
+        expect(await result.json()).toEqual({ ...response, provider });
+      }
+    }
+  );
+
+  it.each(['POST', 'PATCH'])(
+    '%s rejects missing or invalid provider before service execution',
+    async (method) => {
+      for (const identity of [{ externalId: '1' }, { provider: 'other', externalId: '1' }]) {
+        const result = await server.request(method === 'POST' ? '/bibles' : '/bibles/1', {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...base, ...identity }),
+        });
+        expect(result.status).toBe(400);
+      }
+      expect(bibleService.createBible).not.toHaveBeenCalled();
+      expect(bibleService.updateBible).not.toHaveBeenCalled();
+    }
+  );
 });

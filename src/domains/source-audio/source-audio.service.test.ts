@@ -47,7 +47,7 @@ const fluentBible: Bible = {
   abbreviation: 'BSB',
   languageId: 1,
   provider: 'dbl',
-  externalId: null,
+  externalId: 'dbl-text',
   audioResourceId: null,
   hasAudio: false,
   createdAt: new Date(),

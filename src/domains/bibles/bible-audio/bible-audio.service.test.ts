@@ -73,6 +73,21 @@ const DBL_BIBLE = {
 
 describe('bibleAudioService', () => {
   describe('getSourceAudio', () => {
+    it.each(['aquifer', 'youversion'] as const)(
+      'rejects %s without calling DBL',
+      async (provider) => {
+        vi.clearAllMocks();
+        vi.mocked(biblesRepo.getById).mockResolvedValue(ok({ ...BIBLE, provider }));
+        expect(await bibleAudioService.getSourceAudio(1, 1, 1)).toMatchObject({
+          ok: false,
+          error: { code: ErrorCode.UNSUPPORTED_BIBLE_PROVIDER },
+        });
+        expect(dblClient.getBible).not.toHaveBeenCalled();
+        expect(dblClient.getAudioChapter).not.toHaveBeenCalled();
+        expect(booksRepo.getById).not.toHaveBeenCalled();
+      }
+    );
+
     it('returns empty array if bible has no externalId', async () => {
       vi.mocked(biblesRepo.getById).mockResolvedValue(ok({ externalId: null } as any));
 
@@ -84,7 +99,7 @@ describe('bibleAudioService', () => {
     });
 
     it('returns empty array if DBL Bible has no audioBibles', async () => {
-      vi.mocked(biblesRepo.getById).mockResolvedValue(ok({ externalId: 'ext-bible' } as any));
+      vi.mocked(biblesRepo.getById).mockResolvedValue(ok(BIBLE));
       vi.mocked(booksRepo.getById).mockResolvedValue(ok({ code: 'GEN' } as any));
       vi.mocked(dblClient.getBible).mockResolvedValue(ok({ audioBibles: [] } as any));
 
@@ -96,7 +111,7 @@ describe('bibleAudioService', () => {
     });
 
     it('returns empty array and ignores 404s for missing audio chapters', async () => {
-      vi.mocked(biblesRepo.getById).mockResolvedValue(ok({ externalId: 'ext-bible' } as any));
+      vi.mocked(biblesRepo.getById).mockResolvedValue(ok(BIBLE));
       vi.mocked(booksRepo.getById).mockResolvedValue(ok({ code: 'GEN' } as any));
       vi.mocked(dblClient.getBible).mockResolvedValue(
         ok({
@@ -120,7 +135,7 @@ describe('bibleAudioService', () => {
     });
 
     it('returns DBL_SERVICE_UNAVAILABLE if DBL fails with a 500/timeout', async () => {
-      vi.mocked(biblesRepo.getById).mockResolvedValue(ok({ externalId: 'ext-bible' } as any));
+      vi.mocked(biblesRepo.getById).mockResolvedValue(ok(BIBLE));
       vi.mocked(booksRepo.getById).mockResolvedValue(ok({ code: 'GEN' } as any));
       vi.mocked(dblClient.getBible).mockResolvedValue(
         ok({
@@ -183,7 +198,7 @@ describe('bibleAudioService', () => {
     });
 
     it('returns audio tracks on success', async () => {
-      vi.mocked(biblesRepo.getById).mockResolvedValue(ok({ externalId: 'ext-bible' } as any));
+      vi.mocked(biblesRepo.getById).mockResolvedValue(ok(BIBLE));
       vi.mocked(booksRepo.getById).mockResolvedValue(ok({ code: 'GEN' } as any));
       vi.mocked(dblClient.getBible).mockResolvedValue(
         ok({

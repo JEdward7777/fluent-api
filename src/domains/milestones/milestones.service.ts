@@ -1,6 +1,7 @@
 import type { Result } from '@/lib/types';
 
 import { db } from '@/db';
+import * as biblesService from '@/domains/bibles/bibles.service';
 import * as chapterAssignmentsService from '@/domains/chapter-assignments/chapter-assignments.service';
 import * as projectsService from '@/domains/projects/projects.service';
 import { logger } from '@/lib/logger';
@@ -26,6 +27,9 @@ export async function createMilestone(
     if (validBookIds.length !== input.bookIds.length) {
       return err(ErrorCode.INVALID_BIBLE_BOOKS);
     }
+
+    const source = await biblesService.getBibleRecordById(sourceBibleId);
+    if (!source.ok) return source;
 
     const result = await db.transaction(async (tx) => {
       await projectsService.lockProjectById(projectId, tx);
@@ -95,11 +99,18 @@ export async function createMilestone(
     });
 
     if (result.booksToIngest.length > 0) {
-      const bookRecords = await repo.getBooksByIds(result.booksToIngest);
+      if (source.data.provider !== 'dbl') {
+        logger.warn({
+          message: 'Unsupported text ingestion provider; no DBL job queued',
+          context: { bibleId: sourceBibleId, provider: source.data?.provider },
+        });
+      }
+      const bookRecords =
+        source.data.provider === 'dbl' ? await repo.getBooksByIds(result.booksToIngest) : [];
 
       let boss;
       try {
-        boss = await getQueue();
+        if (bookRecords.length > 0) boss = await getQueue();
       } catch (e) {
         logger.error({
           message: 'Failed to get queue for DBL ingest',
@@ -206,6 +217,12 @@ export async function updateMilestone(
       return err(ErrorCode.VALIDATION_ERROR);
     }
 
+    const source =
+      addBooks?.length && sourceBibleId
+        ? await biblesService.getBibleRecordById(sourceBibleId)
+        : ok(null);
+    if (!source.ok) return source;
+
     let booksToIngestIds: number[] = [];
 
     await db.transaction(async (tx) => {
@@ -299,9 +316,15 @@ export async function updateMilestone(
       const enqueueBooksForIngestion = await repo.getBooksByIds(booksToIngestIds);
 
       if (enqueueBooksForIngestion.length > 0 && sourceBibleId) {
+        if (source.data?.provider !== 'dbl') {
+          logger.warn({
+            message: 'Unsupported text ingestion provider; no DBL job queued',
+            context: { bibleId: sourceBibleId, provider: source.data?.provider },
+          });
+        }
         let boss;
         try {
-          boss = await getQueue();
+          if (source.data?.provider === 'dbl') boss = await getQueue();
         } catch (e) {
           logger.error({ message: 'Failed to get queue for DBL ingest', context: { error: e } });
         }
