@@ -4,11 +4,10 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 
-import { logger } from '@/lib/logger';
-
 import type { JsonValue } from './canonical-json';
 
 import { hashCanonicalJson } from './canonical-json';
+import { diagnostic } from './diagnostic';
 
 export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
@@ -88,7 +87,7 @@ export function createRequestCache(cacheDir = defaultCacheDirectory()) {
       try {
         parsed = JSON.parse(content);
       } catch {
-        logger.warn({
+        diagnostic({
           message: 'Ignoring corrupt LLM cache entry',
           context: { requestHash: hash },
         });
@@ -101,7 +100,7 @@ export function createRequestCache(cacheDir = defaultCacheDirectory()) {
         entry.data.provider !== request.provider ||
         entry.data.model !== request.model
       ) {
-        logger.warn({
+        diagnostic({
           message: 'Ignoring invalid LLM cache metadata',
           context: { requestHash: hash },
         });

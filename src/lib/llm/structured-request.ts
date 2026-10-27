@@ -1,9 +1,8 @@
 import { setTimeout } from 'node:timers/promises';
 
-import { logger } from '@/lib/logger';
-
 import type { createRequestCache, LlmRequest } from './request-cache';
 
+import { diagnostic } from './diagnostic';
 import { llmRequestHash } from './request-cache';
 
 export class LlmTransportError extends Error {
@@ -52,7 +51,7 @@ export async function requestStructuredResponse<T>(options: RequestOptions<T>) {
           attempts: 0,
         };
       } catch {
-        logger.warn({
+        diagnostic({
           message: 'Ignoring invalid structured LLM cache response',
           context: provenance,
         });

@@ -25,11 +25,16 @@ export function getByProviderIdentities(identities: ProviderIdentity[]) {
 export function upsertDblTextFacts(
   facts: DblTextLicenseFact[],
   initialStatus: TtsLicenseStatus,
-  tx: DbTransaction
+  tx: DbTransaction,
+  statuses?: ReadonlyMap<string, TtsLicenseStatus>
 ) {
-  return repo.upsertDblTextFacts(facts, initialStatus, tx);
+  return repo.upsertDblTextFacts(facts, initialStatus, tx, statuses);
 }
 
 export function applyAllRightsReservedSweep() {
   return repo.applyAllRightsReservedSweep();
+}
+
+export function getDblPolicyFacts(externalIds: string[], tx: DbTransaction) {
+  return repo.getDblPolicyFacts(externalIds, tx);
 }
