@@ -302,6 +302,20 @@
       "when": 1793105868551,
       "tag": "0042_provider_identity_license_watermarks",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793111834274,
+      "tag": "0043_license_facts_expand",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793111840644,
+      "tag": "0044_license_notice_bridge_and_watermarks",
+      "breakpoints": true
     }
   ]
 }

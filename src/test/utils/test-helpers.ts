@@ -5,6 +5,7 @@ import { PgBoss } from 'pg-boss';
 import { vi } from 'vitest';
 
 import type { Bible } from '@/domains/bibles/bibles.types';
+import type { DblBible } from '@/lib/services/dbl/dbl.types';
 
 import { ErrorCode } from '@/lib/types';
 
@@ -358,6 +359,28 @@ export function makeBible(overrides: Partial<Bible> = {}): Bible {
     audioResourceId: null,
     createdAt: null,
     updatedAt: null,
+    ...overrides,
+  };
+}
+
+export function makeDblBible(overrides: Partial<DblBible> = {}): DblBible {
+  return {
+    id: 'text-1',
+    abbreviation: 'TEST',
+    abbreviationLocal: 'TEST',
+    name: 'Test Bible',
+    nameLocal: 'Test Bible',
+    language: {
+      id: 'eng',
+      name: 'English',
+      nameLocal: 'English',
+      script: 'Latin',
+      scriptDirection: 'LTR',
+    },
+    countries: [],
+    audioBibles: [],
+    copyright: null,
+    info: null,
     ...overrides,
   };
 }

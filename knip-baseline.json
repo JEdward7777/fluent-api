@@ -85,7 +85,6 @@
   "exports:src/test/utils/test-helpers.ts:sampleBibles",
   "exports:src/test/utils/test-helpers.ts:sampleChapterAssignments",
   "exports:src/test/utils/test-helpers.ts:sampleChapterInfo",
-  "exports:src/test/utils/test-helpers.ts:sampleLanguages",
   "exports:src/test/utils/test-helpers.ts:sampleProjectUnitBibleBooks",
   "exports:src/test/utils/test-helpers.ts:sampleProjectUnits",
   "exports:src/test/utils/test-helpers.ts:sampleProjects",

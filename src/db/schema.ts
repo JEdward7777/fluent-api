@@ -211,7 +211,10 @@ export const bible_provider_resources = pgTable(
     provider: resourceProviderEnum('provider').notNull(),
     externalId: varchar('external_id', { length: 255 }).notNull(),
     ttsLicenseStatus: ttsLicenseStatusEnum('tts_license_status').notNull().default('unknown'),
-    licenseNotice: text('license_notice'),
+    // Compatibility column retained only for old binaries and the database bridge.
+    legacyLicenseNotice: text('license_notice'),
+    licenseNotice: text('recording_license_notice'),
+    textLicenseNotice: text('text_license_notice'),
     // Optional label for human diagnostics and curation; never identity or policy.
     displayName: text('display_name'),
   },
@@ -219,6 +222,18 @@ export const bible_provider_resources = pgTable(
     uniqueIndex('idx_bible_provider_resources_identity').on(table.provider, table.externalId),
   ]
 );
+
+export const license_classifications = pgTable('license_classifications', {
+  normalizedText: text('normalized_text').primaryKey(),
+  status: ttsLicenseStatusEnum('status').notNull(),
+  rationale: jsonb('rationale').$type<Json>(),
+  classifiedBy: text('classified_by'),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
 
 export const bibles = pgTable(
   'bibles',

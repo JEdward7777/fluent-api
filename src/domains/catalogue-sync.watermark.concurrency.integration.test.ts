@@ -1,6 +1,7 @@
+import type postgres from 'postgres';
+
 import { randomUUID } from 'node:crypto';
-import postgres from 'postgres';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   migrationStatements,
@@ -12,6 +13,26 @@ import {
  * competing transactions. Gated on WATERMARK_TEST_DATABASE_URL (never
  * DATABASE_URL / shared Dev/QA). Pattern mirrors dlq-integration.
  */
+import type { LegacyLicenseSnapshot } from './catalog-sync.license-release.integration-cases';
+
+import { registerLicenseReleaseCases } from './catalog-sync.license-release.integration-cases';
+
+const { sql, repositorySql, database } = await vi.hoisted(async () => {
+  const postgres = (await import('postgres')).default;
+  const { drizzle } = await import('drizzle-orm/postgres-js');
+  const connection =
+    process.env.WATERMARK_TEST_DATABASE_URL ?? 'postgres://localhost/fluent_watermark_test';
+  // Drizzle installs string timestamp parsers on its client; raw concurrency
+  // assertions deliberately keep PostgreSQL.js's ordinary Date decoding.
+  const sql = postgres(connection, { max: 4 });
+  const repositorySql = postgres(connection, { max: 2 });
+  return { sql, repositorySql, database: drizzle(repositorySql) };
+});
+vi.mock('@/db', () => ({ db: database }));
+vi.mock('@/lib/logger', () => ({
+  logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+
 const connectionString = process.env.WATERMARK_TEST_DATABASE_URL;
 
 type ReservedSql = Awaited<ReturnType<postgres.Sql['reserve']>>;
@@ -70,10 +91,23 @@ const concurrencyOps: ConcurrencyOp[] = [
       return changed! as { updated_at: Date };
     },
   },
+  ...(['license_notice', 'recording_license_notice', 'text_license_notice'] as const).map(
+    (column): ConcurrencyOp => ({
+      label: `${column} query trigger`,
+      table: 'bibles',
+      write: async ({ early, bibleId, resourceId }) => {
+        await early`UPDATE bible_provider_resources SET ${early(column)} = 'Changed notice' WHERE id = ${resourceId}`;
+        const [changed] = await early<
+          { updated_at: Date }[]
+        >`SELECT updated_at FROM bibles WHERE id = ${bibleId}`;
+        return changed!;
+      },
+    })
+  ),
 ];
 
 describe.skipIf(!connectionString)('catalogue watermark commit ordering (PostgreSQL)', () => {
-  const sql = postgres(connectionString!, { max: 4 });
+  let legacy: LegacyLicenseSnapshot;
 
   beforeAll(async () => {
     const url = new URL(connectionString!);
@@ -126,8 +160,11 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
           external_id varchar(255),
           has_audio boolean NOT NULL DEFAULT false,
           audio_resource_id integer REFERENCES bible_provider_resources(id),
+          created_at timestamp DEFAULT now(),
           updated_at timestamp DEFAULT now()
         )`;
+    await sql`CREATE UNIQUE INDEX test_resource_identity ON bible_provider_resources(provider, external_id)`;
+    await sql`CREATE UNIQUE INDEX test_bible_identity ON bibles(provider, external_id) WHERE external_id IS NOT NULL`;
 
     for (const statement of migrationStatements('0038_catalogue_watermark_allocator.sql')) {
       await sql.unsafe(statement);
@@ -138,11 +175,38 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
     for (const statement of migrationStatements('0042_provider_identity_license_watermarks.sql')) {
       await sql.unsafe(statement);
     }
+    for (const statement of migrationStatements(
+      '0037_bump_bibles_on_provider_resource_license.sql'
+    ).filter(
+      (statement) => statement.includes('DROP TRIGGER') || statement.includes('CREATE TRIGGER')
+    ))
+      await sql.unsafe(statement);
+    const [oldLanguage] = await sql<
+      { id: number }[]
+    >`INSERT INTO languages(lang_name) VALUES ('Legacy migration language') RETURNING id`;
+    const [oldResource] = await sql<
+      { id: number }[]
+    >`INSERT INTO bible_provider_resources(provider, external_id, tts_license_status, license_notice) VALUES ('dbl', 'before-expand', 'forbidden', 'Legacy recording attribution') RETURNING id`;
+    const [oldBible] = await sql<
+      { id: number; updated_at: Date }[]
+    >`INSERT INTO bibles(language_id, name, abbreviation, provider, external_id, audio_resource_id) VALUES (${oldLanguage!.id}, 'Legacy migration Bible', 'LEGACY', 'dbl', 'before-expand', ${oldResource!.id}) RETURNING id, updated_at`;
+    legacy = {
+      resourceId: oldResource!.id,
+      bibleId: oldBible!.id,
+      updatedAt: oldBible!.updated_at,
+      notice: 'Legacy recording attribution',
+    };
+    for (const name of [
+      '0043_license_facts_expand.sql',
+      '0044_license_notice_bridge_and_watermarks.sql',
+    ]) {
+      for (const statement of migrationStatements(name)) await sql.unsafe(statement);
+    }
     await sql.unsafe(PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL);
   }, 60_000);
 
   afterAll(async () => {
-    await sql.end();
+    await Promise.all([sql.end(), repositorySql.end()]);
   });
 
   it.each(concurrencyOps)(
@@ -283,4 +347,5 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
       await sql`DELETE FROM books WHERE code IN (${`cursor-now-${key}`}, ${`late-now-${key}`})`;
     }
   });
+  registerLicenseReleaseCases(sql, () => legacy);
 });

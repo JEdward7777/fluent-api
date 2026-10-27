@@ -48,8 +48,19 @@ describe('independent provider rows, schema and read-only authenticated lookup',
       .returning();
     try {
       expect(row.ttsLicenseStatus).toBe('unknown');
-      expect(await getById(row.id)).toEqual({ ok: true, data: row });
-      expect(await getByProviderIdentity('dbl', externalId)).toEqual({ ok: true, data: row });
+      const recordingContract = {
+        id: row.id,
+        provider: row.provider,
+        externalId: row.externalId,
+        ttsLicenseStatus: row.ttsLicenseStatus,
+        licenseNotice: row.licenseNotice,
+        displayName: row.displayName,
+      };
+      expect(await getById(row.id)).toEqual({ ok: true, data: recordingContract });
+      expect(await getByProviderIdentity('dbl', externalId)).toEqual({
+        ok: true,
+        data: recordingContract,
+      });
       await expect(
         db.insert(bible_provider_resources).values({ provider: 'dbl', externalId })
       ).rejects.toThrow();
