@@ -1,14 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as resources from '@/domains/bible-provider-resources/bible-provider-resources.service';
+import * as classifications from '@/domains/bible-provider-resources/classification/license-classifications.service';
 import * as books from '@/domains/books/sync/dbl-book-sync';
 import * as languages from '@/domains/languages/sync/dbl-language-sync';
+import { logger } from '@/lib/logger';
 import { makeDblTestClient } from '@/lib/services/dbl/dbl.test-fixtures';
 import { err, ErrorCode, ok } from '@/lib/types';
 
 import * as bibles from './dbl-bible-sync';
 import { syncDblCatalog, syncDblCatalogLicensePhaseOne } from './dbl-catalog-sync';
 
+vi.mock(
+  '@/domains/bible-provider-resources/classification/license-classifications.service',
+  () => ({ getClassifications: vi.fn(), getSyncGuidance: vi.fn() })
+);
 vi.mock('@/domains/bible-provider-resources/bible-provider-resources.service', () => ({
   applyAllRightsReservedSweep: vi.fn(),
 }));
@@ -18,10 +24,24 @@ vi.mock('@/domains/books/sync/dbl-book-sync', () => ({
 }));
 vi.mock('@/domains/languages/sync/dbl-language-sync', () => ({ syncLanguagesFromDbl: vi.fn() }));
 vi.mock('./dbl-bible-sync', () => ({ syncBiblesFromDbl: vi.fn() }));
-vi.mock('@/lib/logger', () => ({ logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
+vi.mock('@/lib/logger', () => ({
+  logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(classifications.getClassifications).mockResolvedValue([
+    {
+      normalizedText: 'initialized',
+      status: 'allowed',
+      rationale: 'Initialized',
+      classifiedBy: 'human',
+      reviewedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  ]);
+  vi.mocked(classifications.getSyncGuidance).mockResolvedValue('Classifier guidance');
   vi.mocked(languages.syncLanguagesFromDbl).mockResolvedValue(
     ok({ totalBibles: 0, uniqueLanguages: 0, skippedInvalid: 0, inserted: 0, updated: 0 })
   );
@@ -49,8 +69,68 @@ describe('explicit transitional license sync command boundary', () => {
   it('keeps ordinary sync non-optimistic and never runs the ARR sweep implicitly', async () => {
     const client = makeDblTestClient();
     expect((await syncDblCatalog(client)).ok).toBe(true);
-    expect(bibles.syncBiblesFromDbl).toHaveBeenCalledWith(client, 'unknown');
+    expect(bibles.syncBiblesFromDbl).toHaveBeenCalledWith(client, {
+      preserveExistingNonUnknowns: false,
+    });
     expect(resources.applyAllRightsReservedSweep).not.toHaveBeenCalled();
+  });
+  it('exits review-required on an empty table before language, Bible, book or audio writes', async () => {
+    vi.mocked(classifications.getClassifications).mockResolvedValue([]);
+    expect(await syncDblCatalog(makeDblTestClient())).toMatchObject({
+      ok: false,
+      reviewRequired: true,
+    });
+    expect(languages.syncLanguagesFromDbl).not.toHaveBeenCalled();
+    expect(bibles.syncBiblesFromDbl).not.toHaveBeenCalled();
+    expect(books.syncBooksFromDbl).not.toHaveBeenCalled();
+    expect(books.syncAudioAvailability).not.toHaveBeenCalled();
+    expect(resources.applyAllRightsReservedSweep).not.toHaveBeenCalled();
+  });
+  it('passes preservation only to the invocation carrying it', async () => {
+    const client = makeDblTestClient();
+    await syncDblCatalog(client, true);
+    expect(bibles.syncBiblesFromDbl).toHaveBeenLastCalledWith(client, {
+      preserveExistingNonUnknowns: true,
+    });
+    await syncDblCatalog(client);
+    expect(bibles.syncBiblesFromDbl).toHaveBeenLastCalledWith(client, {
+      preserveExistingNonUnknowns: false,
+    });
+  });
+  it('warns when a completed Bible sync flags new missing notice keys', async () => {
+    vi.mocked(bibles.syncBiblesFromDbl).mockResolvedValue(
+      ok({
+        totalBibles: 1,
+        skippedMissingLanguage: 0,
+        inserted: 1,
+        updated: 0,
+        licenseFacts: { inserted: 1, updated: 0, distinctNotices: 1, nullNotices: 0 },
+        licensePolicy: {
+          allowed: 0,
+          forbidden: 0,
+          unknown: 1,
+          newlyFlagged: 1,
+          missingKeys: ['missing'],
+          disagreements: [],
+        },
+      })
+    );
+    await syncDblCatalog(makeDblTestClient());
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          licensePolicy: expect.objectContaining({
+            allowed: 0,
+            forbidden: 0,
+            unknown: 1,
+            newlyFlagged: 1,
+          }),
+        }),
+      })
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ newlyFlagged: 1 }) })
+    );
   });
   it('inserts allowed only on the named Phase-1 path and performs the English sweep last', async () => {
     const client = makeDblTestClient();

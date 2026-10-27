@@ -5,8 +5,27 @@ import type { LicenseArtifact } from './license-artifact.schemas';
 // Explicit, locale-independent ordering. Every sort operates on newly mapped arrays.
 const compare = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
 
+function ownedContract(run: LicenseArtifact['classificationRun']) {
+  return {
+    prompt: run.prompt,
+    promptHash: run.promptHash,
+    ruleSetHash: run.ruleSetHash,
+    responseSchema: run.responseSchema,
+    models: run.models
+      .map((model) => ({
+        provider: model.provider,
+        model: model.model,
+        sampleCount: model.sampleCount,
+        settings: model.settings,
+      }))
+      .sort(
+        (left, right) => compare(left.provider, right.provider) || compare(left.model, right.model)
+      ),
+  };
+}
+
 /**
- * Hash-domain version 1: only this explicit projection owns semantics.
+ * Hash-domain version 2: only this explicit projection owns semantics.
  * Attestation, review markers/hash, acquisition/file times, cache diagnostics and every
  * passthrough extension are excluded. Promoting an extension requires a domain-version change.
  */
@@ -15,23 +34,7 @@ export function computeLicenseReviewHash(artifact: LicenseArtifact): string {
     schemaVersion: artifact.schemaVersion,
     hashDomainVersion: artifact.hashDomainVersion,
     normalizerVersion: artifact.normalizerVersion,
-    classificationRun: {
-      prompt: artifact.classificationRun.prompt,
-      promptHash: artifact.classificationRun.promptHash,
-      ruleSetHash: artifact.classificationRun.ruleSetHash,
-      responseSchema: artifact.classificationRun.responseSchema,
-      models: artifact.classificationRun.models
-        .map((model) => ({
-          provider: model.provider,
-          model: model.model,
-          sampleCount: model.sampleCount,
-          settings: model.settings,
-        }))
-        .sort(
-          (left, right) =>
-            compare(left.provider, right.provider) || compare(left.model, right.model)
-        ),
-    },
+    classificationRun: ownedContract(artifact.classificationRun),
     catalog: artifact.catalog
       .map((bible) => ({
         provider: bible.provider,
@@ -53,6 +56,7 @@ export function computeLicenseReviewHash(artifact: LicenseArtifact): string {
         source: row.source,
         rationale: row.rationale,
         rowNote: row.rowNote ?? null,
+        evidenceContract: row.evidenceContract ? ownedContract(row.evidenceContract) : null,
         automaticDecision: row.automaticDecision
           ? {
               source: row.automaticDecision.source,

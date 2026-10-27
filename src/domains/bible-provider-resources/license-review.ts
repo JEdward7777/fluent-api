@@ -87,7 +87,10 @@ export async function runLicenseReview(options: ReviewOptions) {
       continue;
     }
     let attestationDeclined = false;
-    if (checkLicenseArtifactReview(artifact).status !== 'ready') {
+    if (
+      (config.source === 'json' || config.destination !== 'database') &&
+      checkLicenseArtifactReview(artifact).status !== 'ready'
+    ) {
       const accept = yes(
         await io.ask(
           `Have you spot-checked this exact revision ${artifact.reviewContentHash} and accept review responsibility? [y/N] `

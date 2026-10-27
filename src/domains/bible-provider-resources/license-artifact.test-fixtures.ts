@@ -3,7 +3,7 @@ import { llmRequestHash } from '@/lib/llm/request-cache';
 
 import type { LicenseArtifact, LicenseClassification } from './license-artifact.schemas';
 
-import { createLicenseArtifact } from './license-artifact';
+import { createLicenseArtifact, reviseLicenseArtifact } from './license-artifact';
 import {
   buildLicenseSampleRequest,
   LICENSE_CLASSIFICATION_PROMPT,
@@ -98,4 +98,23 @@ export function makeLicenseArtifact(): LicenseArtifact {
     })),
     classifications,
   });
+}
+
+/** Current owned DB evidence and an older JSON row happen to retain the same human note. */
+export function makeLicenseNoteRefreshFixture() {
+  const stale = makeLicenseArtifact();
+  const note = 'Retained unresolved terms after explicit human review.';
+  const current = reviseLicenseArtifact(makeLicenseArtifact(), (draft) => {
+    const row = draft.classifications[1];
+    row.status = 'unknown';
+    row.rationale = 'The current complete model evidence remains unresolved.';
+    row.rowNote = note;
+    for (const sample of row.samples) {
+      sample.result.decision = 'unknown';
+      sample.result.rationale = 'The current provider evidence is insufficient.';
+      sample.response = JSON.stringify(sample.result);
+    }
+  });
+  stale.classifications[1].rowNote = note;
+  return { stale, current, note };
 }
