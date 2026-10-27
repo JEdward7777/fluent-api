@@ -98,7 +98,6 @@ describe('the milestone created with a project', () => {
       languageId: 1,
       name: 'Source Bible',
       abbreviation: 'SRC',
-      provider: 'dbl',
     });
     await database.insert(schema.bible_books).values([
       { bibleId: 1, bookId: 19 },

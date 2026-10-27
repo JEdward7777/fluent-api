@@ -112,7 +112,6 @@ describe('imported USFM across project rollback and milestone moves', () => {
       languageId: 1,
       name: 'Source Bible',
       abbreviation: 'SRC',
-      provider: 'dbl',
     });
     await database
       .insert(schema.bible_books)
@@ -289,8 +288,8 @@ describe('imported USFM across project rollback and milestone moves', () => {
   it('discovers distinct pending jobs only for the matching completed Bible and active book link', async () => {
     await seedProject();
     await database.insert(schema.bibles).values([
-      { id: 2, languageId: 1, name: 'Incomplete Bible', abbreviation: 'INC', provider: 'dbl' },
-      { id: 3, languageId: 1, name: 'Other complete Bible', abbreviation: 'OTH', provider: 'dbl' },
+      { id: 2, languageId: 1, name: 'Incomplete Bible', abbreviation: 'INC' },
+      { id: 3, languageId: 1, name: 'Other complete Bible', abbreviation: 'OTH' },
     ]);
     await database.insert(schema.bible_books).values([
       { bibleId: 2, bookId: 41 },

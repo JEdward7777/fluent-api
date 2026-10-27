@@ -163,7 +163,7 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
           updated_at timestamp DEFAULT now()
         )`;
     await sql`CREATE UNIQUE INDEX test_resource_identity ON bible_provider_resources(provider, external_id)`;
-    await sql`CREATE UNIQUE INDEX test_bible_identity ON bibles(provider, external_id) WHERE external_id IS NOT NULL`;
+    await sql`CREATE UNIQUE INDEX idx_bibles_provider_external_id ON bibles(provider, external_id) WHERE external_id IS NOT NULL`;
 
     for (const statement of migrationStatements('0038_catalogue_watermark_allocator.sql')) {
       await sql.unsafe(statement);

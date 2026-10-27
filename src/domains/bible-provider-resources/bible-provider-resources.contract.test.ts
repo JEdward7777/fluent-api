@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { bibleProviderEnum, resourceProviderEnum } from '@/db/schema';
+import { resourceProviderEnum } from '@/db/schema';
 import { playbackProviderSchema } from '@/domains/playback-audio/playback-audio.types';
 import { SOURCE_AUDIO_PROVIDERS } from '@/domains/source-audio/source-audio.types';
 
@@ -25,10 +25,9 @@ describe('bible provider identity cross-layer contract', () => {
     }
   });
 
-  it('keeps Bible persistence vocabulary equal and audio capabilities explicit', () => {
+  it('keeps audio capabilities explicitly narrower than resource identities', () => {
     const persistedProviders = new Set(resourceProviderEnum.enumValues);
 
-    expect(new Set(bibleProviderEnum.enumValues)).toEqual(persistedProviders);
     expect(SOURCE_AUDIO_PROVIDERS.every((provider) => persistedProviders.has(provider))).toBe(true);
     expect(new Set(SOURCE_AUDIO_PROVIDERS).size).toBeLessThan(persistedProviders.size);
   });
