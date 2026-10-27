@@ -17,17 +17,6 @@ export function migrationStatements(fileName: string): string[] {
     .filter(Boolean);
 }
 
-/** DROP/CREATE for the provider-resource → bibles watermark trigger (single source). */
-export const PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL = migrationStatements(
-  '0044_license_notice_bridge_and_watermarks.sql'
-)
-  .filter(
-    (statement) =>
-      statement.includes('DROP TRIGGER IF EXISTS trg_bump_bibles_on_provider_resource_license') ||
-      statement.includes('CREATE TRIGGER trg_bump_bibles_on_provider_resource_license')
-  )
-  .join('\n');
-
 /** Install next_catalogue_watermark() before CREATE TABLE … DEFAULT that references it. */
 async function installNextCatalogueWatermarkFunction(client: Pick<PGlite, 'exec'>): Promise<void> {
   const allocator = migrationStatements('0038_catalogue_watermark_allocator.sql').find(
@@ -46,15 +35,16 @@ async function seedCatalogueWatermarkSingleton(client: Pick<PGlite, 'exec'>): Pr
 
 /** bump_linked_bibles function + trigger; fires on bible_provider_resources, updates bibles. */
 async function installProviderResourceLicenseTrigger(client: Pick<PGlite, 'exec'>): Promise<void> {
-  const bump = migrationStatements('0044_license_notice_bridge_and_watermarks.sql').find(
-    (statement) =>
-      statement.includes(
-        'CREATE OR REPLACE FUNCTION bump_linked_bibles_on_provider_resource_license'
-      )
+  await client.exec(
+    'DROP TRIGGER IF EXISTS trg_bump_bibles_on_provider_resource_license ON bible_provider_resources'
   );
-  if (!bump) throw new Error('Catalogue license-bump trigger migration is missing');
-  await client.exec(bump);
-  await client.exec(PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL);
+  for (const statement of migrationStatements('0046_provider_resource_link_bridge.sql')) {
+    if (/CREATE (?:OR REPLACE )?(?:FUNCTION|TRIGGER) /.test(statement)) {
+      await client.exec(statement);
+    }
+  }
+  for (const statement of migrationStatements('0047_canonical_resource_watermarks.sql'))
+    await client.exec(statement);
 }
 
 /**

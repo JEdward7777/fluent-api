@@ -3,7 +3,8 @@ import { and, eq } from 'drizzle-orm';
 import type { DbTransaction, Result } from '@/lib/types';
 
 import { db } from '@/db';
-import { bible_books, bibles, books } from '@/db/schema';
+import { canonicalBibles as bibles } from '@/db/canonical-schema';
+import { bible_books, books } from '@/db/schema';
 import { handleConstraintError } from '@/lib/db-errors';
 import { logger } from '@/lib/logger';
 import { err, ErrorCode, ok } from '@/lib/types';

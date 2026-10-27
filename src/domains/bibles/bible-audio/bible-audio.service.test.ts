@@ -34,6 +34,7 @@ const BIBLE: Bible = {
   provider: 'dbl',
   externalId: 'ext-bible',
   hasAudio: false,
+  textResourceId: null,
   audioResourceId: null,
   createdAt: null,
   updatedAt: null,

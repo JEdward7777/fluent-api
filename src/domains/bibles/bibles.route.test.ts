@@ -158,15 +158,12 @@ describe('superAdmin provider-aware Bible writes', () => {
   };
 
   it.each(['dbl', 'aquifer', 'youversion'] as const)(
-    'POST and PATCH accept explicit %s',
+    'POST and PATCH accept an explicit FK and preserve %s responses',
     async (provider) => {
       vi.mocked(bibleService.createBible).mockResolvedValue(ok({ ...response, provider }));
       vi.mocked(bibleService.updateBible).mockResolvedValue(ok({ ...response, provider }));
       for (const method of ['POST', 'PATCH']) {
-        const input =
-          method === 'POST'
-            ? { ...base, provider, externalId: '1' }
-            : { provider, externalId: '1' };
+        const input = method === 'POST' ? { ...base, textResourceId: 8 } : { textResourceId: 8 };
         const result = await server.request(method === 'POST' ? '/bibles' : '/bibles/1', {
           method,
           headers: { 'Content-Type': 'application/json' },

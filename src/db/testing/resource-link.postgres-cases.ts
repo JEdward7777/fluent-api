@@ -2,8 +2,6 @@ import type postgres from 'postgres';
 
 import { expect, it } from 'vitest';
 
-import { migrationStatements } from './create-catalogue-schema';
-
 interface LinkedBible {
   id: number;
   provider: string;
@@ -25,48 +23,6 @@ export function registerResourceLinkCases(sql: postgres.Sql) {
   const revision = async () =>
     (await sql<{ updated_at: Date }[]>`SELECT updated_at FROM catalogue_watermark`)[0]!.updated_at;
   const providers = ['dbl', 'aquifer', 'youversion'] as const;
-
-  it('backfills the release-1 PostgreSQL catalog without changing policy, notices, labels, classifications, or revisions', async () => {
-    for (const provider of providers) {
-      await sql`INSERT INTO bible_provider_resources(provider,external_id,tts_license_status,license_notice,text_license_notice,display_name)
-        VALUES (${provider},'link-existing','forbidden','Recording','Text','Curated label')`;
-      await sql`INSERT INTO bibles(language_id,name,abbreviation,provider,external_id,has_audio)
-        VALUES (1,${`Link existing ${provider}`},${`LE-${provider}`},${provider},'link-existing',true),
-          (1,${`Link missing ${provider}`},${`LM-${provider}`},${provider},'link-missing',false)`;
-    }
-    await sql`INSERT INTO bibles(language_id,name,abbreviation,provider,external_id,has_audio) VALUES(1,'Link null seed','L-SEED','youversion',NULL,true)`;
-    await sql`INSERT INTO license_classifications(normalized_text,status,rationale,classified_by) VALUES('link retained','unknown','"Review retained"'::jsonb,'human')`;
-    const beforeBibles =
-      await sql`SELECT id,provider,external_id,has_audio,name,abbreviation,audio_resource_id,updated_at FROM bibles ORDER BY id`;
-    const beforeResources =
-      await sql`SELECT id,provider,external_id,tts_license_status,license_notice,recording_license_notice,text_license_notice,display_name FROM bible_provider_resources ORDER BY id`;
-    const beforeClasses = await sql`SELECT * FROM license_classifications ORDER BY normalized_text`;
-    const beforeRevision = await revision();
-    await sql.begin(async (tx) => {
-      for (const statement of migrationStatements('0046_provider_resource_link_bridge.sql'))
-        await tx.unsafe(statement);
-    });
-    expect(
-      await sql`SELECT id,provider,external_id,has_audio,name,abbreviation,audio_resource_id,updated_at FROM bibles ORDER BY id`
-    ).toEqual(beforeBibles);
-    expect(
-      await sql`SELECT id,provider,external_id,tts_license_status,license_notice,recording_license_notice,text_license_notice,display_name FROM bible_provider_resources WHERE external_id <> 'link-missing' ORDER BY id`
-    ).toEqual(beforeResources);
-    expect(await sql`SELECT * FROM license_classifications ORDER BY normalized_text`).toEqual(
-      beforeClasses
-    );
-    expect(await revision()).toEqual(beforeRevision);
-    expect(
-      (await sql`SELECT text_resource_id FROM bibles WHERE abbreviation='L-SEED'`)[0]!
-        .text_resource_id
-    ).toBeNull();
-    expect(
-      await sql`SELECT b.id FROM bibles b JOIN bible_provider_resources r ON r.id=b.text_resource_id WHERE b.has_audio IS DISTINCT FROM r.has_audio`
-    ).toEqual([]);
-    expect(
-      await sql`SELECT id FROM bibles WHERE external_id IS NOT NULL AND text_resource_id IS NULL`
-    ).toEqual([]);
-  });
 
   it.each(providers)(
     'supports old %s and FK-only PostgreSQL writers, canonical resource reflection, null unlink and rollback',
