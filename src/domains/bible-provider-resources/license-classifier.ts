@@ -103,7 +103,7 @@ export function createLicenseClassifier(options: ClassifierOptions) {
       return sample.value;
     });
     const first = samples[0].result.decision;
-    const decision =
+    const decision: TtsLicenseStatus =
       first !== 'unknown' && samples.every((sample) => sample.result.decision === first)
         ? first
         : 'unknown';

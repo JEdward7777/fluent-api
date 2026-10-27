@@ -3,6 +3,12 @@ import type postgres from 'postgres';
 import { expect, it } from 'vitest';
 
 import * as resources from '@/domains/bible-provider-resources/bible-provider-resources.service';
+import { createLicenseDatabaseAdapter } from '@/domains/bible-provider-resources/classification/license-classifications.service';
+import { attestLicenseArtifact } from '@/domains/bible-provider-resources/license-artifact';
+import {
+  makeLicenseArtifact,
+  REVIEWER,
+} from '@/domains/bible-provider-resources/license-artifact.test-fixtures';
 import { persistDblBibleCatalog } from '@/domains/bibles/sync/dbl-bible-sync';
 import { ErrorCode } from '@/lib/types';
 
@@ -199,6 +205,133 @@ export function registerLicenseReleaseCases(
       ).toBe('allowed');
     } finally {
       await sql`DELETE FROM bible_provider_resources WHERE external_id IN ('pg-arr','pg-french','pg-null','pg-nondbl')`;
+    }
+  });
+  it('replaces authoritative classifications transactionally, preserving unchanged timestamps and rolling back on publication failure in PostgreSQL', async () => {
+    const adapter = createLicenseDatabaseAdapter();
+    const artifact = attestLicenseArtifact(makeLicenseArtifact(), REVIEWER);
+    try {
+      await adapter.apply(artifact, true, undefined, true);
+      const before = await sql`SELECT * FROM license_classifications ORDER BY normalized_text`;
+      await adapter.apply(artifact, true, undefined, true);
+      expect(await sql`SELECT * FROM license_classifications ORDER BY normalized_text`).toEqual(
+        before
+      );
+      const changed = structuredClone(artifact);
+      changed.classifications = changed.classifications.slice(0, 1);
+      await expect(
+        adapter.apply(
+          changed,
+          true,
+          async () => {
+            throw new Error('JSON rename failed');
+          },
+          true
+        )
+      ).rejects.toThrow('JSON rename failed');
+      expect(await sql`SELECT * FROM license_classifications ORDER BY normalized_text`).toEqual(
+        before
+      );
+      await adapter.apply(changed, true, undefined, true);
+      expect(
+        (await sql`SELECT normalized_text FROM license_classifications`).map(
+          (row) => row.normalized_text
+        )
+      ).toEqual([changed.classifications[0].normalizedText]);
+    } finally {
+      await sql`DELETE FROM license_classifications`;
+    }
+  });
+  it('derives every matching current notice after classification, flags missing keys once and preserves only on the requested PostgreSQL sync', async () => {
+    const catalog = {
+      totalBibles: 2,
+      skippedMissingLanguage: 0,
+      rows: [1, 2].map((id) => ({
+        provider: 'dbl' as const,
+        externalId: `pg-derived-${id}`,
+        name: `PG Derived ${id}`,
+        abbreviation: `PD${id}`,
+        languageId: 1,
+        hasAudio: false,
+        textLicenseNotice: 'A PostgreSQL notice requiring review.',
+      })),
+    };
+    try {
+      expect(
+        await persistDblBibleCatalog(catalog, { preserveExistingNonUnknowns: false })
+      ).toMatchObject({ ok: true, data: { licensePolicy: { unknown: 2, newlyFlagged: 2 } } });
+      expect(await sql`SELECT * FROM license_classifications`).toEqual([]);
+      const before =
+        await sql`SELECT id, updated_at FROM bibles WHERE external_id IN ('pg-derived-1','pg-derived-2') ORDER BY id`;
+      expect(
+        await persistDblBibleCatalog(catalog, { preserveExistingNonUnknowns: false })
+      ).toMatchObject({
+        ok: true,
+        data: { licensePolicy: { newlyFlagged: 0 }, licenseFacts: { inserted: 0, updated: 0 } },
+      });
+      expect(
+        await sql`SELECT id, updated_at FROM bibles WHERE external_id IN ('pg-derived-1','pg-derived-2') ORDER BY id`
+      ).toEqual(before);
+      await sql`INSERT INTO license_classifications(normalized_text,status,rationale,classified_by) VALUES ('a postgresql notice requiring review.','allowed','"Reviewed permission"'::jsonb,'human')`;
+      await persistDblBibleCatalog(catalog, { preserveExistingNonUnknowns: false });
+      expect(
+        (
+          await sql`SELECT tts_license_status FROM bible_provider_resources WHERE external_id IN ('pg-derived-1','pg-derived-2')`
+        ).map((row) => row.tts_license_status)
+      ).toEqual(['allowed', 'allowed']);
+      await sql`UPDATE license_classifications SET status = 'forbidden'`;
+      expect(
+        await persistDblBibleCatalog(catalog, { preserveExistingNonUnknowns: true })
+      ).toMatchObject({
+        ok: true,
+        data: { licensePolicy: { allowed: 2, newlyFlagged: 0, disagreements: expect.any(Array) } },
+      });
+      await persistDblBibleCatalog(catalog, { preserveExistingNonUnknowns: false });
+      expect(
+        (
+          await sql`SELECT tts_license_status FROM bible_provider_resources WHERE external_id IN ('pg-derived-1','pg-derived-2')`
+        ).map((row) => row.tts_license_status)
+      ).toEqual(['forbidden', 'forbidden']);
+    } finally {
+      await sql`DELETE FROM bibles WHERE external_id IN ('pg-derived-1','pg-derived-2')`;
+      await sql`DELETE FROM bible_provider_resources WHERE external_id IN ('pg-derived-1','pg-derived-2')`;
+      await sql`DELETE FROM license_classifications`;
+    }
+  });
+
+  it('serializes empty-table initialization with concurrent inserts and rejects unforced replacement before publishing files', async () => {
+    const adapter = createLicenseDatabaseAdapter();
+    const artifact = attestLicenseArtifact(makeLicenseArtifact(), REVIEWER);
+    const writer = await sql.reserve();
+    let committed = false;
+    try {
+      await writer`BEGIN`;
+      await writer`INSERT INTO license_classifications(normalized_text,status,rationale,classified_by) VALUES ('concurrently initialized','forbidden','"Review"'::jsonb,'human')`;
+      let published = false;
+      const applying = adapter.apply(artifact, true, async () => {
+        published = true;
+      });
+      const rejected = expect(applying).rejects.toThrow('--force is required');
+      // The table lock waits for this ordinary writer; after commit the apply read must see it.
+      await writer`COMMIT`;
+      committed = true;
+      await rejected;
+      expect(published).toBe(false);
+      expect(
+        (await sql`SELECT normalized_text FROM license_classifications`).map(
+          (row) => row.normalized_text
+        )
+      ).toEqual(['concurrently initialized']);
+      await adapter.apply(artifact, true, undefined, true);
+      expect(
+        (await sql`SELECT normalized_text FROM license_classifications`).some(
+          (row) => row.normalized_text === 'concurrently initialized'
+        )
+      ).toBe(false);
+    } finally {
+      if (!committed) await writer`ROLLBACK`;
+      writer.release();
+      await sql`DELETE FROM license_classifications`;
     }
   });
 }

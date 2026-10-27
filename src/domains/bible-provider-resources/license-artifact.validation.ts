@@ -28,9 +28,15 @@ function validateEvidence(row: LicenseClassification, artifact: LicenseArtifact)
   } else if (row.rule) throw new Error('Unexpected rule evidence');
   if (proposal.source !== 'gemini' && row.samples.length > 0)
     throw new Error('Unexpected model evidence');
+  const contract = row.evidenceContract ?? artifact.classificationRun;
+  if (hashCanonicalJson(contract.prompt) !== contract.promptHash)
+    throw new Error('Recorded row prompt hash mismatch');
+  unique(
+    contract.models.map((model) => modelKey(model.provider, model.model)),
+    'row model identity'
+  );
   if (proposal.source !== 'gemini') return;
-
-  const models = artifact.classificationRun.models;
+  const models = contract.models;
   const expectedCount = models.reduce((count, model) => count + model.sampleCount, 0);
   if (row.samples.length !== expectedCount)
     throw new Error('Incomplete configured model sample set');
@@ -57,8 +63,8 @@ function validateEvidence(row: LicenseClassification, artifact: LicenseArtifact)
       model.model,
       sample.index,
       {
-        prompt: artifact.classificationRun.prompt,
-        responseSchema: artifact.classificationRun.responseSchema,
+        prompt: contract.prompt,
+        responseSchema: contract.responseSchema,
         settings: model.settings,
       }
     );

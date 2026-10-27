@@ -6,8 +6,9 @@ logger.warn(
 );
 syncDblCatalogLicensePhaseOne()
   .then((result) => {
-    if (!result.ok) logger.error('Phase-1 DBL catalog sync failed', { error: result.error });
-    else logger.info('Phase-1 DBL catalog sync completed', { data: result.data });
+    if (!result.ok)
+      logger.error({ message: 'Phase-1 DBL catalog sync failed', error: result.error });
+    else logger.info({ message: 'Phase-1 DBL catalog sync completed', data: result.data });
     process.exit(result.ok ? 0 : 1);
   })
   .catch((cause: unknown) => {

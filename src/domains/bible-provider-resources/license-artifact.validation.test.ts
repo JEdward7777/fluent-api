@@ -178,7 +178,7 @@ describe('artifact owned content validation', () => {
   it.each(['schemaVersion', 'hashDomainVersion', 'normalizerVersion'])(
     'rejects unsupported %s',
     (field) => {
-      expect(checkLicenseArtifactReview({ ...makeLicenseArtifact(), [field]: 2 }).status).toBe(
+      expect(checkLicenseArtifactReview({ ...makeLicenseArtifact(), [field]: 999 }).status).toBe(
         'invalid'
       );
     }

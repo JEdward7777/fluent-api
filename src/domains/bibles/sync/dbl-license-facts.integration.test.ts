@@ -127,7 +127,7 @@ describe('dBL text license facts and canonical recording compatibility', () => {
     expect((await syncBiblesFromDbl(makeDblTestClient([makeDblBible()]))).ok).toBe(true);
     expect(
       (await database.select().from(schema.bible_provider_resources))[0].ttsLicenseStatus
-    ).toBe('unknown');
+    ).toBe('forbidden');
   });
   it('refreshes changed text facts while preserving curated status, recording notices, stored labels and selected audio', async () => {
     const [text, recording] = await database

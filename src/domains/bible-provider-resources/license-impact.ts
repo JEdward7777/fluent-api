@@ -1,7 +1,9 @@
 import type { TtsLicenseStatus } from '@/domains/bibles/bibles.types';
 
+import type { StoredLicenseClassification } from './classification/license-database.types';
 import type { LicenseArtifact } from './license-artifact.schemas';
 
+import { planLicenseDatabaseChanges } from './classification/license-database-projection';
 import { normalizeLicenseNotice } from './license-normalizer';
 
 export interface DatabaseLicenseResource {
@@ -16,6 +18,9 @@ export interface DatabaseLicenseResource {
 export interface LicenseDatabaseContext {
   label: string;
   resources: DatabaseLicenseResource[];
+  /** Classification import forecasts current target rows, never catalog acquisition writes. */
+  projection?: 'classification-only';
+  classificationTable?: { existing: StoredLicenseClassification[]; replace: boolean };
 }
 
 /** Invocation-scoped preservation never changes the authoritative derived decision. */
@@ -58,10 +63,12 @@ export function computeLicenseImpact(
     artifact.catalog.map((bible) => [identity(bible.provider, bible.externalId), bible])
   );
   // Retained database-only resources also derive policy; a JSON source cannot hide their effects.
-  const keys = new Set([...catalog.keys(), ...before.keys()]);
+  const targetOnly = database?.projection === 'classification-only';
+  const keys = new Set(targetOnly ? before.keys() : [...catalog.keys(), ...before.keys()]);
   const rows = [...keys].sort().map((key) => {
     const current = before.get(key) ?? null;
-    const bible = catalog.get(key) ?? current!;
+    const snapshot = catalog.get(key);
+    const bible = targetOnly ? current! : (snapshot ?? current!);
     const effective = effectiveLicenseStatus(
       bible.rawNotice,
       statuses,
@@ -78,12 +85,15 @@ export function computeLicenseImpact(
       rawNotice: bible.rawNotice,
       currentStatus: current?.ttsLicenseStatus ?? null,
       currentNotice: current?.rawNotice ?? null,
+      snapshotNotice: snapshot?.rawNotice ?? null,
       ...effective,
       isNew: database ? current === null : null,
       statusChanged: database
         ? current === null || current.ttsLicenseStatus !== effective.status
         : null,
-      noticeChanged: database ? current !== null && current.rawNotice !== bible.rawNotice : null,
+      noticeChanged: database
+        ? current !== null && snapshot !== undefined && current.rawNotice !== snapshot.rawNotice
+        : null,
     };
   });
   const totals = { allowed: 0, forbidden: 0, unknown: 0 };
@@ -108,8 +118,9 @@ export function computeLicenseImpact(
     context: database
       ? {
           kind: 'database' as const,
+          classificationOnly: targetOnly,
           label: database.label,
-          disclaimer: `Impact compares the exact supplied database rows: ${database.label}. No production state is inferred.`,
+          disclaimer: `Impact compares the exact supplied database rows: ${database.label}. No production state is inferred.${targetOnly ? ' Classification-only import changes no Bible metadata or notices; projected statuses use current target notices after the following ordinary sync. Notice changes below indicate artifact snapshot drift only.' : ''}`,
         }
       : {
           kind: 'artifact-only' as const,
@@ -117,6 +128,9 @@ export function computeLicenseImpact(
           disclaimer:
             'Production impact is unavailable because no database context was supplied. This is an artifact-only report.',
         },
+    classificationChanges: database?.classificationTable?.replace
+      ? planLicenseDatabaseChanges(artifact, database.classificationTable.existing)
+      : null,
     preserveExistingNonUnknowns,
     preservationWarning: preserveExistingNonUnknowns
       ? 'Preservation applies to this invocation only. It may retain stale status drift; every disagreement is listed. A later ordinary sync derives status again.'

@@ -100,7 +100,8 @@ export interface DblTextLicenseFact {
 export async function upsertDblTextFacts(
   facts: DblTextLicenseFact[],
   initialStatus: TtsLicenseStatus,
-  tx: DbTransaction
+  tx: DbTransaction,
+  statuses?: ReadonlyMap<string, TtsLicenseStatus>
 ) {
   try {
     let inserted = 0;
@@ -110,17 +111,20 @@ export async function upsertDblTextFacts(
       const rows = await tx
         .insert(bible_provider_resources)
         .values(
-          facts
-            .slice(offset, offset + 100)
-            .map((fact) => ({ ...fact, provider: 'dbl' as const, ttsLicenseStatus: initialStatus }))
+          facts.slice(offset, offset + 100).map((fact) => ({
+            ...fact,
+            provider: 'dbl' as const,
+            ttsLicenseStatus: statuses?.get(fact.externalId) ?? initialStatus,
+          }))
         )
         .onConflictDoUpdate({
           target: [bible_provider_resources.provider, bible_provider_resources.externalId],
           set: {
             textLicenseNotice: sql`excluded.text_license_notice`,
             displayName: sql`excluded.display_name`,
+            ...(statuses ? { ttsLicenseStatus: sql`excluded.tts_license_status` } : {}),
           },
-          setWhere: sql`bible_provider_resources.text_license_notice IS DISTINCT FROM excluded.text_license_notice OR bible_provider_resources.display_name IS DISTINCT FROM excluded.display_name`,
+          setWhere: sql`bible_provider_resources.text_license_notice IS DISTINCT FROM excluded.text_license_notice OR bible_provider_resources.display_name IS DISTINCT FROM excluded.display_name ${statuses ? sql`OR bible_provider_resources.tts_license_status IS DISTINCT FROM excluded.tts_license_status` : sql``}`,
         })
         .returning({ wasInsert: sql<boolean>`(xmax = 0)` });
       for (const row of rows) {
@@ -173,4 +177,20 @@ export async function applyAllRightsReservedSweep() {
     logger.error({ cause, message: 'Failed to apply the English all-rights-reserved sweep' });
     return err(ErrorCode.INTERNAL_ERROR);
   }
+}
+
+/** Current policy facts are read inside the same transaction as derived cache writes. */
+export function getDblPolicyFacts(externalIds: string[], tx: DbTransaction) {
+  return tx
+    .select({
+      externalId: bible_provider_resources.externalId,
+      status: bible_provider_resources.ttsLicenseStatus,
+    })
+    .from(bible_provider_resources)
+    .where(
+      and(
+        eq(bible_provider_resources.provider, 'dbl'),
+        inArray(bible_provider_resources.externalId, externalIds)
+      )
+    );
 }

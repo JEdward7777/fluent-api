@@ -7,8 +7,8 @@ import { jsonValueSchema, llmRequestSchema } from '@/lib/llm/request-cache';
 import { licenseVoteSchema } from './license-model-contract';
 import { LICENSE_NORMALIZER_VERSION } from './license-normalizer';
 
-export const LICENSE_ARTIFACT_SCHEMA_VERSION = 1;
-export const LICENSE_REVIEW_HASH_DOMAIN_VERSION = 1;
+export const LICENSE_ARTIFACT_SCHEMA_VERSION = 2;
+export const LICENSE_REVIEW_HASH_DOMAIN_VERSION = 2;
 export const LICENSE_CLASSIFICATIONS_PATH =
   'docs/features/tts-license-ingestion/reference/license-classifications.json';
 const text = z.string().refine((value) => value.trim().length > 0, 'Must not be blank');
@@ -43,6 +43,27 @@ const sample = z
   })
   .passthrough();
 
+const evidenceContract = z
+  .object({
+    prompt: text,
+    promptHash: digest,
+    ruleSetHash: digest,
+    responseSchema: z.record(jsonValueSchema),
+    models: z
+      .array(
+        z
+          .object({
+            provider: text,
+            model: text,
+            sampleCount: z.number().int().min(2),
+            settings: z.record(jsonValueSchema),
+          })
+          .passthrough()
+      )
+      .min(1),
+  })
+  .passthrough();
+
 export const licenseClassificationSchema = z
   .object({
     normalizedText: z.string(),
@@ -52,6 +73,7 @@ export const licenseClassificationSchema = z
     rationale: text,
     rule: rule.optional(),
     samples: z.array(sample),
+    evidenceContract: evidenceContract.optional(),
     automaticDecision: decision.optional(),
     rowNote: text.optional(),
   })
@@ -62,29 +84,11 @@ export const licenseArtifactSchema = z
     schemaVersion: z.literal(LICENSE_ARTIFACT_SCHEMA_VERSION),
     hashDomainVersion: z.literal(LICENSE_REVIEW_HASH_DOMAIN_VERSION),
     normalizerVersion: z.literal(LICENSE_NORMALIZER_VERSION),
-    classificationRun: z
-      .object({
-        prompt: text,
-        promptHash: digest,
-        ruleSetHash: digest,
-        responseSchema: z.record(jsonValueSchema),
-        models: z
-          .array(
-            z
-              .object({
-                provider: text,
-                model: text,
-                sampleCount: z.number().int().min(2),
-                settings: z.record(jsonValueSchema),
-              })
-              .passthrough()
-          )
-          .min(1),
-        createdAt: z.string().datetime().optional(),
-        snapshotAt: z.string().datetime().optional(),
-        acquiredAt: z.string().datetime().optional(),
-      })
-      .passthrough(),
+    classificationRun: evidenceContract.extend({
+      createdAt: z.string().datetime().optional(),
+      snapshotAt: z.string().datetime().optional(),
+      acquiredAt: z.string().datetime().optional(),
+    }),
     catalog: z.array(
       z
         .object({
