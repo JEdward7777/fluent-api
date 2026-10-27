@@ -316,6 +316,20 @@
       "when": 1793111840644,
       "tag": "0044_license_notice_bridge_and_watermarks",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1793118073476,
+      "tag": "0045_provider_resource_link_expand",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793118080512,
+      "tag": "0046_provider_resource_link_bridge",
+      "breakpoints": true
     }
   ]
 }

@@ -62,7 +62,10 @@ describe('dblIngestTextWorker', () => {
     async (provider) => {
       const { boss, work } = fakeBoss();
       await registerDblIngestTextWorker(boss);
-      vi.mocked(db.query.bibles.findFirst).mockResolvedValue(makeBible({ provider }));
+      vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
+        ...makeBible({ provider }),
+        textResourceId: null,
+      });
       const handler = work.mock.calls[0][2];
       await expect(handler([jobResult({ bibleId: 1, bookCodes: ['GEN'] })])).rejects.toThrow(
         'Unsupported text ingestion provider'
@@ -261,9 +264,8 @@ describe('dblIngestTextWorker', () => {
       const { logger } = await import('../lib/logger');
       const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined as any);
 
-      const chapterAssignmentsService = await import(
-        '../domains/chapter-assignments/chapter-assignments.service'
-      );
+      const chapterAssignmentsService =
+        await import('../domains/chapter-assignments/chapter-assignments.service');
       vi.mocked(chapterAssignmentsService.createChapterAssignmentForProjectUnit).mockResolvedValue({
         ok: true,
         data: [],
@@ -285,9 +287,8 @@ describe('dblIngestTextWorker', () => {
       await registerDblIngestTextWorker(boss);
       const handler = work.mock.calls[0][2];
 
-      const chapterAssignmentsService = await import(
-        '../domains/chapter-assignments/chapter-assignments.service'
-      );
+      const chapterAssignmentsService =
+        await import('../domains/chapter-assignments/chapter-assignments.service');
       vi.mocked(chapterAssignmentsService.createChapterAssignmentForProjectUnit).mockResolvedValue({
         ok: true,
         data: [],
@@ -376,9 +377,10 @@ describe('dblIngestTextWorker', () => {
       await expect(retryHandler(retryJob)).resolves.toBeUndefined();
 
       expect(usfmImportService.materializePendingUsfmImportsForBible).toHaveBeenCalledTimes(3);
-      expect(usfmImportService.materializePendingUsfmImportsForBible).toHaveBeenLastCalledWith(1, [
-        7,
-      ]);
+      expect(usfmImportService.materializePendingUsfmImportsForBible).toHaveBeenLastCalledWith(
+        1,
+        [7]
+      );
       expect(mockDblClientInstance.getChapter).toHaveBeenCalledTimes(1);
     });
 
@@ -425,9 +427,8 @@ describe('dblIngestTextWorker', () => {
       const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined as any);
       const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined as any);
 
-      const chapterAssignmentsService = await import(
-        '../domains/chapter-assignments/chapter-assignments.service'
-      );
+      const chapterAssignmentsService =
+        await import('../domains/chapter-assignments/chapter-assignments.service');
       vi.mocked(chapterAssignmentsService.createChapterAssignmentForProjectUnit).mockResolvedValue({
         ok: false,
         error: { message: 'insert failed', code: 'INTERNAL_ERROR' },
