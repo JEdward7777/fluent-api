@@ -48,6 +48,7 @@ const fluentBible: Bible = {
   languageId: 1,
   provider: 'dbl',
   externalId: 'dbl-text',
+  textResourceId: null,
   audioResourceId: null,
   hasAudio: false,
   createdAt: new Date(),
@@ -468,7 +469,9 @@ describe('getChapterSourceAudio', () => {
 describe('legacy source and manifest isolation from explicit playback selections', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(biblesRepo.getById).mockResolvedValue(ok({ ...fluentBible, audioResourceId: 999 }));
+    vi.mocked(biblesRepo.getById).mockResolvedValue(
+      ok({ ...fluentBible, textResourceId: null, audioResourceId: 999 })
+    );
     vi.mocked(getBookByCode).mockResolvedValue(
       ok({ id: 41, code: 'MRK', eng_display_name: 'Mark', updatedAt: null })
     );

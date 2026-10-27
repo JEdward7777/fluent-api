@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { db } from '@/db';
-import { bible_books, bible_texts, bibles, books } from '@/db/schema';
+import {
+  bibleProjection,
+  canonicalBibles as bibles,
+  canonicalResources,
+} from '@/db/canonical-schema';
+import { bible_books, bible_texts, books } from '@/db/schema';
 
 const bsbJohnSchema = z.object({
   source: z.object({ bookCode: z.literal('JHN'), license: z.literal('Public domain') }),
@@ -32,15 +37,17 @@ export async function seedBsbBibleTexts(): Promise<void> {
   // abbreviation after a catalogue sync (e.g. QA's 'BSB-bba9f4') while the
   // bare 'BSB' row names a different upstream bible entirely.
   const [holder] = await db
-    .select({ id: bibles.id, provider: bibles.provider, externalId: bibles.externalId })
+    .select({ id: bibles.id, provider: canonicalResources.provider, externalId: canonicalResources.externalId })
     .from(bibles)
-    .where(and(eq(bibles.provider, 'dbl'), eq(bibles.externalId, 'bba9f40183526463-01')))
+    .innerJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
+    .where(and(eq(canonicalResources.provider, 'dbl'), eq(canonicalResources.externalId, 'bba9f40183526463-01')))
     .limit(1);
   const [bible] = holder
     ? [holder]
     : await db
-        .select({ id: bibles.id, provider: bibles.provider, externalId: bibles.externalId })
+        .select({ id: bibles.id, provider: bibleProjection.provider, externalId: canonicalResources.externalId })
         .from(bibles)
+        .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
         .where(eq(bibles.abbreviation, 'BSB'));
   const [book] = await db.select({ id: books.id }).from(books).where(eq(books.code, 'JHN'));
   if (!bible || !book) throw new Error('BSB/JHN not found. Run seedBibles and seedBooks first.');

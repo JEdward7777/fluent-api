@@ -356,6 +356,7 @@ export function makeBible(overrides: Partial<Bible> = {}): Bible {
     provider: 'dbl',
     externalId: 'text-1',
     hasAudio: false,
+    textResourceId: null,
     audioResourceId: null,
     createdAt: null,
     updatedAt: null,

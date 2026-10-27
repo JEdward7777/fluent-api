@@ -40,6 +40,7 @@ const fluentBible: Bible = {
   languageId: 1,
   provider: 'dbl',
   externalId: null,
+  textResourceId: null,
   audioResourceId: null,
   hasAudio: false,
   createdAt: new Date(),
@@ -124,7 +125,9 @@ describe('getSourceAudioManifest', () => {
 
 describe('legacy source and manifest isolation from explicit playback selections', () => {
   it('manifest still name-matches and retains download metadata while omitting unknown sizes', async () => {
-    vi.mocked(biblesRepo.getById).mockResolvedValue(ok({ ...fluentBible, audioResourceId: 999 }));
+    vi.mocked(biblesRepo.getById).mockResolvedValue(
+      ok({ ...fluentBible, textResourceId: null, audioResourceId: 999 })
+    );
     vi.mocked(getBibles).mockResolvedValue(
       ok([{ id: 11, name: 'Berean Standard Bible', abbreviation: 'BSB', hasAudio: true }])
     );

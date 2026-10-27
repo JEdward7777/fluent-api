@@ -3,10 +3,8 @@ import type postgres from 'postgres';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import {
-  migrationStatements,
-  PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL,
-} from '@/db/testing/create-catalogue-schema';
+import { registerCanonicalCatalogCases } from '@/db/testing/canonical-catalog.postgres-cases';
+import { migrationStatements } from '@/db/testing/create-catalogue-schema';
 import { registerResourceLinkCases } from '@/db/testing/resource-link.postgres-cases';
 
 /**
@@ -200,11 +198,50 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
     for (const name of [
       '0044_license_facts_expand.sql',
       '0045_license_notice_bridge_and_watermarks.sql',
-      '0045_provider_resource_link_expand.sql',
     ]) {
       for (const statement of migrationStatements(name)) await sql.unsafe(statement);
     }
-    await sql.unsafe(PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL);
+    // Migration/backfill proof precedes every canonical application write.
+    for (const provider of ['aquifer', 'youversion']) {
+      await sql`INSERT INTO bible_provider_resources(provider,external_id,tts_license_status,license_notice,display_name) VALUES(${provider},'upgrade-existing','forbidden','Retained recording','Curated label')`;
+      await sql`INSERT INTO bibles(language_id,name,abbreviation,provider,external_id,has_audio) VALUES(${oldLanguage!.id},${`Upgrade ${provider}`},${`UP-${provider}`},${provider},'upgrade-existing',true),(${oldLanguage!.id},${`Missing ${provider}`},${`UM-${provider}`},${provider},'upgrade-missing',false)`;
+    }
+    await sql`INSERT INTO bibles(language_id,name,abbreviation,provider,external_id,has_audio) VALUES(${oldLanguage!.id},'Unlinked upgrade','U-NULL','youversion',NULL,true)`;
+    const beforeUpgrade =
+      await sql`SELECT id,name,abbreviation,provider,external_id,has_audio,updated_at FROM bibles ORDER BY id`;
+    await sql.begin(async (tx) => {
+      for (const name of [
+        '0045_provider_resource_link_expand.sql',
+        '0046_provider_resource_link_bridge.sql',
+        '0047_canonical_resource_watermarks.sql',
+      ]) {
+        for (const statement of migrationStatements(name)) await tx.unsafe(statement);
+      }
+    });
+    expect(
+      await sql`SELECT id,name,abbreviation,provider,external_id,has_audio,updated_at FROM bibles ORDER BY id`
+    ).toEqual(beforeUpgrade);
+    expect(
+      await sql`SELECT id FROM bibles WHERE external_id IS NOT NULL AND text_resource_id IS NULL`
+    ).toEqual([]);
+    expect(
+      (await sql`SELECT text_resource_id FROM bibles WHERE abbreviation='U-NULL'`)[0]!
+        .text_resource_id
+    ).toBeNull();
+    expect(
+      await sql`SELECT tts_license_status,recording_license_notice,display_name FROM bible_provider_resources WHERE external_id='upgrade-existing'`
+    ).toEqual([
+      {
+        tts_license_status: 'forbidden',
+        recording_license_notice: 'Retained recording',
+        display_name: 'Curated label',
+      },
+      {
+        tts_license_status: 'forbidden',
+        recording_license_notice: 'Retained recording',
+        display_name: 'Curated label',
+      },
+    ]);
   }, 60_000);
 
   afterAll(async () => {
@@ -221,7 +258,7 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
           VALUES (${language!.id}, ${key}, ${key}, 'dbl', ${key}) RETURNING id`;
       const [resource] = await sql`
           INSERT INTO bible_provider_resources (provider, external_id)
-          VALUES ('dbl', ${key}) RETURNING id`;
+          VALUES ('dbl', ${key}) ON CONFLICT (provider,external_id) DO UPDATE SET external_id=excluded.external_id RETURNING id`;
       const early = await sql.reserve();
       const later = await sql.reserve();
       let committed = false;
@@ -351,4 +388,5 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
   });
   registerLicenseReleaseCases(sql, () => legacy);
   registerResourceLinkCases(sql);
+  registerCanonicalCatalogCases(sql);
 });

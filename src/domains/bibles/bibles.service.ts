@@ -15,10 +15,6 @@ type ProviderResource = NonNullable<
   Extract<Awaited<ReturnType<typeof resources.getById>>, { ok: true }>['data']
 >;
 
-function identityKey(provider: string, externalId: string) {
-  return JSON.stringify([provider, externalId]);
-}
-
 function mapBibleResponse(
   bible: Bible,
   text: ProviderResource | null,
@@ -40,9 +36,7 @@ function mapBibleResponse(
   } satisfies BibleResponse;
 }
 async function toBibleResponse(bible: Bible) {
-  const text = bible.externalId
-    ? await resources.getByProviderIdentity(bible.provider, bible.externalId)
-    : ok(null);
+  const text = bible.textResourceId ? await resources.getById(bible.textResourceId) : ok(null);
   if (!text.ok) return text;
   const audio = bible.audioResourceId ? await resources.getById(bible.audioResourceId) : ok(null);
   if (!audio.ok) return audio;
@@ -50,35 +44,27 @@ async function toBibleResponse(bible: Bible) {
 }
 
 async function toBibleResponses(bibles: Bible[]) {
-  const identities = new Map<string, { provider: Bible['provider']; externalId: string }>();
+  const textIds = new Set<number>();
   const recordingIds = new Set<number>();
   for (const bible of bibles) {
-    if (bible.externalId)
-      identities.set(identityKey(bible.provider, bible.externalId), {
-        provider: bible.provider,
-        externalId: bible.externalId,
-      });
+    if (bible.textResourceId !== null) textIds.add(bible.textResourceId);
     if (bible.audioResourceId !== null) recordingIds.add(bible.audioResourceId);
   }
 
   const [texts, recordings] = await Promise.all([
-    resources.getByProviderIdentities([...identities.values()]),
+    resources.getByIds([...textIds]),
     resources.getByIds([...recordingIds]),
   ]);
   if (!texts.ok) return texts;
   if (!recordings.ok) return recordings;
 
-  const textsByIdentity = new Map(
-    texts.data.map((resource) => [identityKey(resource.provider, resource.externalId), resource])
-  );
+  const textsById = new Map(texts.data.map((resource) => [resource.id, resource]));
   const recordingsById = new Map(recordings.data.map((resource) => [resource.id, resource]));
   return ok(
     bibles.map((bible) =>
       mapBibleResponse(
         bible,
-        bible.externalId
-          ? (textsByIdentity.get(identityKey(bible.provider, bible.externalId)) ?? null)
-          : null,
+        bible.textResourceId === null ? null : (textsById.get(bible.textResourceId) ?? null),
         bible.audioResourceId === null ? null : (recordingsById.get(bible.audioResourceId) ?? null)
       )
     )
