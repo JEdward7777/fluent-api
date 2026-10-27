@@ -30,6 +30,18 @@ export function renderLicenseMarkdown(model: LicenseReportModel): string {
       ''
     );
   if (impact.preservationWarning) rows.push(`**${text(impact.preservationWarning)}**`, '');
+  if (impact.classificationChanges) {
+    const changes = impact.classificationChanges;
+    rows.push(
+      '## WARNING: whole-table classification replacement',
+      '',
+      `Deletes ${changes.deletedKeys.length}; inserts ${changes.insertedKeys.length}; changes ${changes.changedKeys.length} (status, rationale, producer or recorded evidence).`,
+      ...changes.deletedKeys.map((key) => `- Delete: ${text(key)}`),
+      ...changes.insertedKeys.map((key) => `- Insert: ${text(key)}`),
+      ...changes.changedKeys.map((key) => `- Change: ${text(key)}`),
+      ''
+    );
+  }
   rows.push('## Proposed resource status changes', '');
   for (const change of impact.changes)
     rows.push(
@@ -52,15 +64,16 @@ export function renderLicenseMarkdown(model: LicenseReportModel): string {
         ? 'None.'
         : 'New membership cannot be determined without database context.'
     );
-  rows.push('', '## Notice changes', '');
+  const targetOnly = impact.context.kind === 'database' && impact.context.classificationOnly;
+  rows.push('', targetOnly ? '## Snapshot notice drift' : '## Notice changes', '');
   for (const bible of impact.noticeChanges)
     rows.push(
       `### ${text(bible.name)} [${text(bible.provider)}:${text(bible.externalId)}]`,
       '',
       'Previous notice:',
       `<pre>${html(bible.currentNotice ?? '(none)')}</pre>`,
-      'Proposed notice:',
-      `<pre>${html(bible.rawNotice ?? '(none)')}</pre>`,
+      targetOnly ? 'Reviewed artifact snapshot notice (not written):' : 'Proposed notice:',
+      `<pre>${html((targetOnly ? bible.snapshotNotice : bible.rawNotice) ?? '(none)')}</pre>`,
       ''
     );
   if (!impact.noticeChanges.length) rows.push('None identified in the supplied comparison.');

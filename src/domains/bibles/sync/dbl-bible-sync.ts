@@ -3,6 +3,8 @@ import type { Result } from '@/lib/types';
 
 import { runInTransaction } from '@/db/transaction';
 import * as resourcesService from '@/domains/bible-provider-resources/bible-provider-resources.service';
+import { getClassifications } from '@/domains/bible-provider-resources/classification/license-classifications.service';
+import { deriveDblLicensePolicy } from '@/domains/bible-provider-resources/classification/license-sync-policy';
 import { normalizeIso6393Code } from '@/domains/languages/import/iso';
 import * as languagesRepository from '@/domains/languages/languages.repository';
 import { dblClient } from '@/lib/services/dbl/dbl.client';
@@ -16,6 +18,7 @@ export interface DblBibleSyncSummary {
   skippedMissingLanguage: number;
   inserted: number;
   updated: number;
+  licensePolicy?: ReturnType<typeof deriveDblLicensePolicy>['summary'];
   licenseFacts: { inserted: number; updated: number; distinctNotices: number; nullNotices: number };
 }
 
@@ -153,17 +156,37 @@ export async function acquireDblBibleCatalog(client: DblClient = dblClient) {
 /** Reused acquisition is read-only; all provider facts and Bible rows commit together. */
 export async function persistDblBibleCatalog(
   catalog: Extract<Awaited<ReturnType<typeof acquireDblBibleCatalog>>, { ok: true }>['data'],
-  initialStatus: 'unknown' | 'allowed'
+  initialStatus: 'unknown' | 'allowed' | { preserveExistingNonUnknowns: boolean }
 ): Promise<Result<DblBibleSyncSummary>> {
   return runInTransaction(async (tx) => {
+    const state =
+      typeof initialStatus === 'object'
+        ? await Promise.all([
+            getClassifications(tx),
+            resourcesService.getDblPolicyFacts(
+              catalog.rows.map((row) => row.externalId),
+              tx
+            ),
+          ])
+        : undefined;
+    const policy =
+      state && typeof initialStatus === 'object'
+        ? deriveDblLicensePolicy(
+            catalog.rows,
+            state[0],
+            state[1],
+            initialStatus.preserveExistingNonUnknowns
+          )
+        : undefined;
     const facts = await resourcesService.upsertDblTextFacts(
       catalog.rows.map((row) => ({
         externalId: row.externalId,
         textLicenseNotice: row.textLicenseNotice,
         displayName: row.name,
       })),
-      initialStatus,
-      tx
+      typeof initialStatus === 'string' ? initialStatus : 'unknown',
+      tx,
+      policy?.statuses
     );
     if (!facts.ok) return facts;
     const bibles = await biblesRepository.upsertFromDbl(
@@ -178,6 +201,7 @@ export async function persistDblBibleCatalog(
         totalBibles: catalog.totalBibles,
         skippedMissingLanguage: catalog.skippedMissingLanguage,
         ...bibles.data,
+        ...(policy ? { licensePolicy: policy.summary } : {}),
         licenseFacts: {
           ...facts.data,
           distinctNotices: new Set(notices.filter((notice) => notice !== null)).size,
@@ -191,7 +215,9 @@ export async function persistDblBibleCatalog(
 /** Ordinary sync never opts into Phase-1 optimism implicitly. Derived policy is wired in the next slice. */
 export async function syncBiblesFromDbl(
   client: DblClient = dblClient,
-  initialStatus: 'unknown' | 'allowed' = 'unknown'
+  initialStatus: 'unknown' | 'allowed' | { preserveExistingNonUnknowns: boolean } = {
+    preserveExistingNonUnknowns: false,
+  }
 ): Promise<Result<DblBibleSyncSummary>> {
   const catalog = await acquireDblBibleCatalog(client);
   if (!catalog.ok) return catalog;
