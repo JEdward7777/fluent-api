@@ -34,17 +34,26 @@ async function seedCatalogueWatermarkSingleton(client: Pick<PGlite, 'exec'>): Pr
 }
 
 /** bump_linked_bibles function + trigger; fires on bible_provider_resources, updates bibles. */
-async function installProviderResourceLicenseTrigger(client: Pick<PGlite, 'exec'>): Promise<void> {
+async function installProviderResourceLicenseTrigger(
+  client: Pick<PGlite, 'exec'>,
+  legacy: boolean
+): Promise<void> {
   await client.exec(
     'DROP TRIGGER IF EXISTS trg_bump_bibles_on_provider_resource_license ON bible_provider_resources'
   );
-  for (const statement of migrationStatements('0046_provider_resource_link_bridge.sql')) {
-    if (/CREATE (?:OR REPLACE )?(?:FUNCTION|TRIGGER) /.test(statement)) {
+  if (legacy) {
+    for (const statement of migrationStatements('0046_provider_resource_link_bridge.sql')) {
+      if (/CREATE (?:OR REPLACE )?(?:FUNCTION|TRIGGER) /.test(statement))
+        await client.exec(statement);
+    }
+    for (const statement of migrationStatements('0047_canonical_resource_watermarks.sql'))
       await client.exec(statement);
+  } else {
+    for (const statement of migrationStatements('0048_license_identity_contract.sql')) {
+      if (/CREATE (?:OR REPLACE )?(?:FUNCTION|TRIGGER) /.test(statement))
+        await client.exec(statement);
     }
   }
-  for (const statement of migrationStatements('0047_canonical_resource_watermarks.sql'))
-    await client.exec(statement);
 }
 
 /**
@@ -67,7 +76,7 @@ export async function createTestSchema(
   await client.exec(statements.join('\n'));
   await seedCatalogueWatermarkSingleton(client);
 
-  if ('bible_provider_resources' in tables) {
+  if ('bible_provider_resources' in tables && 'bibleProviderEnum' in tables) {
     const bridge = migrationStatements('0044_license_notice_bridge_and_watermarks.sql').filter(
       (statement) =>
         statement.includes('CREATE OR REPLACE FUNCTION bridge_recording_license_notice()') ||
@@ -76,6 +85,6 @@ export async function createTestSchema(
     for (const statement of bridge) await client.exec(statement);
   }
   if ('bibles' in tables && 'bible_provider_resources' in tables) {
-    await installProviderResourceLicenseTrigger(client);
+    await installProviderResourceLicenseTrigger(client, 'bibleProviderEnum' in tables);
   }
 }

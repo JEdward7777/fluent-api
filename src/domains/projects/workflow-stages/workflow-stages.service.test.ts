@@ -41,7 +41,6 @@ async function seedBaseEntities() {
     languageId: 1,
     name: 'Source Bible',
     abbreviation: 'SRC',
-    provider: 'dbl',
   });
   await database.insert(schema.users).values({
     id: 1,

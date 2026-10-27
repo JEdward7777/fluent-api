@@ -89,7 +89,6 @@ describe('updateTakeCoverageAndRecordingIfVersion (PGlite rollback)', () => {
       storage_objects: schema.storage_objects,
       verse_audio_recordings: schema.verse_audio_recordings,
       verse_audio_takes: schema.verse_audio_takes,
-      bibleProviderEnum: schema.bibleProviderEnum,
       resourceProviderEnum: schema.resourceProviderEnum,
       ttsLicenseStatusEnum: schema.ttsLicenseStatusEnum,
       projectStatusEnum: schema.projectStatusEnum,

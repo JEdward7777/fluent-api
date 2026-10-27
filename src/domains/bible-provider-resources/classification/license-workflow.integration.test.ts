@@ -35,7 +35,6 @@ beforeAll(async () => {
     bible_provider_resources: schema.bible_provider_resources,
     license_classifications: schema.license_classifications,
     scriptDirectionEnum: schema.scriptDirectionEnum,
-    bibleProviderEnum: schema.bibleProviderEnum,
     resourceProviderEnum: schema.resourceProviderEnum,
     ttsLicenseStatusEnum: schema.ttsLicenseStatusEnum,
   });

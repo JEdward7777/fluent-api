@@ -2,11 +2,11 @@ import { eq } from 'drizzle-orm';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { canonicalBibles, canonicalResources } from '@/db/canonical-schema';
-import * as schema from '@/db/schema';
 import { seedBsbBibleTexts } from '@/db/seeds/bible-texts-bsb';
 import { seedBibles } from '@/db/seeds/bibles';
 import { contractCatalogFixture } from '@/db/testing/contract-catalog-fixture';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
+import * as schema from '@/db/testing/expanded-catalog-schema';
 import * as classifications from '@/domains/bible-provider-resources/classification/license-classifications.repository';
 import * as bibles from '@/domains/bibles/bibles.repository';
 import { getAllBibles, getBibleById } from '@/domains/bibles/bibles.service';
