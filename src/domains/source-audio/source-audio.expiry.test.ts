@@ -51,6 +51,7 @@ describe('dBL expiry presence', () => {
         languageId: 1,
         provider: 'dbl',
         externalId: 'text-bible',
+        textResourceId: null,
         audioResourceId: null,
         hasAudio: false,
         createdAt: null,

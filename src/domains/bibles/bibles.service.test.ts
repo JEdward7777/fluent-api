@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as resources from '@/domains/bible-provider-resources/bible-provider-resources.service';
 import { err, ErrorCode, ok } from '@/lib/types';
+import { makeBible } from '@/test/utils/test-helpers';
 
 import * as repo from './bibles.repository';
 import {
@@ -11,6 +12,7 @@ import {
   getBiblesByLanguageId,
   updateBible,
 } from './bibles.service';
+import { createBibleSchema, updateBibleSchema } from './bibles.types';
 
 vi.mock('./bibles.repository', () => ({
   getAll: vi.fn(),
@@ -25,224 +27,66 @@ vi.mock('@/domains/bible-provider-resources/bible-provider-resources.service', (
   getByIds: vi.fn(),
   getByProviderIdentities: vi.fn(),
 }));
-
-const bibleUpdatedAt = new Date('2026-06-01T12:00:00.000Z');
-const bible = {
-  id: 1,
-  name: 'BSB',
-  abbreviation: 'BSB',
-  languageId: 1,
-  provider: 'dbl' as const,
+const bible = makeBible({
+  textResourceId: 8,
   externalId: 'text-id',
   audioResourceId: 3,
-  hasAudio: false,
-  createdAt: null,
-  updatedAt: bibleUpdatedAt,
-};
-const recording = {
-  id: 3,
-  provider: 'aquifer' as const,
-  externalId: '1',
-  ttsLicenseStatus: 'allowed' as const,
-  licenseNotice: 'Audio notice',
+  updatedAt: new Date('2026-06-01T12:00:00.000Z'),
+});
+const text = {
+  id: 8,
+  provider: 'dbl' as const,
+  externalId: 'text-id',
+  ttsLicenseStatus: 'unknown' as const,
+  licenseNotice: null,
   displayName: null,
 };
-
+const recording = { ...text, id: 3, provider: 'aquifer' as const, externalId: '1' };
+const input = {
+  name: bible.name,
+  abbreviation: bible.abbreviation,
+  languageId: 1,
+  textResourceId: 8,
+  audioResourceId: 3,
+};
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(repo.getById).mockResolvedValue(ok(bible));
-  vi.mocked(repo.create).mockResolvedValue(ok(bible));
-  vi.mocked(repo.update).mockResolvedValue(ok(bible));
-  vi.mocked(resources.getById).mockResolvedValue(ok(recording));
-  vi.mocked(resources.getByProviderIdentity).mockResolvedValue(ok(null));
-  vi.mocked(resources.getByIds).mockResolvedValue(ok([]));
-  vi.mocked(resources.getByProviderIdentities).mockResolvedValue(ok([]));
+  for (const fn of [repo.getById, repo.create, repo.update])
+    vi.mocked(fn).mockResolvedValue(ok(bible));
+  for (const fn of [repo.getAll, repo.getByLanguageId])
+    vi.mocked(fn).mockResolvedValue(ok([bible]));
+  vi.mocked(resources.getById).mockImplementation(async (id) => ok(id === 8 ? text : recording));
+  vi.mocked(resources.getByIds).mockImplementation(async (ids) =>
+    ok([text, recording].filter((row) => ids.includes(row.id)))
+  );
 });
 
-describe('source bootstrap policy identity', () => {
+describe('canonical Bible responses', () => {
   it.each(['allowed', 'forbidden', 'unknown'] as const)(
-    'returns curated text %s independently of recording',
-    async (ttsLicenseStatus) => {
-      vi.mocked(resources.getByProviderIdentity).mockResolvedValue(
-        ok({ ...recording, provider: 'dbl', externalId: 'text-id', ttsLicenseStatus })
+    'uses text FK %s policy independently of recording',
+    async (status) => {
+      vi.mocked(resources.getById).mockImplementation(async (id) =>
+        ok(id === 8 ? { ...text, ttsLicenseStatus: status } : recording)
       );
       const result = await getBibleById(1);
       expect(result).toMatchObject({
         ok: true,
         data: {
-          ttsLicenseStatus,
+          ttsLicenseStatus: status,
           textBibleKey: 'dbl-text-id',
           selectedRecordingKey: 'aq-1',
           updatedAt: '2026-06-01T12:00:00.000Z',
         },
       });
-      if (result.ok) expect(result.data).not.toHaveProperty('licenseNotice');
-      expect(resources.getByProviderIdentities).not.toHaveBeenCalled();
-      expect(resources.getByIds).not.toHaveBeenCalled();
+      if (result.ok) {
+        expect(result.data).not.toHaveProperty('textResourceId');
+        expect(result.data).not.toHaveProperty('licenseNotice');
+      }
+      expect(resources.getByProviderIdentity).not.toHaveBeenCalled();
     }
   );
-
-  it('returns unknown when a single text identity is missing', async () => {
-    expect(await getBibleById(1)).toMatchObject({
-      ok: true,
-      data: { ttsLicenseStatus: 'unknown', textBibleKey: 'dbl-text-id' },
-    });
-  });
-
-  it('does not convert a single-resource database outage into successful unknown', async () => {
-    vi.mocked(resources.getByProviderIdentity).mockResolvedValue(err(ErrorCode.INTERNAL_ERROR));
-    expect(await getBibleById(1)).toEqual(err(ErrorCode.INTERNAL_ERROR));
-  });
-
-  it.each([
-    ['create', () => createBible(bible)],
-    ['update', () => updateBible(1, bible)],
-  ])('keeps %s enrichment on bounded single-resource lookups', async (_label, write) => {
-    await expect(write()).resolves.toMatchObject({ ok: true, data: { id: 1 } });
-    expect(resources.getByProviderIdentity).toHaveBeenCalledTimes(1);
-    expect(resources.getById).toHaveBeenCalledTimes(1);
-    expect(resources.getByProviderIdentities).not.toHaveBeenCalled();
-    expect(resources.getByIds).not.toHaveBeenCalled();
-  });
-});
-
-describe('batched list enrichment', () => {
-  const repeated = { ...bible, id: 2, name: 'BSB copy', abbreviation: 'BSB2' };
-  const missing = {
-    ...bible,
-    id: 3,
-    name: 'WEB',
-    abbreviation: 'WEB',
-    externalId: 'missing-text',
-    audioResourceId: 99,
-  };
-  const unidentified = {
-    ...bible,
-    id: 4,
-    name: 'Local',
-    abbreviation: 'LOC',
-    externalId: null,
-    audioResourceId: null,
-  };
-  const other = {
-    ...bible,
-    id: 5,
-    name: 'Other',
-    abbreviation: 'OTH',
-    externalId: 'other-text',
-    audioResourceId: 4,
-  };
-  const rows = [repeated, missing, other, bible, unidentified];
-  const textResource = {
-    ...recording,
-    id: 8,
-    provider: 'dbl' as const,
-    externalId: 'text-id',
-    ttsLicenseStatus: 'forbidden' as const,
-  };
-  const otherTextResource = {
-    ...textResource,
-    id: 9,
-    externalId: 'other-text',
-    ttsLicenseStatus: 'allowed' as const,
-  };
-  const otherRecording = {
-    ...recording,
-    id: 4,
-    provider: 'youversion' as const,
-    externalId: '88',
-  };
-
-  beforeEach(() => {
-    vi.mocked(repo.getAll).mockResolvedValue(ok(rows));
-    vi.mocked(repo.getByLanguageId).mockResolvedValue(ok(rows));
-    // Deliberately return rows in a different order than the Bible list.
-    vi.mocked(resources.getByProviderIdentities).mockResolvedValue(
-      ok([otherTextResource, textResource])
-    );
-    vi.mocked(resources.getByIds).mockResolvedValue(ok([otherRecording, recording]));
-  });
-
-  it.each([
-    ['all Bibles', () => getAllBibles()],
-    ['Bibles by language', () => getBiblesByLanguageId(1)],
-  ])('deduplicates lookups and preserves response order for %s', async (_label, list) => {
-    const result = await list();
-
-    expect(result).toMatchObject({
-      ok: true,
-      data: [
-        {
-          id: 2,
-          ttsLicenseStatus: 'forbidden',
-          selectedRecordingKey: 'aq-1',
-          updatedAt: '2026-06-01T12:00:00.000Z',
-        },
-        {
-          id: 3,
-          ttsLicenseStatus: 'unknown',
-          textBibleKey: 'dbl-missing-text',
-          selectedRecordingKey: null,
-          updatedAt: '2026-06-01T12:00:00.000Z',
-        },
-        {
-          id: 5,
-          ttsLicenseStatus: 'allowed',
-          textBibleKey: 'dbl-other-text',
-          selectedRecordingKey: 'yv-88',
-          updatedAt: '2026-06-01T12:00:00.000Z',
-        },
-        {
-          id: 1,
-          ttsLicenseStatus: 'forbidden',
-          selectedRecordingKey: 'aq-1',
-          updatedAt: '2026-06-01T12:00:00.000Z',
-        },
-        {
-          id: 4,
-          ttsLicenseStatus: 'unknown',
-          textBibleKey: null,
-          selectedRecordingKey: null,
-          updatedAt: '2026-06-01T12:00:00.000Z',
-        },
-      ],
-    });
-    expect(resources.getByProviderIdentities).toHaveBeenCalledTimes(1);
-    expect(resources.getByProviderIdentities).toHaveBeenCalledWith([
-      { provider: 'dbl', externalId: 'text-id' },
-      { provider: 'dbl', externalId: 'missing-text' },
-      { provider: 'dbl', externalId: 'other-text' },
-    ]);
-    expect(resources.getByIds).toHaveBeenCalledTimes(1);
-    expect(resources.getByIds).toHaveBeenCalledWith([3, 99, 4]);
-    expect(resources.getByProviderIdentity).not.toHaveBeenCalled();
-    expect(resources.getById).not.toHaveBeenCalled();
-  });
-
-  it('handles an empty list without single-record enrichment', async () => {
-    vi.mocked(repo.getAll).mockResolvedValue(ok([]));
-
-    expect(await getAllBibles()).toEqual(ok([]));
-    expect(resources.getByProviderIdentities).toHaveBeenCalledWith([]);
-    expect(resources.getByIds).toHaveBeenCalledWith([]);
-    expect(resources.getByProviderIdentity).not.toHaveBeenCalled();
-    expect(resources.getById).not.toHaveBeenCalled();
-  });
-
-  it.each(['text', 'recording'] as const)('propagates a %s batch failure', async (kind) => {
-    if (kind === 'text')
-      vi.mocked(resources.getByProviderIdentities).mockResolvedValue(err(ErrorCode.INTERNAL_ERROR));
-    else vi.mocked(resources.getByIds).mockResolvedValue(err(ErrorCode.INTERNAL_ERROR));
-
-    expect(await getAllBibles()).toEqual(err(ErrorCode.INTERNAL_ERROR));
-  });
-});
-
-describe('provider-aware legacy Bible writes', () => {
-  it('preserves the null-identity seed response without claiming a text resource', async () => {
-    vi.mocked(repo.getById).mockResolvedValue(
-      ok({ ...bible, externalId: null, audioResourceId: null })
-    );
+  it('preserves unlinked seed response without a text lookup', async () => {
+    vi.mocked(repo.getById).mockResolvedValue(ok(makeBible({ externalId: null })));
     expect(await getBibleById(1)).toMatchObject({
       ok: true,
       data: {
@@ -253,47 +97,65 @@ describe('provider-aware legacy Bible writes', () => {
         ttsLicenseStatus: 'unknown',
       },
     });
-    expect(resources.getByProviderIdentity).not.toHaveBeenCalled();
     expect(resources.getById).not.toHaveBeenCalled();
   });
-
-  it.each(['dbl', 'aquifer', 'youversion'] as const)(
-    'preserves %s response identity and columns',
-    async (provider) => {
-      const row = { ...bible, provider, audioResourceId: null };
-      vi.mocked(repo.create).mockResolvedValue(ok(row));
-      vi.mocked(repo.update).mockResolvedValue(ok(row));
-      const input = {
-        name: row.name,
-        abbreviation: row.abbreviation,
-        languageId: row.languageId,
-        provider,
-        externalId: row.externalId,
-      };
-      const created = await createBible(input);
-      const updated = await updateBible(1, { provider, externalId: row.externalId });
-      expect(created).toEqual(updated);
-      expect(created).toMatchObject({
+  it('propagates text resource read failures', async () => {
+    vi.mocked(resources.getById).mockResolvedValue(err(ErrorCode.INTERNAL_ERROR));
+    expect(await getBibleById(1)).toEqual(err(ErrorCode.INTERNAL_ERROR));
+  });
+  it.each([
+    ['create', () => createBible(input)],
+    ['update', () => updateBible(1, input)],
+  ])('%s returns the unchanged public contract through FK lookups', async (_label, write) => {
+    expect(await write()).toMatchObject({ ok: true, data: { id: 1, textBibleKey: 'dbl-text-id' } });
+    expect(resources.getById).toHaveBeenCalledWith(8);
+    expect(resources.getById).toHaveBeenCalledWith(3);
+  });
+  it.each([getAllBibles, () => getBiblesByLanguageId(1)])(
+    'batch joins by resource IDs and retains order',
+    async (read) => {
+      const rows = [bible, { ...bible, id: 2 }, makeBible({ id: 3, externalId: null })];
+      vi.mocked(repo.getAll).mockResolvedValue(ok(rows));
+      vi.mocked(repo.getByLanguageId).mockResolvedValue(ok(rows));
+      const result = await read();
+      expect(result).toMatchObject({
         ok: true,
-        data: {
-          provider,
-          hasAudio: false,
-          textBibleKey: `${provider === 'aquifer' ? 'aq' : provider === 'youversion' ? 'yv' : 'dbl'}-text-id`,
-          selectedRecordingKey: null,
-          ttsLicenseStatus: 'unknown',
-        },
+        data: [
+          { id: 1, textBibleKey: 'dbl-text-id' },
+          { id: 2, textBibleKey: 'dbl-text-id' },
+          { id: 3, textBibleKey: null },
+        ],
       });
-      expect(repo.create).toHaveBeenCalledWith(input);
-      expect(repo.update).toHaveBeenCalledWith(1, { provider, externalId: row.externalId });
+      expect(resources.getByIds).toHaveBeenCalledWith([8]);
+      expect(resources.getByIds).toHaveBeenCalledWith([3]);
+      expect(resources.getByProviderIdentities).not.toHaveBeenCalled();
     }
   );
+  it('propagates batch failures', async () => {
+    vi.mocked(resources.getByIds).mockResolvedValue(err(ErrorCode.INTERNAL_ERROR));
+    expect(await getAllBibles()).toEqual(err(ErrorCode.INTERNAL_ERROR));
+  });
+});
 
-  it('requires an explicit provider alongside an external ID before writing', async () => {
+describe('explicit SuperAdmin FK contract', () => {
+  it.each(['provider', 'externalId', 'hasAudio'])(
+    'rejects deprecated %s in both request schemas',
+    (key) => {
+      expect(
+        createBibleSchema.safeParse({ ...input, [key]: key === 'hasAudio' ? true : 'dbl' }).success
+      ).toBe(false);
+      expect(
+        updateBibleSchema.safeParse({ [key]: key === 'hasAudio' ? true : 'dbl' }).success
+      ).toBe(false);
+    }
+  );
+  it.each([0, -1, 1.5, '8'])('rejects invalid FK %s', (textResourceId) => {
+    expect(createBibleSchema.safeParse({ ...input, textResourceId }).success).toBe(false);
+  });
+  it('allows explicit unlink and no-identity seeds', () => {
+    expect(updateBibleSchema.parse({ textResourceId: null })).toEqual({ textResourceId: null });
     expect(
-      await createBible({ name: 'Test', abbreviation: 'TEST', languageId: 1, externalId: 'id' })
-    ).toEqual(err(ErrorCode.VALIDATION_ERROR));
-    expect(await updateBible(1, { externalId: 'id' })).toEqual(err(ErrorCode.VALIDATION_ERROR));
-    expect(repo.create).not.toHaveBeenCalled();
-    expect(repo.update).not.toHaveBeenCalled();
+      createBibleSchema.safeParse({ name: 'Local', abbreviation: 'LOC', languageId: 1 }).success
+    ).toBe(true);
   });
 });

@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { db } from '@/db';
-import { bible_books, bible_texts, bibles, books, translated_verses } from '@/db/schema';
+import { canonicalBibles as bibles } from '@/db/canonical-schema';
+import { bible_books, bible_texts, books, translated_verses } from '@/db/schema';
 
 const IRV_ABBREVIATION = 'IRV';
 const CHUNK_SIZE = 1000;

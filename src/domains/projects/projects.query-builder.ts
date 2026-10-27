@@ -2,7 +2,8 @@ import { eq, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import { db } from '@/db';
-import { bibles, languages, projects } from '@/db/schema';
+import { canonicalBibles as bibles } from '@/db/canonical-schema';
+import { languages, projects } from '@/db/schema';
 
 // Aliases
 export const sourceLanguages = alias(languages, 'sourceLanguages');

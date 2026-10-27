@@ -1,9 +1,13 @@
-import { and, eq, notInArray, or, sql } from 'drizzle-orm';
+import { eq, notInArray, or, sql } from 'drizzle-orm';
 
 import type { DbTransaction } from '@/lib/types';
 
 import { db } from '@/db';
-import { bible_provider_resources, bibles, license_classifications } from '@/db/schema';
+import {
+  canonicalResources as bible_provider_resources,
+  canonicalBibles as bibles,
+} from '@/db/canonical-schema';
+import { license_classifications } from '@/db/schema';
 import { logger } from '@/lib/logger';
 
 import type { LicenseArtifact, LicenseClassification } from '../license-artifact.schemas';
@@ -47,13 +51,7 @@ export async function loadClassificationSnapshot(): Promise<LicenseDatabaseSnaps
         ttsLicenseStatus: bible_provider_resources.ttsLicenseStatus,
       })
       .from(bible_provider_resources)
-      .innerJoin(
-        bibles,
-        and(
-          sql`${bibles.provider}::text = ${bible_provider_resources.provider}::text`,
-          eq(bibles.externalId, bible_provider_resources.externalId)
-        )
-      ),
+      .innerJoin(bibles, eq(bibles.textResourceId, bible_provider_resources.id)),
   ]);
   const classifications: StoredLicenseClassification[] = rows.map((row) => {
     const content = row.rationale;
