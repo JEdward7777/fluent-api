@@ -3,7 +3,12 @@ import { eq } from 'drizzle-orm';
 import { readFileSync } from 'node:fs';
 
 import { db } from '@/db';
-import { bible_texts, bibles, books } from '@/db/schema';
+import {
+  bibleProjection,
+  canonicalBibles as bibles,
+  canonicalResources,
+} from '@/db/canonical-schema';
+import { bible_texts, books } from '@/db/schema';
 
 const bsbJohnSchema = z.object({
   source: z.object({ bookCode: z.literal('JHN'), license: z.literal('Public domain') }),
@@ -27,8 +32,13 @@ export function loadBsbJohn() {
 
 export async function seedBsbBibleTexts(): Promise<void> {
   const [bible] = await db
-    .select({ id: bibles.id, provider: bibles.provider, externalId: bibles.externalId })
+    .select({
+      id: bibles.id,
+      provider: bibleProjection.provider,
+      externalId: canonicalResources.externalId,
+    })
     .from(bibles)
+    .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
     .where(eq(bibles.abbreviation, 'BSB'));
   const [book] = await db.select({ id: books.id }).from(books).where(eq(books.code, 'JHN'));
   if (!bible || !book) throw new Error('BSB/JHN not found. Run seedBibles and seedBooks first.');

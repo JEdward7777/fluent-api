@@ -20,6 +20,7 @@ vi.mock('@/db', () => ({ db: dbMock }));
 function selectResult(rows: unknown[]) {
   const result = {
     from: vi.fn().mockReturnThis(),
+    leftJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),

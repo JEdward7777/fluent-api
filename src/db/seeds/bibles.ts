@@ -2,7 +2,11 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
 
 import { db } from '@/db';
-import { bible_books, bible_provider_resources, bibles, books, languages } from '@/db/schema';
+import {
+  canonicalResources as bible_provider_resources,
+  canonicalBibles as bibles,
+} from '@/db/canonical-schema';
+import { bible_books, books, languages } from '@/db/schema';
 
 const IRV_BIBLE = {
   name: 'IRV Gujarati',
@@ -140,6 +144,16 @@ async function seedBereanStandardBible() {
       )
     );
   if (!recording) throw new Error('Aquifer BSB recording resource missing');
+  const [text] = await db
+    .select({ id: bible_provider_resources.id })
+    .from(bible_provider_resources)
+    .where(
+      and(
+        eq(bible_provider_resources.provider, 'dbl'),
+        eq(bible_provider_resources.externalId, BSB_BIBLE.externalId)
+      )
+    );
+  if (!text) throw new Error('DBL BSB text resource missing');
 
   const [language] = await db
     .select({ id: languages.id })
@@ -157,8 +171,7 @@ async function seedBereanStandardBible() {
       name: BSB_BIBLE.name,
       abbreviation: BSB_BIBLE.abbreviation,
       languageId: language.id,
-      provider: 'dbl',
-      externalId: BSB_BIBLE.externalId,
+      textResourceId: text.id,
       audioResourceId: recording.id,
     })
     .onConflictDoNothing({ target: bibles.abbreviation });
