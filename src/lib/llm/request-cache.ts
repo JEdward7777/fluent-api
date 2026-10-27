@@ -10,13 +10,30 @@ import type { JsonValue } from './canonical-json';
 
 import { hashCanonicalJson } from './canonical-json';
 
-export interface LlmRequest {
-  provider: string;
-  model: string;
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
-  responseSchema: { [key: string]: JsonValue };
-  settings: { [key: string]: JsonValue };
-}
+export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.null(),
+    z.boolean(),
+    z.number().finite(),
+    z.string(),
+    z.array(jsonValueSchema),
+    z.record(jsonValueSchema),
+  ])
+);
+export const llmRequestSchema = z
+  .object({
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    messages: z
+      .array(
+        z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.string() }).strict()
+      )
+      .min(1),
+    responseSchema: z.record(jsonValueSchema),
+    settings: z.record(jsonValueSchema),
+  })
+  .strict();
+export type LlmRequest = z.infer<typeof llmRequestSchema>;
 
 const entrySchema = z
   .object({
