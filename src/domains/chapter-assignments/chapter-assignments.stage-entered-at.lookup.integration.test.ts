@@ -34,7 +34,6 @@ describe('stageEnteredAt lookup (PGlite SQL)', () => {
       languageId: 1,
       name: 'Source',
       abbreviation: 'SRC',
-      provider: 'dbl',
     });
     await database.insert(schema.users).values({
       id: 1,
