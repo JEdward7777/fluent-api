@@ -215,6 +215,7 @@ export const bible_provider_resources = pgTable(
     legacyLicenseNotice: text('license_notice'),
     licenseNotice: text('recording_license_notice'),
     textLicenseNotice: text('text_license_notice'),
+    hasAudio: boolean('has_audio').notNull().default(false),
     // Optional label for human diagnostics and curation; never identity or policy.
     displayName: text('display_name'),
   },
@@ -244,9 +245,13 @@ export const bibles = pgTable(
       .references(() => languages.id),
     name: varchar('name', { length: 255 }).notNull().unique(),
     abbreviation: varchar('abbreviation', { length: 50 }).notNull().unique(),
+    // Legacy compatibility columns remain authoritative to release-1 binaries.
     provider: bibleProviderEnum('provider').notNull().default('dbl'),
     externalId: varchar('external_id', { length: 255 }),
     hasAudio: boolean('has_audio').notNull().default(false),
+    textResourceId: integer('text_resource_id').references(() => bible_provider_resources.id, {
+      onDelete: 'restrict',
+    }),
     audioResourceId: integer('audio_resource_id').references(() => bible_provider_resources.id, {
       onDelete: 'restrict',
     }),
@@ -256,6 +261,9 @@ export const bibles = pgTable(
       .$onUpdate(() => sql`next_catalogue_watermark()`),
   },
   (table) => [
+    uniqueIndex('idx_bibles_text_resource_id')
+      .on(table.textResourceId)
+      .where(sql`${table.textResourceId} IS NOT NULL`),
     // Provider identity: a given provider + externalId pair maps to exactly one row.
     // Partial: only rows with a non-null externalId are covered (seed data has none).
     uniqueIndex('idx_bibles_provider_external_id')
@@ -1161,7 +1169,8 @@ export const selectRolesSchema = createSelectSchema(roles);
 export const selectOrganizationsSchema = createSelectSchema(organizations);
 export const selectLanguagesSchema = createSelectSchema(languages);
 export const selectProjectsSchema = createSelectSchema(projects);
-export const selectBiblesSchema = createSelectSchema(bibles);
+// The expand slice preserves the legacy public contract until the application switch.
+export const selectBiblesSchema = createSelectSchema(bibles).omit({ textResourceId: true });
 export const selectBooksSchema = createSelectSchema(books);
 export const selectBibleBooksSchema = createSelectSchema(bible_books);
 export const selectProjectUnitsSchema = createSelectSchema(project_units);
@@ -1316,6 +1325,7 @@ export const insertBiblesSchema = createInsertSchema(bibles, {
   })
   .omit({
     id: true,
+    textResourceId: true,
     createdAt: true,
     updatedAt: true,
   });
