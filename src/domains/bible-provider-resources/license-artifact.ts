@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { LicenseArtifact } from './license-artifact.schemas';
+import type { LicenseArtifact, LicenseClassification } from './license-artifact.schemas';
 
 import { computeLicenseReviewHash } from './license-artifact.hash';
 import {
@@ -125,6 +125,16 @@ export function attestLicenseArtifact(
   return artifact;
 }
 
+export function licenseOverrideWarning(
+  row: LicenseClassification,
+  status: LicenseClassification['status']
+): string | null {
+  return row.rule?.id === 'all-rights-reserved' &&
+    status !== (row.automaticDecision?.status ?? row.status)
+    ? 'Overriding an automatic all-rights-reserved decision requires explicit human responsibility.'
+    : null;
+}
+
 /** The caller displays the warning during review; the reason and original proposal remain owned evidence. */
 export function overrideLicenseClassification(
   value: unknown,
@@ -141,9 +151,7 @@ export function overrideLicenseClassification(
     if (!row) throw new Error('No exact normalized classification exists');
     if (row.source !== 'manual')
       row.automaticDecision = { source: row.source, status: row.status, rationale: row.rationale };
-    if (row.rule?.id === 'all-rights-reserved' && status !== row.automaticDecision?.status)
-      warning =
-        'Overriding an automatic all-rights-reserved decision requires explicit human responsibility.';
+    warning = licenseOverrideWarning(row, status);
     row.status = status;
     row.source = 'manual';
     row.rationale = reason;
