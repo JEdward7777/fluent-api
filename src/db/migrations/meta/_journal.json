@@ -288,6 +288,20 @@
       "when": 1792682769108,
       "tag": "0040_chapter_assignment_bible_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793105837777,
+      "tag": "0041_provider_aware_legacy_bibles",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793105868551,
+      "tag": "0042_provider_identity_license_watermarks",
+      "breakpoints": true
     }
   ]
 }

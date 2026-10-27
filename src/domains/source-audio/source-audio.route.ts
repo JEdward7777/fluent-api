@@ -23,7 +23,7 @@ import {
 
 const badRequestResponse = jsonContent(
   createMessageObjectSchema('Bad Request'),
-  'Invalid request parameters'
+  'Invalid request parameters or unsupported Bible provider'
 );
 const unauthorizedResponse = jsonContent(
   createMessageObjectSchema('Unauthorized'),
@@ -86,7 +86,7 @@ const getChapterSourceAudioRoute = createRoute({
   ] as const,
   summary: 'Get source/reference audio for a chapter',
   description:
-    'Prefers linked DBL recordings, then Aquifer name matching, or empty `items` (HTTP 200). `bibleId` must be linked to the project for the given book. Distinct from translator `/verse-audio` draft recordings.',
+    'Prefers DBL recordings for DBL identities, then Aquifer matching, or empty `items` (HTTP 200). Aquifer identities match their external ID; YouVersion audio is unsupported (HTTP 400). `bibleId` must be linked to the project for the given book. Distinct from translator `/verse-audio` draft recordings.',
   request: {
     params: chapterSourceAudioParamSchema,
     query: sourceAudioQuerySchema,
@@ -132,7 +132,7 @@ const getSourceAudioManifestRoute = createRoute({
   ] as const,
   summary: 'Prepare Offline Tier 1 source audio manifest',
   description:
-    'Returns Aquifer-backed download metadata for source Bible audio across a chapter range (max 20 chapters). Empty `items` when no audio exists or the Aquifer bible cannot be matched. `bibleId` must be linked to the project for the given book.',
+    'Returns Aquifer-backed download metadata for source Bible audio across a chapter range (max 20 chapters). Empty `items` when no audio exists or the Aquifer bible cannot be matched. YouVersion audio is unsupported (HTTP 400). `bibleId` must be linked to the project for the given book.',
   request: {
     params: chapterSourceAudioParamSchema.pick({ projectId: true }),
     query: sourceAudioManifestQuerySchema,

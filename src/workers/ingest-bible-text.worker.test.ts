@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { err, ErrorCode } from '@/lib/types';
-import { fakeBoss, jobResult } from '@/test/utils/test-helpers';
+import { fakeBoss, jobResult, makeBible } from '@/test/utils/test-helpers';
 
 import { db } from '../db';
 import { bible_books } from '../db/schema';
@@ -57,6 +57,22 @@ vi.mock('../domains/chapter-assignments/chapter-assignments.service', () => ({
 }));
 
 describe('dblIngestTextWorker', () => {
+  it.each(['aquifer', 'youversion'] as const)(
+    'rejects %s before any DBL client call',
+    async (provider) => {
+      const { boss, work } = fakeBoss();
+      await registerDblIngestTextWorker(boss);
+      vi.mocked(db.query.bibles.findFirst).mockResolvedValue(makeBible({ provider }));
+      const handler = work.mock.calls[0][2];
+      await expect(handler([jobResult({ bibleId: 1, bookCodes: ['GEN'] })])).rejects.toThrow(
+        'Unsupported text ingestion provider'
+      );
+      expect(mockDblClientInstance.getChapters).not.toHaveBeenCalled();
+      expect(mockDblClientInstance.getChapter).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+    }
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -99,6 +115,7 @@ describe('dblIngestTextWorker', () => {
     const handler = work.mock.calls[0][2];
 
     vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
+      provider: 'dbl',
       id: 1,
       externalId: 'ext-bible-1',
     } as any);
@@ -137,6 +154,7 @@ describe('dblIngestTextWorker', () => {
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined as any);
 
     vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
+      provider: 'dbl',
       id: 1,
       externalId: 'ext-bible-1',
     } as any);
@@ -159,6 +177,7 @@ describe('dblIngestTextWorker', () => {
     const handler = work.mock.calls[0][2];
 
     vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
+      provider: 'dbl',
       id: 1,
       externalId: 'ext-bible-1',
     } as any);
@@ -191,6 +210,7 @@ describe('dblIngestTextWorker', () => {
 
     beforeEach(() => {
       vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
+        provider: 'dbl',
         id: 1,
         externalId: 'ext-bible-1',
       } as any);
@@ -241,8 +261,9 @@ describe('dblIngestTextWorker', () => {
       const { logger } = await import('../lib/logger');
       const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined as any);
 
-      const chapterAssignmentsService =
-        await import('../domains/chapter-assignments/chapter-assignments.service');
+      const chapterAssignmentsService = await import(
+        '../domains/chapter-assignments/chapter-assignments.service'
+      );
       vi.mocked(chapterAssignmentsService.createChapterAssignmentForProjectUnit).mockResolvedValue({
         ok: true,
         data: [],
@@ -264,8 +285,9 @@ describe('dblIngestTextWorker', () => {
       await registerDblIngestTextWorker(boss);
       const handler = work.mock.calls[0][2];
 
-      const chapterAssignmentsService =
-        await import('../domains/chapter-assignments/chapter-assignments.service');
+      const chapterAssignmentsService = await import(
+        '../domains/chapter-assignments/chapter-assignments.service'
+      );
       vi.mocked(chapterAssignmentsService.createChapterAssignmentForProjectUnit).mockResolvedValue({
         ok: true,
         data: [],
@@ -354,10 +376,9 @@ describe('dblIngestTextWorker', () => {
       await expect(retryHandler(retryJob)).resolves.toBeUndefined();
 
       expect(usfmImportService.materializePendingUsfmImportsForBible).toHaveBeenCalledTimes(3);
-      expect(usfmImportService.materializePendingUsfmImportsForBible).toHaveBeenLastCalledWith(
-        1,
-        [7]
-      );
+      expect(usfmImportService.materializePendingUsfmImportsForBible).toHaveBeenLastCalledWith(1, [
+        7,
+      ]);
       expect(mockDblClientInstance.getChapter).toHaveBeenCalledTimes(1);
     });
 
@@ -404,8 +425,9 @@ describe('dblIngestTextWorker', () => {
       const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined as any);
       const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined as any);
 
-      const chapterAssignmentsService =
-        await import('../domains/chapter-assignments/chapter-assignments.service');
+      const chapterAssignmentsService = await import(
+        '../domains/chapter-assignments/chapter-assignments.service'
+      );
       vi.mocked(chapterAssignmentsService.createChapterAssignmentForProjectUnit).mockResolvedValue({
         ok: false,
         error: { message: 'insert failed', code: 'INTERNAL_ERROR' },

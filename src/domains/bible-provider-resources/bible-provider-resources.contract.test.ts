@@ -25,14 +25,11 @@ describe('bible provider identity cross-layer contract', () => {
     }
   });
 
-  it('keeps the narrower text-ingest and audio-capability provider sets explicit', () => {
+  it('keeps Bible persistence vocabulary equal and audio capabilities explicit', () => {
     const persistedProviders = new Set(resourceProviderEnum.enumValues);
 
-    expect(bibleProviderEnum.enumValues.every((provider) => persistedProviders.has(provider))).toBe(
-      true
-    );
+    expect(new Set(bibleProviderEnum.enumValues)).toEqual(persistedProviders);
     expect(SOURCE_AUDIO_PROVIDERS.every((provider) => persistedProviders.has(provider))).toBe(true);
-    expect(new Set(bibleProviderEnum.enumValues).size).toBeLessThan(persistedProviders.size);
     expect(new Set(SOURCE_AUDIO_PROVIDERS).size).toBeLessThan(persistedProviders.size);
   });
 });

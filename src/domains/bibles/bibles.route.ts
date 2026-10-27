@@ -4,14 +4,18 @@ import * as HttpStatusPhrases from 'stoker/http-status-phrases';
 import { jsonContent, jsonContentRequired } from 'stoker/openapi/helpers';
 import { createMessageObjectSchema } from 'stoker/openapi/schemas';
 
-import { insertBiblesSchema, patchBiblesSchema } from '@/db/schema';
 import { getHttpStatus } from '@/lib/types';
 import { updatedAfterQuerySchema, validationErrorSchema } from '@/lib/updated-after-query';
 import { authenticateUser, requireSuperAdmin } from '@/middlewares/role-auth';
 import { server } from '@/server/server';
 
 import * as bibleService from './bibles.service';
-import { bibleResponseSchema, sourceSearchResponseSchema } from './bibles.types';
+import {
+  bibleResponseSchema,
+  createBibleSchema,
+  sourceSearchResponseSchema,
+  updateBibleSchema,
+} from './bibles.types';
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
@@ -187,7 +191,7 @@ const createBibleRoute = createRoute({
   path: '/bibles',
   middleware: [authenticateUser, requireSuperAdmin] as const,
   request: {
-    body: jsonContentRequired(insertBiblesSchema, 'The bible to create'),
+    body: jsonContentRequired(createBibleSchema, 'The bible to create'),
   },
   responses: {
     [HttpStatusCodes.CREATED]: jsonContent(
@@ -230,7 +234,7 @@ const updateBibleRoute = createRoute({
   middleware: [authenticateUser, requireSuperAdmin] as const,
   request: {
     params: idParam,
-    body: jsonContentRequired(patchBiblesSchema, 'The bible data to update'),
+    body: jsonContentRequired(updateBibleSchema, 'The bible data to update'),
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(bibleResponseSchema.openapi('Bible'), 'The updated bible'),

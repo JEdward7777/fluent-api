@@ -1,10 +1,13 @@
+import type { DbTransaction } from '@/lib/types';
+
 import { bibleKey } from '@/domains/bible-provider-resources/bible-provider-resources.identity';
 import * as resources from '@/domains/bible-provider-resources/bible-provider-resources.service';
-import { ok } from '@/lib/types';
+import { err, ErrorCode, ok } from '@/lib/types';
 
 import type { Bible, BibleResponse, CreateBible, UpdateBible } from './bibles.types';
 
 import * as repo from './bibles.repository';
+import { createBibleSchema, updateBibleSchema } from './bibles.types';
 
 // ─── Response mapping ─────────────────────────────────────────────────────────
 
@@ -94,8 +97,8 @@ export async function getAllBibles(updatedAfter?: Date) {
   return toBibleResponses(result.data);
 }
 
-export function getBibleRecordById(id: number) {
-  return repo.getById(id);
+export function getBibleRecordById(id: number, tx?: DbTransaction) {
+  return repo.getById(id, tx);
 }
 
 export async function getBibleById(id: number) {
@@ -111,12 +114,14 @@ export async function getBiblesByLanguageId(languageId: number) {
 }
 
 export async function createBible(data: CreateBible) {
+  if (!createBibleSchema.safeParse(data).success) return err(ErrorCode.VALIDATION_ERROR);
   const result = await repo.create(data);
   if (!result.ok) return result;
   return toBibleResponse(result.data);
 }
 
 export async function updateBible(id: number, data: UpdateBible) {
+  if (!updateBibleSchema.safeParse(data).success) return err(ErrorCode.VALIDATION_ERROR);
   const result = await repo.update(id, data);
   if (!result.ok) return result;
   return toBibleResponse(result.data);

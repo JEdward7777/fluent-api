@@ -4,6 +4,8 @@ import type { AppPolicyUser, DbTransaction, Result } from '@/lib/types';
 
 import { db } from '@/db';
 import { bible_books, bible_texts, pericope_sets } from '@/db/schema';
+import { runInTransaction } from '@/db/transaction';
+import * as biblesService from '@/domains/bibles/bibles.service';
 import * as chapterAssignmentsService from '@/domains/chapter-assignments/chapter-assignments.service';
 import { logger } from '@/lib/logger';
 import { PERMISSIONS } from '@/lib/permissions';
@@ -197,7 +199,7 @@ export async function createProject(
     }
 
     let createdProjectUnitId: number | null = null;
-    const result = await db.transaction(async (tx) => {
+    const result = await runInTransaction(async (tx) => {
       const {
         bibleId,
         bookId,
@@ -301,6 +303,16 @@ export async function createProject(
 
         // Enqueue priority ingestion for the exact requested books
         if (priorityBookCodes.length > 0) {
+          const source = await biblesService.getBibleRecordById(input.bibleId, tx);
+          if (!source.ok) return source;
+          if (source.data.provider !== 'dbl') {
+            logger.warn({
+              message: 'Unsupported text ingestion provider; no DBL job queued',
+              context: { bibleId: input.bibleId, provider: source.data.provider },
+            });
+            if (importedFiles) return err(ErrorCode.UNSUPPORTED_BIBLE_PROVIDER);
+            return ok(project);
+          }
           const queue = await getQueue();
           await queue.send(
             QUEUE_NAMES.DBL_INGEST_TEXT_PRIORITY,

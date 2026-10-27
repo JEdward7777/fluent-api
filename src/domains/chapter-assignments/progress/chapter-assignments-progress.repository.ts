@@ -156,10 +156,8 @@ export async function findAssignmentsProgress(
       .innerJoin(projects, eq(project_units.projectId, projects.id))
       .innerJoin(books, eq(chapter_assignments.bookId, books.id))
       .innerJoin(bibles, eq(bibles.id, chapter_assignments.bibleId))
-      // `bibles.provider` deliberately remains the narrower DBL text-ingest enum,
-      // while provider resources cover every playback identity. PostgreSQL cannot
-      // compare those enum types directly, so this relational join casts to text.
-      // Consolidating the broader provider vocabulary is deferred maintenance.
+      // The provider enums share labels but remain distinct PostgreSQL types.
+      // Compare their text values alongside the external ID for every provider.
       .leftJoin(
         bible_provider_resources,
         and(
