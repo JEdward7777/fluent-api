@@ -167,7 +167,7 @@ async function seedBereanStandardBible() {
     ])
     .onConflictDoNothing();
   const [recording] = await db
-    .select()
+    .select({ id: bible_provider_resources.id })
     .from(bible_provider_resources)
     .where(
       and(

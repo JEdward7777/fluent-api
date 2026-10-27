@@ -84,7 +84,6 @@
   "exports:src/test/utils/test-helpers.ts:createResult",
   "exports:src/test/utils/test-helpers.ts:sampleBibles",
   "exports:src/test/utils/test-helpers.ts:sampleChapterInfo",
-  "exports:src/test/utils/test-helpers.ts:sampleLanguages",
   "exports:src/test/utils/test-helpers.ts:sampleProjectUnitBibleBooks",
   "exports:src/test/utils/test-helpers.ts:sampleProjectUnits",
   "exports:src/workers/dbl-sync.worker.ts:QUEUE_DBL_SYNC",

@@ -1,6 +1,8 @@
 import type { DblClient } from '@/lib/services/dbl/dbl.client';
 import type { Result } from '@/lib/types';
 
+import { runInTransaction } from '@/db/transaction';
+import * as resourcesService from '@/domains/bible-provider-resources/bible-provider-resources.service';
 import { normalizeIso6393Code } from '@/domains/languages/import/iso';
 import * as languagesRepository from '@/domains/languages/languages.repository';
 import { dblClient } from '@/lib/services/dbl/dbl.client';
@@ -14,24 +16,31 @@ export interface DblBibleSyncSummary {
   skippedMissingLanguage: number;
   inserted: number;
   updated: number;
+  licenseFacts: { inserted: number; updated: number; distinctNotices: number; nullNotices: number };
+}
+
+interface DblCatalogRow extends DblBibleUpsertInput {
+  textLicenseNotice: string | null;
 }
 
 /**
- * Fetches all open-license Bibles from DBL and upserts them into `bibles`.
+ * Acquires the catalog visible to the configured DBL key without writing data.
  * Bibles without a corresponding valid language in the DB are skipped.
  *
  * Note: `syncLanguagesFromDbl` should generally be called BEFORE this
  * to ensure the languages table is fully populated.
  */
-export async function syncBiblesFromDbl(
-  client: DblClient = dblClient
-): Promise<Result<DblBibleSyncSummary>> {
-  const biblesResult = await client.getBibles();
+export async function acquireDblBibleCatalog(client: DblClient = dblClient) {
+  const biblesResult = await client.getBibles({ includeFullDetails: true });
   if (!biblesResult.ok) return biblesResult;
   const allBibles = biblesResult.data;
 
-  const languagesResult = await languagesRepository.getAll();
+  const [languagesResult, existingResult] = await Promise.all([
+    languagesRepository.getAll(),
+    biblesRepository.getAll(),
+  ]);
   if (!languagesResult.ok) return languagesResult;
+  if (!existingResult.ok) return existingResult;
 
   const langCodeToId = new Map<string, number>();
   for (const lang of languagesResult.data) {
@@ -40,7 +49,7 @@ export async function syncBiblesFromDbl(
     }
   }
 
-  const rows: DblBibleUpsertInput[] = [];
+  const rows: DblCatalogRow[] = [];
   const seenAbbreviations = new Set<string>();
   const seenNames = new Set<string>();
   let skippedMissingLanguage = 0;
@@ -48,9 +57,6 @@ export async function syncBiblesFromDbl(
   // Pre-populate with existing DB bibles to prevent collisions with seed/existing data.
   // Also build an externalId→existing-row map so we can reuse stored abbreviations
   // for Bibles we've already synced (avoids ever-growing suffixes on re-sync).
-  const existingResult = await biblesRepository.getAll();
-  if (!existingResult.ok) return existingResult;
-
   const existingByExternalId = new Map<string, { abbreviation: string; name: string }>();
   for (const b of existingResult.data) {
     if (b.abbreviation) seenAbbreviations.add(b.abbreviation.toLowerCase());
@@ -85,6 +91,7 @@ export async function syncBiblesFromDbl(
     // to avoid regenerating collision suffixes on every re-sync.
     const existing = existingByExternalId.get(bible.id);
     const hasAudio = !!(bible.audioBibles && bible.audioBibles.length > 0);
+    const textLicenseNotice = bible.copyright?.trim() || null;
     if (existing) {
       rows.push({
         languageId,
@@ -93,6 +100,7 @@ export async function syncBiblesFromDbl(
         provider: 'dbl',
         externalId: bible.id,
         hasAudio,
+        textLicenseNotice,
       });
       continue;
     }
@@ -132,19 +140,60 @@ export async function syncBiblesFromDbl(
       provider: 'dbl',
       externalId: bible.id,
       hasAudio,
+      textLicenseNotice,
     });
   }
 
-  const upsertResult = await biblesRepository.upsertFromDbl(rows);
-  if (!upsertResult.ok) return upsertResult;
-
   return {
-    ok: true,
-    data: {
-      totalBibles: allBibles.length,
-      skippedMissingLanguage,
-      inserted: upsertResult.data.inserted,
-      updated: upsertResult.data.updated,
-    },
+    ok: true as const,
+    data: { rows, totalBibles: allBibles.length, skippedMissingLanguage },
   };
+}
+
+/** Reused acquisition is read-only; all provider facts and Bible rows commit together. */
+export async function persistDblBibleCatalog(
+  catalog: Extract<Awaited<ReturnType<typeof acquireDblBibleCatalog>>, { ok: true }>['data'],
+  initialStatus: 'unknown' | 'allowed'
+): Promise<Result<DblBibleSyncSummary>> {
+  return runInTransaction(async (tx) => {
+    const facts = await resourcesService.upsertDblTextFacts(
+      catalog.rows.map((row) => ({
+        externalId: row.externalId,
+        textLicenseNotice: row.textLicenseNotice,
+        displayName: row.name,
+      })),
+      initialStatus,
+      tx
+    );
+    if (!facts.ok) return facts;
+    const bibles = await biblesRepository.upsertFromDbl(
+      catalog.rows.map(({ textLicenseNotice: _notice, ...row }) => row),
+      tx
+    );
+    if (!bibles.ok) return bibles;
+    const notices = catalog.rows.map((row) => row.textLicenseNotice);
+    return {
+      ok: true as const,
+      data: {
+        totalBibles: catalog.totalBibles,
+        skippedMissingLanguage: catalog.skippedMissingLanguage,
+        ...bibles.data,
+        licenseFacts: {
+          ...facts.data,
+          distinctNotices: new Set(notices.filter((notice) => notice !== null)).size,
+          nullNotices: notices.filter((notice) => notice === null).length,
+        },
+      },
+    };
+  });
+}
+
+/** Ordinary sync never opts into Phase-1 optimism implicitly. Derived policy is wired in the next slice. */
+export async function syncBiblesFromDbl(
+  client: DblClient = dblClient,
+  initialStatus: 'unknown' | 'allowed' = 'unknown'
+): Promise<Result<DblBibleSyncSummary>> {
+  const catalog = await acquireDblBibleCatalog(client);
+  if (!catalog.ok) return catalog;
+  return persistDblBibleCatalog(catalog.data, initialStatus);
 }
