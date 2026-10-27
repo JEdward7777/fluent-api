@@ -60,7 +60,8 @@
     "db:consolidate:projects": "npx tsx src/db/scripts/consolidation-migration.ts",
     "lint:prune": "eslint . --prune-suppressions",
     "deadcode": "node scripts/check-dead-code.mjs",
-    "verify": "npm run precheck && npm run deadcode && ./scripts/check-docs-structure.sh && npm run build"
+    "verify": "npm run precheck && npm run deadcode && ./scripts/check-docs-structure.sh && npm run build",
+    "db:sync:dbl:license-phase-one": "npx tsx src/db/scripts/sync-dbl-catalog-license-phase-one.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1098.0",

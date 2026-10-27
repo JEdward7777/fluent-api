@@ -198,7 +198,7 @@ export interface DblBibleUpsertInput {
   hasAudio: boolean;
 }
 
-export interface DblBibleUpsertSummary {
+interface DblBibleUpsertSummary {
   inserted: number;
   updated: number;
 }
@@ -209,7 +209,8 @@ export interface DblBibleUpsertSummary {
  * the name, abbreviation, and language association if a conflict occurs.
  */
 export async function upsertFromDbl(
-  rows: DblBibleUpsertInput[]
+  rows: DblBibleUpsertInput[],
+  tx?: DbTransaction
 ): Promise<Result<DblBibleUpsertSummary>> {
   if (rows.length === 0) return ok({ inserted: 0, updated: 0 });
 
@@ -217,7 +218,7 @@ export async function upsertFromDbl(
     let inserted = 0;
     let updated = 0;
 
-    await db.transaction(async (tx) => {
+    await (tx ?? db).transaction(async (tx) => {
       for (let i = 0; i < rows.length; i += UPSERT_CHUNK_SIZE) {
         const chunk = rows.slice(i, i + UPSERT_CHUNK_SIZE);
         const written = await tx
@@ -242,6 +243,10 @@ export async function upsertFromDbl(
                   ELSE bibles.updated_at
                 END`,
             },
+            setWhere: sql`bibles.name IS DISTINCT FROM excluded.name
+              OR bibles.abbreviation IS DISTINCT FROM excluded.abbreviation
+              OR bibles.language_id IS DISTINCT FROM excluded.language_id
+              OR bibles.has_audio IS DISTINCT FROM excluded.has_audio`,
           })
           .returning({ wasInsert: sql<boolean>`(xmax = 0)` });
 

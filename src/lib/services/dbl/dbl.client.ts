@@ -324,7 +324,7 @@ export function createDblClient(config: DblClientConfig): DblClient {
           ids: params?.ids,
           'include-full-details': params?.includeFullDetails,
         },
-        dblBibleSummarySchema.array(),
+        params?.includeFullDetails ? dblBibleSchema.array() : dblBibleSummarySchema.array(),
         options
       );
     },

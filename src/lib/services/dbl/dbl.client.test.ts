@@ -83,6 +83,26 @@ describe('createDblClient', () => {
     }
   });
 
+  it('retains copyright and info only when full list details are requested', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      jsonResponse({
+        data: [{ ...bibleFixture, copyright: ' Copyright notice ', info: 'Publisher information' }],
+      })
+    );
+    const client = createDblClient(configuredConfig());
+    const full = await client.getBibles({ includeFullDetails: true });
+    expect(full).toMatchObject({
+      ok: true,
+      data: [{ copyright: ' Copyright notice ', info: 'Publisher information' }],
+    });
+    const summary = await client.getBibles();
+    expect(summary.ok).toBe(true);
+    if (summary.ok) {
+      expect(summary.data[0]).not.toHaveProperty('copyright');
+      expect(summary.data[0]).not.toHaveProperty('info');
+    }
+  });
+
   it('returns Result.ok with a parsed single Bible on GET /bibles/{bibleId}', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({ data: { ...bibleFixture, copyright: 'copyright text' } })

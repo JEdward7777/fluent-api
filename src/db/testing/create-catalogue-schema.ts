@@ -18,14 +18,15 @@ export function migrationStatements(fileName: string): string[] {
 }
 
 /** DROP/CREATE for the provider-resource → bibles watermark trigger (single source). */
-export const PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL = `
-    DROP TRIGGER IF EXISTS trg_bump_bibles_on_provider_resource_license ON bible_provider_resources;
-    CREATE TRIGGER trg_bump_bibles_on_provider_resource_license
-    AFTER INSERT OR UPDATE OF tts_license_status, license_notice, display_name, provider, external_id
-    ON bible_provider_resources
-    FOR EACH ROW
-    EXECUTE FUNCTION bump_linked_bibles_on_provider_resource_license();
-  `;
+export const PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL = migrationStatements(
+  '0044_license_notice_bridge_and_watermarks.sql'
+)
+  .filter(
+    (statement) =>
+      statement.includes('DROP TRIGGER IF EXISTS trg_bump_bibles_on_provider_resource_license') ||
+      statement.includes('CREATE TRIGGER trg_bump_bibles_on_provider_resource_license')
+  )
+  .join('\n');
 
 /** Install next_catalogue_watermark() before CREATE TABLE … DEFAULT that references it. */
 async function installNextCatalogueWatermarkFunction(client: Pick<PGlite, 'exec'>): Promise<void> {
@@ -45,7 +46,7 @@ async function seedCatalogueWatermarkSingleton(client: Pick<PGlite, 'exec'>): Pr
 
 /** bump_linked_bibles function + trigger; fires on bible_provider_resources, updates bibles. */
 async function installProviderResourceLicenseTrigger(client: Pick<PGlite, 'exec'>): Promise<void> {
-  const bump = migrationStatements('0042_provider_identity_license_watermarks.sql').find(
+  const bump = migrationStatements('0044_license_notice_bridge_and_watermarks.sql').find(
     (statement) =>
       statement.includes(
         'CREATE OR REPLACE FUNCTION bump_linked_bibles_on_provider_resource_license'
@@ -76,6 +77,14 @@ export async function createTestSchema(
   await client.exec(statements.join('\n'));
   await seedCatalogueWatermarkSingleton(client);
 
+  if ('bible_provider_resources' in tables) {
+    const bridge = migrationStatements('0044_license_notice_bridge_and_watermarks.sql').filter(
+      (statement) =>
+        statement.includes('CREATE OR REPLACE FUNCTION bridge_recording_license_notice()') ||
+        statement.includes('CREATE TRIGGER trg_bridge_recording_license_notice')
+    );
+    for (const statement of bridge) await client.exec(statement);
+  }
   if ('bibles' in tables && 'bible_provider_resources' in tables) {
     await installProviderResourceLicenseTrigger(client);
   }
