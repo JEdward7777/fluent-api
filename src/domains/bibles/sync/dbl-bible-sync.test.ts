@@ -1,178 +1,129 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Language } from '@/domains/languages/languages.types';
-import type { DblClient } from '@/lib/services/dbl/dbl.client';
-import type { DblBibleSummary } from '@/lib/services/dbl/dbl.types';
+import { makeDblTestClient } from '@/lib/services/dbl/dbl.test-fixtures';
+import { err, ErrorCode, ok } from '@/lib/types';
+import { makeBible, makeDblBible, sampleLanguages } from '@/test/utils/test-helpers';
 
-import { ErrorCode, ok } from '@/lib/types';
+import { acquireDblBibleCatalog } from './dbl-bible-sync';
 
-import type { DblBibleUpsertSummary } from '../bibles.repository';
-
-import { syncBiblesFromDbl } from './dbl-bible-sync';
-
-const { mockUpsertFromDbl, mockGetAllBibles, mockGetAllLanguages } = vi.hoisted(() => ({
-  mockUpsertFromDbl: vi.fn(),
-  mockGetAllBibles: vi.fn(),
-  mockGetAllLanguages: vi.fn(),
+const { getBibles, getLanguages } = vi.hoisted(() => ({
+  getBibles: vi.fn(),
+  getLanguages: vi.fn(),
 }));
-
-vi.mock('../bibles.repository', () => ({
-  upsertFromDbl: mockUpsertFromDbl,
-  getAll: mockGetAllBibles,
-}));
-
-vi.mock('@/domains/languages/languages.repository', () => ({
-  getAll: mockGetAllLanguages,
-}));
-
-function bible(overrides: {
-  id: string;
-  langId: string;
-  abbreviation?: string;
-  abbreviationLocal?: string;
-  audioBibles?: { id: string }[];
-}): DblBibleSummary {
-  return {
-    id: overrides.id,
-    abbreviation: overrides.abbreviation ?? overrides.id.toUpperCase(),
-    abbreviationLocal: overrides.abbreviationLocal,
-    name: `${overrides.id} Bible`,
-    nameLocal: `${overrides.id} Bible`,
-    language: {
-      id: overrides.langId,
-      name: 'Test',
-      nameLocal: 'Test',
-      script: 'Latin',
-      scriptDirection: 'LTR',
-    },
-    audioBibles: overrides.audioBibles,
-  } as DblBibleSummary;
-}
-
-function fakeClient(bibles: DblBibleSummary[]): DblClient {
-  return {
-    getBibles: vi.fn().mockResolvedValue(ok(bibles)),
-    getBible: vi.fn(),
-    getBooks: vi.fn(),
-    getBook: vi.fn(),
-    getChapters: vi.fn(),
-    getChapter: vi.fn(),
-    getVerses: vi.fn(),
-    getVerse: vi.fn(),
-    getPassage: vi.fn(),
-    getAudioChapter: vi.fn(),
-    getAudioBibleBooks: vi.fn(),
-  };
-}
+vi.mock('../bibles.repository', () => ({ getAll: getBibles }));
+vi.mock('@/domains/languages/languages.repository', () => ({ getAll: getLanguages }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUpsertFromDbl.mockResolvedValue(ok({ inserted: 0, updated: 0 } as DblBibleUpsertSummary));
-  mockGetAllBibles.mockResolvedValue(ok([]));
-  mockGetAllLanguages.mockResolvedValue(ok([{ id: 100, langCodeIso6393: 'eng' }] as Language[]));
+  getBibles.mockResolvedValue(ok([]));
+  getLanguages.mockResolvedValue(ok([{ ...sampleLanguages.english, id: 100 }]));
 });
 
-describe('syncBiblesFromDbl', () => {
-  it('propagates a client error without calling repositories', async () => {
-    const client = {
-      ...fakeClient([]),
-      getBibles: vi
-        .fn()
-        .mockResolvedValue({ ok: false, error: { code: ErrorCode.DBL_NOT_CONFIGURED } }),
-    } as unknown as DblClient;
-
-    const result = await syncBiblesFromDbl(client);
-
-    expect(result.ok).toBe(false);
-    expect(mockGetAllLanguages).not.toHaveBeenCalled();
-    expect(mockUpsertFromDbl).not.toHaveBeenCalled();
+describe('read-only DBL full catalog acquisition', () => {
+  it('propagates client failure before database reads', async () => {
+    const client = makeDblTestClient();
+    vi.mocked(client.getBibles).mockResolvedValue(err(ErrorCode.DBL_NOT_CONFIGURED));
+    expect(await acquireDblBibleCatalog(client)).toEqual(err(ErrorCode.DBL_NOT_CONFIGURED));
+    expect(getLanguages).not.toHaveBeenCalled();
+    expect(getBibles).not.toHaveBeenCalled();
   });
-
-  it('skips bibles if the language is missing from our database', async () => {
-    const client = fakeClient([bible({ id: 'spa-bible', langId: 'spa' })]); // 'spa' not in our mock DB
-
-    const result = await syncBiblesFromDbl(client);
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.data.skippedMissingLanguage).toBe(1);
-      expect(result.data.inserted).toBe(0);
+  it.each(['language', 'Bible'])(
+    'propagates %s catalog read failures without returning a partial plan',
+    async (kind) => {
+      (kind === 'language' ? getLanguages : getBibles).mockResolvedValue(
+        err(ErrorCode.INTERNAL_ERROR)
+      );
+      expect(await acquireDblBibleCatalog(makeDblTestClient())).toEqual(
+        err(ErrorCode.INTERNAL_ERROR)
+      );
     }
-    expect(mockUpsertFromDbl).toHaveBeenCalledWith([]);
-  });
-
-  it('passes all bibles with known languages through to upsert', async () => {
-    mockUpsertFromDbl.mockResolvedValue(ok({ inserted: 3, updated: 0 }));
-    const client = fakeClient([
-      bible({ id: 'b1', langId: 'eng' }),
-      bible({ id: 'b2', langId: 'eng' }),
-      bible({ id: 'b3', langId: 'eng' }),
+  );
+  it('requests full details, trims copyright independently of recording attribution and preserves null notices', async () => {
+    const client = makeDblTestClient([
+      makeDblBible({
+        id: 'b1',
+        name: 'One',
+        abbreviationLocal: 'ONE',
+        copyright: '  Notice  ',
+        info: 'promo',
+      }),
+      makeDblBible({ id: 'b2', name: 'Two', abbreviationLocal: 'TWO', copyright: ' \n ' }),
+      makeDblBible({ id: 'b3', name: 'Three', abbreviationLocal: 'THREE', copyright: undefined }),
     ]);
-
-    const result = await syncBiblesFromDbl(client);
-
+    const result = await acquireDblBibleCatalog(client);
+    expect(client.getBibles).toHaveBeenCalledWith({ includeFullDetails: true });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        totalBibles: 3,
+        skippedMissingLanguage: 0,
+        rows: [
+          { externalId: 'b1', languageId: 100, textLicenseNotice: 'Notice' },
+          { externalId: 'b2', textLicenseNotice: null },
+          { externalId: 'b3', textLicenseNotice: null },
+        ],
+      },
+    });
+    if (result.ok)
+      for (const row of result.data.rows) expect(row).not.toHaveProperty('licenseNotice');
+  });
+  it('omits resources and Bible plans for missing, invalid and unmapped languages', async () => {
+    const base = makeDblBible();
+    const client = makeDblTestClient([
+      makeDblBible({ id: 'spa', language: { ...base.language, id: 'spa' } }),
+      makeDblBible({ id: 'bad', language: { ...base.language, id: 'invalid' } }),
+    ]);
+    expect(await acquireDblBibleCatalog(client)).toMatchObject({
+      ok: true,
+      data: { totalBibles: 2, skippedMissingLanguage: 2, rows: [] },
+    });
+  });
+  it('reuses the stored DBL name/abbreviation for resource display and ignores cross-provider identity collisions', async () => {
+    getBibles.mockResolvedValue(
+      ok([
+        makeBible({ externalId: 'b1', name: 'Stored name', abbreviation: 'STORED' }),
+        makeBible({
+          id: 2,
+          provider: 'aquifer',
+          externalId: 'b2',
+          name: 'Other provider',
+          abbreviation: 'OTHER',
+        }),
+      ])
+    );
+    const result = await acquireDblBibleCatalog(
+      makeDblTestClient([
+        makeDblBible({ id: 'b1' }),
+        makeDblBible({ id: 'b2', name: 'Incoming', abbreviationLocal: 'INC' }),
+      ])
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        rows: [
+          { name: 'Stored name', abbreviation: 'STORED' },
+          { name: 'Incoming', abbreviation: 'INC' },
+        ],
+      },
+    });
+  });
+  it('bounds abbreviation collision suffixes and maps advertised audio without changing recording identity', async () => {
+    const client = makeDblTestClient([
+      makeDblBible({
+        id: 'bible-one',
+        abbreviationLocal: 'A'.repeat(55),
+        audioBibles: [{ id: 'ab1', name: 'Audio', nameLocal: 'Audio' }],
+      }),
+      makeDblBible({ id: 'bible-two', abbreviationLocal: 'A'.repeat(55), audioBibles: [] }),
+    ]);
+    const result = await acquireDblBibleCatalog(client);
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.data.totalBibles).toBe(3);
-      expect(result.data.skippedMissingLanguage).toBe(0);
+    if (!result.ok) return;
+    expect(result.data.rows[0].abbreviation).not.toBe(result.data.rows[1].abbreviation);
+    for (const row of result.data.rows) {
+      expect(row.abbreviation.length).toBeLessThanOrEqual(50);
+      expect(row).not.toHaveProperty('audioResourceId');
     }
-    expect(mockUpsertFromDbl).toHaveBeenCalledWith([
-      expect.objectContaining({ externalId: 'b1' }),
-      expect.objectContaining({ externalId: 'b2' }),
-      expect.objectContaining({ externalId: 'b3' }),
-    ]);
-  });
-
-  it('resolves abbreviation collisions without hanging when the base abbreviation is at the column width', async () => {
-    mockUpsertFromDbl.mockResolvedValue(ok({ inserted: 2, updated: 0 }));
-    const longAbbrev = 'A'.repeat(55); // exceeds the 50-char DB column width
-    const client = fakeClient([
-      bible({ id: 'bible-one', langId: 'eng', abbreviationLocal: longAbbrev }),
-      bible({ id: 'bible-two', langId: 'eng', abbreviationLocal: longAbbrev }),
-    ]);
-
-    const result = await syncBiblesFromDbl(client);
-
-    expect(result.ok).toBe(true);
-    const rows = mockUpsertFromDbl.mock.calls[0]?.[0];
-    expect(rows).toHaveLength(2);
-    const [first, second] = rows;
-    expect(first.abbreviation).not.toBe(second.abbreviation);
-    expect(first.abbreviation.length).toBeLessThanOrEqual(50);
-    expect(second.abbreviation.length).toBeLessThanOrEqual(50);
-  });
-
-  it('maps valid bibles to UpsertInput rows and calls upsertFromDbl', async () => {
-    mockUpsertFromDbl.mockResolvedValue(ok({ inserted: 2, updated: 0 }));
-    const client = fakeClient([
-      bible({ id: 'b1', langId: 'eng', abbreviationLocal: 'B1L' }),
-      bible({ id: 'b2', langId: 'eng', abbreviation: 'B2A', abbreviationLocal: undefined }),
-    ]);
-
-    const result = await syncBiblesFromDbl(client);
-
-    expect(result.ok).toBe(true);
-    expect(mockUpsertFromDbl).toHaveBeenCalledWith([
-      expect.objectContaining({ languageId: 100, externalId: 'b1', abbreviation: 'B1L' }),
-      expect.objectContaining({ languageId: 100, externalId: 'b2', abbreviation: 'B2A' }),
-    ]);
-  });
-
-  it('correctly maps hasAudio to true if audioBibles exist, false otherwise', async () => {
-    mockUpsertFromDbl.mockResolvedValue(ok({ inserted: 2, updated: 0 }));
-    const client = fakeClient([
-      bible({ id: 'b1', langId: 'eng', audioBibles: [{ id: 'ab1' }] }),
-      bible({ id: 'b2', langId: 'eng', audioBibles: [] }),
-      bible({ id: 'b3', langId: 'eng' }), // audioBibles undefined
-    ]);
-
-    const result = await syncBiblesFromDbl(client);
-
-    expect(result.ok).toBe(true);
-    expect(mockUpsertFromDbl).toHaveBeenCalledWith([
-      expect.objectContaining({ externalId: 'b1', hasAudio: true }),
-      expect.objectContaining({ externalId: 'b2', hasAudio: false }),
-      expect.objectContaining({ externalId: 'b3', hasAudio: false }),
-    ]);
+    expect(result.data.rows.map((row) => row.hasAudio)).toEqual([true, false]);
   });
 });
