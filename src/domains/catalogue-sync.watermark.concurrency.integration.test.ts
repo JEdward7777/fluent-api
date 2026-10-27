@@ -7,6 +7,7 @@ import {
   migrationStatements,
   PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL,
 } from '@/db/testing/create-catalogue-schema';
+import { registerResourceLinkCases } from '@/db/testing/resource-link.postgres-cases';
 
 /**
  * Multi-session PostgreSQL regressions for #404. PGlite cannot exercise
@@ -199,6 +200,7 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
     for (const name of [
       '0044_license_facts_expand.sql',
       '0045_license_notice_bridge_and_watermarks.sql',
+      '0045_provider_resource_link_expand.sql',
     ]) {
       for (const statement of migrationStatements(name)) await sql.unsafe(statement);
     }
@@ -348,4 +350,5 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
     }
   });
   registerLicenseReleaseCases(sql, () => legacy);
+  registerResourceLinkCases(sql);
 });

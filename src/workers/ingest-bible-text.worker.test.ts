@@ -62,7 +62,10 @@ describe('dblIngestTextWorker', () => {
     async (provider) => {
       const { boss, work } = fakeBoss();
       await registerDblIngestTextWorker(boss);
-      vi.mocked(db.query.bibles.findFirst).mockResolvedValue(makeBible({ provider }));
+      vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
+        ...makeBible({ provider }),
+        textResourceId: null,
+      });
       const handler = work.mock.calls[0][2];
       await expect(handler([jobResult({ bibleId: 1, bookCodes: ['GEN'] })])).rejects.toThrow(
         'Unsupported text ingestion provider'
