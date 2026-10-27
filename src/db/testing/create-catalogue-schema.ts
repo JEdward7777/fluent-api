@@ -45,8 +45,11 @@ async function seedCatalogueWatermarkSingleton(client: Pick<PGlite, 'exec'>): Pr
 
 /** bump_linked_bibles function + trigger; fires on bible_provider_resources, updates bibles. */
 async function installProviderResourceLicenseTrigger(client: Pick<PGlite, 'exec'>): Promise<void> {
-  const bump = migrationStatements('0038_catalogue_watermark_allocator.sql').find((statement) =>
-    statement.includes('CREATE OR REPLACE FUNCTION bump_linked_bibles_on_provider_resource_license')
+  const bump = migrationStatements('0042_provider_identity_license_watermarks.sql').find(
+    (statement) =>
+      statement.includes(
+        'CREATE OR REPLACE FUNCTION bump_linked_bibles_on_provider_resource_license'
+      )
   );
   if (!bump) throw new Error('Catalogue license-bump trigger migration is missing');
   await client.exec(bump);

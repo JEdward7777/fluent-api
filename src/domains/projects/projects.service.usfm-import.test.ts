@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { db } from '@/db';
+import * as biblesService from '@/domains/bibles/bibles.service';
 import { createChapterAssignmentForProjectUnit } from '@/domains/chapter-assignments/chapter-assignments.service';
 import { logger } from '@/lib/logger';
 import { getQueue } from '@/lib/queue';
 import { err, ErrorCode, ok } from '@/lib/types';
+import { makeBible } from '@/test/utils/test-helpers';
 
 import * as repo from './projects.repository';
 import { createProject } from './projects.service';
@@ -31,6 +33,8 @@ vi.mock('@/db', () => {
     },
   };
 });
+
+vi.mock('@/domains/bibles/bibles.service', () => ({ getBibleRecordById: vi.fn() }));
 
 vi.mock('@/lib/queue', () => ({
   getQueue: vi.fn(),
@@ -95,6 +99,7 @@ const BASE = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(biblesService.getBibleRecordById).mockResolvedValue(ok(makeBible()));
   vi.mocked(db.transaction).mockImplementation(async (cb) => cb(mockTx as never));
   vi.mocked(repo.getValidBookIdsForBible).mockResolvedValue([1, 40, 99]);
   vi.mocked(repo.getBookDisplayNames).mockResolvedValue(['Genesis', 'Matthew']);
@@ -109,6 +114,40 @@ beforeEach(() => {
 });
 
 describe('createProject from USFM files (#419)', () => {
+  it.each(['aquifer', 'youversion'] as const)(
+    'does not queue missing %s source text for a blank project',
+    async (provider) => {
+      vi.mocked(biblesService.getBibleRecordById).mockResolvedValue(ok(makeBible({ provider })));
+      vi.mocked(db.query.books.findMany).mockResolvedValueOnce([
+        { id: 99, code: 'GEN', eng_display_name: 'Genesis', createdAt: null, updatedAt: null },
+      ]);
+      const result = await createProject(BASE);
+      expect(result.ok).toBe(true);
+      expect(getQueue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Unsupported text ingestion provider; no DBL job queued',
+          context: { bibleId: 3, provider },
+        })
+      );
+    }
+  );
+
+  it.each(['aquifer', 'youversion'] as const)(
+    'aborts an import needing unsupported %s ingestion',
+    async (provider) => {
+      vi.mocked(biblesService.getBibleRecordById).mockResolvedValue(ok(makeBible({ provider })));
+      vi.mocked(db.query.books.findMany).mockResolvedValueOnce([
+        { id: 1, code: 'GEN', eng_display_name: 'Genesis', createdAt: null, updatedAt: null },
+      ]);
+      expect(await createProject({ ...BASE, usfmFiles: FILES })).toEqual(
+        err(ErrorCode.UNSUPPORTED_BIBLE_PROVIDER)
+      );
+      expect(getQueue).not.toHaveBeenCalled();
+      expect(usfmImportService.materializePendingUsfmImports).not.toHaveBeenCalled();
+    }
+  );
+
   it('queues imported books until source ingestion is explicitly complete', async () => {
     vi.mocked(db.query.books.findMany).mockResolvedValueOnce([
       { id: 1, code: 'GEN' },
@@ -244,7 +283,9 @@ describe('createProject from USFM files (#419)', () => {
   });
 
   it('still creates a blank project when the ingestion job cannot be queued', async () => {
-    vi.mocked(db.query.books.findMany).mockResolvedValueOnce([{ id: 1, code: 'GEN' }] as never);
+    vi.mocked(db.query.books.findMany).mockResolvedValueOnce([
+      { id: 1, code: 'GEN', eng_display_name: 'Genesis', createdAt: null, updatedAt: null },
+    ]);
     vi.mocked(getQueue).mockResolvedValue({
       send: vi.fn().mockRejectedValue(new Error('queue unavailable')),
     } as never);

@@ -4,6 +4,8 @@ import type { Db, Job, QueueResult } from 'pg-boss';
 import { PgBoss } from 'pg-boss';
 import { vi } from 'vitest';
 
+import type { Bible } from '@/domains/bibles/bibles.types';
+
 import { ErrorCode } from '@/lib/types';
 
 /**
@@ -340,5 +342,22 @@ export function fakeBoss() {
     getDb,
     executeSql,
     work,
+  };
+}
+
+/** Complete legacy Bible fixture; override identity explicitly for provider dispatch tests. */
+export function makeBible(overrides: Partial<Bible> = {}): Bible {
+  return {
+    id: 1,
+    languageId: 1,
+    name: 'Test Bible',
+    abbreviation: 'TEST',
+    provider: 'dbl',
+    externalId: 'text-1',
+    hasAudio: false,
+    audioResourceId: null,
+    createdAt: null,
+    updatedAt: null,
+    ...overrides,
   };
 }

@@ -116,7 +116,7 @@
   },
   "src/domains/bibles/bible-audio/bible-audio.service.test.ts": {
     "ts/no-explicit-any": {
-      "count": 16
+      "count": 12
     }
   },
   "src/domains/bibles/bible-audio/bible-audio.service.ts": {

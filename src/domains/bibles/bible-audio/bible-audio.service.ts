@@ -14,13 +14,21 @@ export async function getSourceAudio(
   bookId: number,
   chapterNumber: number
 ): Promise<Result<BibleAudioResponse[]>> {
-  // 1. Resolve internal Bible ID to get the DBL externalId
+  // 1. Resolve the provider before using an external identity with DBL.
   const bibleResult = await biblesRepo.getById(bibleId);
   if (!bibleResult.ok) return bibleResult;
   const bible = bibleResult.data;
 
   if (!bible.externalId) {
     return ok([]);
+  }
+
+  if (bible.provider !== 'dbl') {
+    logger.warn({
+      message: 'Unsupported Bible audio provider',
+      context: { bibleId, provider: bible.provider },
+    });
+    return err(ErrorCode.UNSUPPORTED_BIBLE_PROVIDER);
   }
 
   // 2. Resolve internal Book ID to get the USFM code (e.g. 'GEN')

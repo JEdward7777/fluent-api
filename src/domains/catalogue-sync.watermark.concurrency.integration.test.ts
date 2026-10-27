@@ -132,6 +132,12 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
     for (const statement of migrationStatements('0038_catalogue_watermark_allocator.sql')) {
       await sql.unsafe(statement);
     }
+    for (const statement of migrationStatements('0041_provider_aware_legacy_bibles.sql')) {
+      await sql.unsafe(statement);
+    }
+    for (const statement of migrationStatements('0042_provider_identity_license_watermarks.sql')) {
+      await sql.unsafe(statement);
+    }
     await sql.unsafe(PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL);
   }, 60_000);
 

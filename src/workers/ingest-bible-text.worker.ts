@@ -49,6 +49,11 @@ export async function registerDblIngestTextWorker(boss: PgBoss, metricsHooks?: W
       if (!bible || !bible.externalId) {
         throw new Error(`Bible not found or missing externalId for bibleId: ${bibleId}`);
       }
+      if (bible.provider !== 'dbl') {
+        throw new Error(
+          `Unsupported text ingestion provider: ${bible.provider} for bibleId: ${bibleId}`
+        );
+      }
       const externalId = bible.externalId;
 
       for (const code of bookCodes) {

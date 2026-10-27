@@ -46,6 +46,138 @@ describe('catalogue sync watermarks (PGlite)', () => {
   });
 
   describe('provider-resource license trigger (DB boundary)', () => {
+    it.each(schema.bibleProviderEnum.enumValues)(
+      'matches %s text identity, old identity, no-op and rollback',
+      async (provider) => {
+        const [language] = await database
+          .insert(schema.languages)
+          .values({ langName: 'English' })
+          .returning();
+        const [bible, sibling] = await database
+          .insert(schema.bibles)
+          .values([
+            {
+              languageId: language.id,
+              name: 'Target',
+              abbreviation: 'TGT',
+              provider,
+              externalId: 'same',
+            },
+            {
+              languageId: language.id,
+              name: 'Sibling',
+              abbreviation: 'SIB',
+              provider: provider === 'dbl' ? 'aquifer' : 'dbl',
+              externalId: 'same',
+            },
+          ])
+          .returning();
+        const [resource] = await database
+          .insert(schema.bible_provider_resources)
+          .values({ provider, externalId: 'same', ttsLicenseStatus: 'allowed' })
+          .returning();
+        const read = async () =>
+          (await database.select().from(schema.bibles).where(eq(schema.bibles.id, bible.id)))[0];
+        const inserted = await read();
+        expect(inserted.updatedAt!.getTime()).toBeGreaterThan(bible.updatedAt!.getTime());
+        expect(
+          (await database.select().from(schema.bibles).where(eq(schema.bibles.id, sibling.id)))[0]
+            .updatedAt
+        ).toEqual(sibling.updatedAt);
+        const [allocator] = await database.select().from(schema.catalogue_watermark);
+        await database
+          .update(schema.bible_provider_resources)
+          .set({ ttsLicenseStatus: 'allowed' })
+          .where(eq(schema.bible_provider_resources.id, resource.id));
+        expect((await read()).updatedAt).toEqual(inserted.updatedAt);
+        expect((await database.select().from(schema.catalogue_watermark))[0].updatedAt).toEqual(
+          allocator.updatedAt
+        );
+        await expect(
+          database.transaction(async (tx) => {
+            await tx
+              .update(schema.bible_provider_resources)
+              .set({ ttsLicenseStatus: 'forbidden' })
+              .where(eq(schema.bible_provider_resources.id, resource.id));
+            throw new Error('rollback');
+          })
+        ).rejects.toThrow('rollback');
+        expect((await read()).updatedAt).toEqual(inserted.updatedAt);
+        expect((await database.select().from(schema.catalogue_watermark))[0].updatedAt).toEqual(
+          allocator.updatedAt
+        );
+        await database
+          .update(schema.bible_provider_resources)
+          .set({ externalId: 'moved' })
+          .where(eq(schema.bible_provider_resources.id, resource.id));
+        const moved = await read();
+        expect(moved.updatedAt!.getTime()).toBeGreaterThan(inserted.updatedAt!.getTime());
+        await database
+          .update(schema.bible_provider_resources)
+          .set({ ttsLicenseStatus: 'forbidden' })
+          .where(eq(schema.bible_provider_resources.id, resource.id));
+        expect((await read()).updatedAt).toEqual(moved.updatedAt);
+        const nextProvider = provider === 'youversion' ? 'dbl' : 'youversion';
+        const oldAndNew = await database
+          .insert(schema.bibles)
+          .values([
+            {
+              languageId: language.id,
+              name: 'Old identity',
+              abbreviation: 'OLDID',
+              provider,
+              externalId: 'moved',
+            },
+            {
+              languageId: language.id,
+              name: 'New identity',
+              abbreviation: 'NEWID',
+              provider: nextProvider,
+              externalId: 'moved',
+            },
+          ])
+          .returning();
+        await database
+          .update(schema.bible_provider_resources)
+          .set({ provider: nextProvider })
+          .where(eq(schema.bible_provider_resources.id, resource.id));
+        const afterProviderMove = await database.select().from(schema.bibles);
+        for (const before of oldAndNew) {
+          expect(
+            afterProviderMove.find((row) => row.id === before.id)!.updatedAt!.getTime()
+          ).toBeGreaterThan(before.updatedAt!.getTime());
+        }
+      }
+    );
+
+    it.each(schema.bibleProviderEnum.enumValues)(
+      'persists canonical %s identity through generic create and update',
+      async (provider) => {
+        const [language] = await database
+          .insert(schema.languages)
+          .values({ langName: 'English' })
+          .returning();
+        const created = await biblesRepo.create({
+          languageId: language.id,
+          name: 'Created',
+          abbreviation: 'CRT',
+          provider,
+          externalId: '1',
+        });
+        expect(created).toMatchObject({
+          ok: true,
+          data: { provider, externalId: '1', hasAudio: false },
+        });
+        if (!created.ok) return;
+        const updated = await biblesRepo.update(created.data.id, { provider, externalId: '2' });
+        expect(updated).toMatchObject({
+          ok: true,
+          data: { provider, externalId: '2', hasAudio: false },
+        });
+        expect(await database.select().from(schema.bible_provider_resources)).toEqual([]);
+      }
+    );
+
     it('bumps text-linked bibles on real license INSERT', async () => {
       const [language] = await database
         .insert(schema.languages)

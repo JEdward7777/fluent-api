@@ -91,6 +91,7 @@ export const ErrorCode = {
   USFM_BOOK_EXISTS: 'USFM_BOOK_EXISTS',
   USFM_BOOK_NOT_IN_SOURCE: 'USFM_BOOK_NOT_IN_SOURCE',
   UNSUPPORTED_AUDIO_TYPE: 'UNSUPPORTED_AUDIO_TYPE',
+  UNSUPPORTED_BIBLE_PROVIDER: 'UNSUPPORTED_BIBLE_PROVIDER',
   EMPTY_AUDIO_FILE: 'EMPTY_AUDIO_FILE',
   // External service errors
   AUTH_ERROR: 'AUTH_ERROR',
@@ -138,6 +139,7 @@ export const ErrorMessages: Record<ErrorCode, string> = {
   VERSE_AUDIO_VERSION_CONFLICT:
     'Verse audio changed concurrently; use currentVersionToken from this response as baseVersionToken and retry',
   UNSUPPORTED_AUDIO_TYPE: 'Unsupported audio content type',
+  UNSUPPORTED_BIBLE_PROVIDER: 'This operation is unsupported for the Bible provider',
   VERSE_AUDIO_NOT_IN_CONFLICT:
     "Verse audio is not in conflict; resolve is a no-op unless conflictStatus is 'conflict'",
   EMPTY_AUDIO_FILE: 'Audio file is empty',
@@ -232,6 +234,7 @@ export const ErrorHttpStatus: Record<ErrorCode, number> = {
   VERSE_AUDIO_VERSION_CONFLICT: 409,
   VERSE_AUDIO_NOT_IN_CONFLICT: 400,
   UNSUPPORTED_AUDIO_TYPE: 400,
+  UNSUPPORTED_BIBLE_PROVIDER: 400,
   EMPTY_AUDIO_FILE: 400,
   // Workflow stage errors
   WORKFLOW_STAGE_NOT_FOUND: 404,

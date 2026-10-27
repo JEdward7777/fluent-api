@@ -4,7 +4,7 @@ import type { Bible } from '@/domains/bibles/bibles.types';
 
 import * as biblesRepo from '@/domains/bibles/bibles.repository';
 import { getBibles, getBibleText } from '@/lib/services/aquifer/aquifer.client';
-import { ok } from '@/lib/types';
+import { err, ErrorCode, ok } from '@/lib/types';
 
 import { getSourceAudioManifest } from './source-audio.service';
 
@@ -50,6 +50,24 @@ describe('getSourceAudioManifest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(biblesRepo.getById).mockResolvedValue(ok(fluentBible));
+  });
+
+  it('rejects YouVersion without querying Aquifer', async () => {
+    vi.mocked(biblesRepo.getById).mockResolvedValue(
+      ok({ ...fluentBible, provider: 'youversion', externalId: '1' })
+    );
+    expect(
+      await getSourceAudioManifest({
+        projectId: 10,
+        languageCode: 'eng',
+        fluentBibleId: 1,
+        bookCode: 'MRK',
+        startChapter: 14,
+        endChapter: 14,
+      })
+    ).toEqual(err(ErrorCode.UNSUPPORTED_BIBLE_PROVIDER));
+    expect(getBibles).not.toHaveBeenCalled();
+    expect(getBibleText).not.toHaveBeenCalled();
   });
 
   it('returns empty items when no Aquifer bible matches', async () => {

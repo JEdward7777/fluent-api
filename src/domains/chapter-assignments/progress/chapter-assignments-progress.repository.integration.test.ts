@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '@/db/schema';
@@ -174,6 +175,42 @@ describe('chapter-assignments-progress repository (PGlite integration)', () => {
   afterAll(async () => {
     await client.close();
   });
+
+  it.each(schema.bibleProviderEnum.enumValues)(
+    'joins %s text policy by provider and external ID',
+    async (provider) => {
+      const externalId = `parity-${provider}`;
+      const [resource] = await database
+        .insert(schema.bible_provider_resources)
+        .values({ provider, externalId, ttsLicenseStatus: 'forbidden' })
+        .returning();
+      await database
+        .update(schema.bibles)
+        .set({ provider, externalId })
+        .where(eq(schema.bibles.id, bibleId));
+      try {
+        const result = await progressRepo.findAssignmentsProgress({ projectId });
+        expect(result).toMatchObject({
+          ok: true,
+          data: [
+            {
+              ttsLicenseStatus: 'forbidden',
+              textBibleKey: `${provider === 'aquifer' ? 'aq' : provider === 'youversion' ? 'yv' : 'dbl'}-${externalId}`,
+              selectedRecordingKey: 'aq-res-rec-1',
+            },
+          ],
+        });
+      } finally {
+        await database
+          .update(schema.bibles)
+          .set({ provider: 'dbl', externalId: 'opaque-text-ID' })
+          .where(eq(schema.bibles.id, bibleId));
+        await database
+          .delete(schema.bible_provider_resources)
+          .where(eq(schema.bible_provider_resources.id, resource.id));
+      }
+    }
+  );
 
   it('surfaces assignment progress, counts, keys, and hasConflict from real PostgreSQL', async () => {
     const result = await progressRepo.findAssignmentsProgress({ projectId });

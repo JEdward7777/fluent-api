@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { db } from '@/db';
+import * as biblesService from '@/domains/bibles/bibles.service';
 import * as chapterAssignmentsService from '@/domains/chapter-assignments/chapter-assignments.service';
+import { logger } from '@/lib/logger';
+import { getQueue } from '@/lib/queue';
 import { err, ErrorCode, ok } from '@/lib/types';
+import { makeBible } from '@/test/utils/test-helpers';
 
 import * as repo from './milestones.repository';
 import {
@@ -21,6 +25,8 @@ vi.mock('@/db', () => ({
     transaction: vi.fn(),
   },
 }));
+
+vi.mock('@/domains/bibles/bibles.service', () => ({ getBibleRecordById: vi.fn() }));
 
 vi.mock('@/lib/queue', () => ({
   getQueue: vi.fn(),
@@ -66,6 +72,7 @@ vi.mock('@/lib/logger', () => ({
 describe('milestones service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(biblesService.getBibleRecordById).mockResolvedValue(ok(makeBible()));
     vi.mocked(db.transaction).mockImplementation(async (cb) => cb(mockTx as any));
   });
 
@@ -245,4 +252,91 @@ describe('milestones service', () => {
       expect(result).toEqual(ok(undefined));
     });
   });
+});
+
+describe('milestone ingestion provider dispatch', () => {
+  const row = {
+    id: 200,
+    projectId: 100,
+    name: 'Milestone',
+    status: 'not_started' as const,
+    type: 'text' as const,
+    connectivityProfile: null,
+    createdAt: null,
+    updatedAt: null,
+  };
+  const enriched = {
+    ...row,
+    projectName: 'Project',
+    milestoneCount: 1,
+    bookCount: 1,
+    bookIds: [1],
+    chapterStatusCounts: {},
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.transaction).mockImplementation(async (cb) => cb(mockTx as never));
+    vi.mocked(repo.getValidBookIdsForBible).mockResolvedValue([1]);
+    vi.mocked(repo.insertMilestoneRecord).mockResolvedValue(row);
+    vi.mocked(repo.getExistingBookAssignmentsForProject).mockResolvedValue([]);
+    vi.mocked(repo.getByIdForProject).mockResolvedValue(enriched);
+    vi.mocked(repo.getBooksByIds).mockResolvedValue([{ id: 1, code: 'GEN' }]);
+    vi.mocked(chapterAssignmentsService.createChapterAssignmentForProjectUnit).mockResolvedValue(
+      ok([])
+    );
+  });
+
+  it.each(['create', 'update'] as const)(
+    '%s propagates identity lookup errors before any transaction',
+    async (operation) => {
+      vi.mocked(biblesService.getBibleRecordById).mockResolvedValue(err(ErrorCode.INTERNAL_ERROR));
+      const result =
+        operation === 'create'
+          ? await createMilestone(100, 1, {
+              name: 'Milestone',
+              type: 'text',
+              status: 'not_started',
+              bookIds: [1],
+            })
+          : await updateMilestone(100, 200, { addBooks: [1] }, 1);
+      expect(result).toEqual(err(ErrorCode.INTERNAL_ERROR));
+      expect(db.transaction).not.toHaveBeenCalled();
+      expect(getQueue).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['aquifer', 'youversion', 'dbl'] as const)(
+    'guards both create and update dispatch for %s',
+    async (provider) => {
+      vi.mocked(biblesService.getBibleRecordById).mockResolvedValue(ok(makeBible({ provider })));
+      const send = vi.fn();
+      const { boss } = (await import('@/test/utils/test-helpers')).fakeBoss();
+      vi.spyOn(boss, 'send').mockImplementation(send);
+      vi.mocked(getQueue).mockResolvedValue(boss);
+      expect(
+        (
+          await createMilestone(100, 1, {
+            name: 'Milestone',
+            type: 'text',
+            status: 'not_started',
+            bookIds: [1],
+          })
+        ).ok
+      ).toBe(true);
+      expect((await updateMilestone(100, 200, { addBooks: [1] }, 1)).ok).toBe(true);
+      if (provider === 'dbl') {
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(send).toHaveBeenCalledWith(
+          'dbl-ingest-text-priority',
+          expect.objectContaining({ bibleId: 1, bookCodes: ['GEN'] }),
+          { priority: 10 }
+        );
+      } else {
+        expect(getQueue).not.toHaveBeenCalled();
+        expect(send).not.toHaveBeenCalled();
+        expect(logger.warn).toHaveBeenCalledTimes(2);
+      }
+    }
+  );
 });
