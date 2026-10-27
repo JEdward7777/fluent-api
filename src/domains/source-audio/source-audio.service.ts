@@ -18,7 +18,7 @@ import {
   parseDblVerseNumber,
   warnIfAllDblTimecodesDropped,
 } from '@/lib/services/dbl/dbl.timecodes';
-import { ErrorCode, ok } from '@/lib/types';
+import { err, ErrorCode, ok } from '@/lib/types';
 
 import type {
   SourceAudioItem,
@@ -67,7 +67,10 @@ export function matchAquiferBible(
   fluentBible: Bible,
   candidates: AquiferBible[]
 ): AquiferBible | undefined {
-  if (candidates.length === 0) return undefined;
+  if (fluentBible.provider === 'youversion' || candidates.length === 0) return undefined;
+  if (fluentBible.provider === 'aquifer' && fluentBible.externalId) {
+    return candidates.find((candidate) => String(candidate.id) === fluentBible.externalId);
+  }
 
   const abbrev = normalizeToken(fluentBible.abbreviation);
   const name = normalizeToken(fluentBible.name);
@@ -280,7 +283,8 @@ async function getDblChapterSourceAudio(
 
 /**
  * Chapter-level source/reference audio for drafting. Prefers DBL when the Fluent
- * bible is linked; falls back to Aquifer when DBL has no tracks or DBL is down.
+ * bible has a DBL identity; falls back to Aquifer when DBL has no tracks or is down.
+ * Aquifer and unlinked seed Bibles use Aquifer directly; YouVersion is unsupported.
  * Empty `items` when neither has audio (including unmatched Aquifer catalogues).
  */
 export async function getChapterSourceAudio(
@@ -288,6 +292,17 @@ export async function getChapterSourceAudio(
 ): Promise<Result<SourceAudioResponse>> {
   const fluentBibleResult = await biblesRepo.getById(input.fluentBibleId);
   if (!fluentBibleResult.ok) return fluentBibleResult;
+
+  if (fluentBibleResult.data.provider === 'youversion') {
+    logger.warn({
+      message: 'Unsupported source audio provider',
+      context: { fluentBibleId: input.fluentBibleId, provider: 'youversion' },
+    });
+    return err(ErrorCode.UNSUPPORTED_BIBLE_PROVIDER);
+  }
+  if (fluentBibleResult.data.provider === 'aquifer' || !fluentBibleResult.data.externalId) {
+    return getAquiferChapterSourceAudio(input, fluentBibleResult.data);
+  }
 
   const dblResult = await getDblChapterSourceAudio(input, fluentBibleResult.data);
   if (dblResult.ok) {
@@ -317,6 +332,14 @@ export async function getSourceAudioManifest(
 ): Promise<Result<SourceAudioManifestResponse>> {
   const fluentBibleResult = await biblesRepo.getById(input.fluentBibleId);
   if (!fluentBibleResult.ok) return fluentBibleResult;
+
+  if (fluentBibleResult.data.provider === 'youversion') {
+    logger.warn({
+      message: 'Unsupported source audio manifest provider',
+      context: { fluentBibleId: input.fluentBibleId, provider: 'youversion' },
+    });
+    return err(ErrorCode.UNSUPPORTED_BIBLE_PROVIDER);
+  }
 
   const aquiferList = await getBibles(input.languageCode);
   if (!aquiferList.ok) return aquiferList;

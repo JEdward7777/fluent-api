@@ -237,3 +237,63 @@ describe('batched list enrichment', () => {
     expect(await getAllBibles()).toEqual(err(ErrorCode.INTERNAL_ERROR));
   });
 });
+
+describe('provider-aware legacy Bible writes', () => {
+  it('preserves the null-identity seed response without claiming a text resource', async () => {
+    vi.mocked(repo.getById).mockResolvedValue(
+      ok({ ...bible, externalId: null, audioResourceId: null })
+    );
+    expect(await getBibleById(1)).toMatchObject({
+      ok: true,
+      data: {
+        provider: 'dbl',
+        hasAudio: false,
+        textBibleKey: null,
+        selectedRecordingKey: null,
+        ttsLicenseStatus: 'unknown',
+      },
+    });
+    expect(resources.getByProviderIdentity).not.toHaveBeenCalled();
+    expect(resources.getById).not.toHaveBeenCalled();
+  });
+
+  it.each(['dbl', 'aquifer', 'youversion'] as const)(
+    'preserves %s response identity and columns',
+    async (provider) => {
+      const row = { ...bible, provider, audioResourceId: null };
+      vi.mocked(repo.create).mockResolvedValue(ok(row));
+      vi.mocked(repo.update).mockResolvedValue(ok(row));
+      const input = {
+        name: row.name,
+        abbreviation: row.abbreviation,
+        languageId: row.languageId,
+        provider,
+        externalId: row.externalId,
+      };
+      const created = await createBible(input);
+      const updated = await updateBible(1, { provider, externalId: row.externalId });
+      expect(created).toEqual(updated);
+      expect(created).toMatchObject({
+        ok: true,
+        data: {
+          provider,
+          hasAudio: false,
+          textBibleKey: `${provider === 'aquifer' ? 'aq' : provider === 'youversion' ? 'yv' : 'dbl'}-text-id`,
+          selectedRecordingKey: null,
+          ttsLicenseStatus: 'unknown',
+        },
+      });
+      expect(repo.create).toHaveBeenCalledWith(input);
+      expect(repo.update).toHaveBeenCalledWith(1, { provider, externalId: row.externalId });
+    }
+  );
+
+  it('requires an explicit provider alongside an external ID before writing', async () => {
+    expect(
+      await createBible({ name: 'Test', abbreviation: 'TEST', languageId: 1, externalId: 'id' })
+    ).toEqual(err(ErrorCode.VALIDATION_ERROR));
+    expect(await updateBible(1, { externalId: 'id' })).toEqual(err(ErrorCode.VALIDATION_ERROR));
+    expect(repo.create).not.toHaveBeenCalled();
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+});

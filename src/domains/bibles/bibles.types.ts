@@ -1,8 +1,8 @@
 import { z } from '@hono/zod-openapi';
 
-import type { insertBiblesSchema, patchBiblesSchema, selectBiblesSchema } from '@/db/schema';
+import type { selectBiblesSchema } from '@/db/schema';
 
-import { ttsLicenseStatusEnum } from '@/db/schema';
+import { insertBiblesSchema, patchBiblesSchema, ttsLicenseStatusEnum } from '@/db/schema';
 
 export const ttsLicenseStatusSchema = z.enum(ttsLicenseStatusEnum.enumValues);
 export type TtsLicenseStatus = z.infer<typeof ttsLicenseStatusSchema>;
@@ -10,8 +10,23 @@ export type TtsLicenseStatus = z.infer<typeof ttsLicenseStatusSchema>;
 // ─── DB-derived types ─────────────────────────────────────────────
 
 export type Bible = z.infer<typeof selectBiblesSchema>;
-export type CreateBible = z.infer<typeof insertBiblesSchema>;
-export type UpdateBible = z.infer<typeof patchBiblesSchema>;
+function requireExplicitProvider(
+  data: { externalId?: string | null; provider?: string },
+  context: z.RefinementCtx
+) {
+  if (data.externalId != null && data.provider === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['provider'],
+      message: 'Provider is required with an external ID',
+    });
+  }
+}
+
+export const createBibleSchema = insertBiblesSchema.superRefine(requireExplicitProvider);
+export const updateBibleSchema = patchBiblesSchema.superRefine(requireExplicitProvider);
+export type CreateBible = z.infer<typeof createBibleSchema>;
+export type UpdateBible = z.infer<typeof updateBibleSchema>;
 
 export const bibleResponseSchema = z.object({
   id: z.number().int(),

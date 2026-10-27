@@ -295,6 +295,20 @@
       "when": 1793897939935,
       "tag": "0041_assistant_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793897939936,
+      "tag": "0042_provider_aware_legacy_bibles",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793897939937,
+      "tag": "0043_provider_identity_license_watermarks",
+      "breakpoints": true
     }
   ]
 }
