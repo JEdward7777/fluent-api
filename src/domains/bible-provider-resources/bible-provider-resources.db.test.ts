@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -136,12 +136,7 @@ describe('independent provider rows, schema and read-only authenticated lookup',
     const [text] = await db
       .select()
       .from(bible_provider_resources)
-      .where(
-        and(
-          eq(bible_provider_resources.provider, 'dbl'),
-          eq(bible_provider_resources.externalId, bible.externalId!)
-        )
-      );
+      .where(eq(bible_provider_resources.id, bible.textResourceId!));
     const [audio] = await db
       .select()
       .from(bible_provider_resources)
@@ -180,7 +175,7 @@ describe('independent provider rows, schema and read-only authenticated lookup',
       for (const row of progress.data) {
         expect(row).toMatchObject({
           ttsLicenseStatus: 'forbidden',
-          textBibleKey: `dbl-${bible.externalId}`,
+          textBibleKey: `dbl-${text.externalId}`,
           selectedRecordingKey: `dbl-${alternate.externalId}`,
           totalVerses: 36,
         });
@@ -235,7 +230,7 @@ describe('independent provider rows, schema and read-only authenticated lookup',
 
       await db
         .update(bibles)
-        .set({ audioResourceId: null, externalId: null })
+        .set({ audioResourceId: null, textResourceId: null })
         .where(eq(bibles.id, bible.id));
       const progress = await findAssignmentsProgress({ projectId });
       expect(progress.ok).toBe(true);
@@ -251,7 +246,7 @@ describe('independent provider rows, schema and read-only authenticated lookup',
         .update(bibles)
         .set({
           audioResourceId: bible.audioResourceId,
-          externalId: bible.externalId,
+          textResourceId: bible.textResourceId,
           updatedAt: bible.updatedAt,
         })
         .where(eq(bibles.id, bible.id));

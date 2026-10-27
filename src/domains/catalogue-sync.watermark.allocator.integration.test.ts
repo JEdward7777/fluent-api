@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as schema from '@/db/schema';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
+import * as schema from '@/db/testing/expanded-catalog-schema';
 import * as biblesRepo from '@/domains/bibles/bibles.repository';
 import * as booksRepo from '@/domains/books/books.repository';
 import * as languagesRepo from '@/domains/languages/languages.repository';

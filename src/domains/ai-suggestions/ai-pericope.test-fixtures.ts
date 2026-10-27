@@ -43,7 +43,6 @@ export async function setupPericopeIntegrationTest(
     bible_provider_resources: schema.bible_provider_resources,
     authUser: schema.authUser,
     authSession: schema.authSession,
-    bibleProviderEnum: schema.bibleProviderEnum,
     resourceProviderEnum: schema.resourceProviderEnum,
     ttsLicenseStatusEnum: schema.ttsLicenseStatusEnum,
     milestoneTypeEnum: schema.milestoneTypeEnum,

@@ -37,7 +37,6 @@ describe('flagClaimConflict SQL CAS (PGlite)', () => {
       languages: schema.languages,
       scriptDirectionEnum: schema.scriptDirectionEnum,
       bibles: schema.bibles,
-      bibleProviderEnum: schema.bibleProviderEnum,
       bible_provider_resources: schema.bible_provider_resources,
       resourceProviderEnum: schema.resourceProviderEnum,
       ttsLicenseStatusEnum: schema.ttsLicenseStatusEnum,
@@ -56,7 +55,6 @@ describe('flagClaimConflict SQL CAS (PGlite)', () => {
       languageId: 1,
       name: 'Test Bible',
       abbreviation: 'TST',
-      provider: 'dbl',
     });
     await database.insert(schema.users).values([
       { id: 5, username: 'claimant', email: 'claimant@example.com' },

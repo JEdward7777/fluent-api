@@ -2,9 +2,9 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { canonicalBibles } from '@/db/canonical-schema';
-import * as schema from '@/db/schema';
 import { contractCatalogFixture } from '@/db/testing/contract-catalog-fixture';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
+import * as schema from '@/db/testing/expanded-catalog-schema';
 import { VERSE_AUDIO_CONFLICT_STATUS } from '@/domains/verse-audio/verse-audio.types';
 
 import { CHAPTER_ASSIGNMENT_STATUS } from '../chapter-assignments.types';

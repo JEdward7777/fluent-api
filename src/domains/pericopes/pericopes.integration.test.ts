@@ -61,7 +61,6 @@ describe('chapter pericopes with real PostgreSQL queries', () => {
       books: schema.books,
       bibles: schema.bibles,
       bible_provider_resources: schema.bible_provider_resources,
-      bibleProviderEnum: schema.bibleProviderEnum,
       resourceProviderEnum: schema.resourceProviderEnum,
       ttsLicenseStatusEnum: schema.ttsLicenseStatusEnum,
       projects: schema.projects,
@@ -89,7 +88,6 @@ describe('chapter pericopes with real PostgreSQL queries', () => {
       languageId: 1,
       name: 'Test Bible',
       abbreviation: 'TST',
-      provider: 'dbl',
     });
     await database.insert(schema.organizations).values({ id: 1, name: 'Test organization' });
     await database.insert(schema.projects).values(

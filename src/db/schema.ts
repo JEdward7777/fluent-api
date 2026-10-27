@@ -26,7 +26,6 @@ import {
 import { createSchemaFactory } from 'drizzle-zod';
 export const userStatusEnum = pgEnum('user_status', ['invited', 'verified', 'inactive']);
 export const scriptDirectionEnum = pgEnum('script_direction', ['ltr', 'rtl']);
-export const bibleProviderEnum = pgEnum('bible_provider', ['dbl', 'aquifer', 'youversion']);
 // Publication license, global to the Bible (not a tenant/user grant). TTS_USE is the RBAC axis.
 export const ttsLicenseStatusEnum = pgEnum('tts_license_status', [
   'allowed',
@@ -212,8 +211,6 @@ export const bible_provider_resources = pgTable(
     provider: resourceProviderEnum('provider').notNull(),
     externalId: varchar('external_id', { length: 255 }).notNull(),
     ttsLicenseStatus: ttsLicenseStatusEnum('tts_license_status').notNull().default('unknown'),
-    // Compatibility column retained only for old binaries and the database bridge.
-    legacyLicenseNotice: text('license_notice'),
     licenseNotice: text('recording_license_notice'),
     textLicenseNotice: text('text_license_notice'),
     hasAudio: boolean('has_audio').notNull().default(false),
@@ -246,10 +243,6 @@ export const bibles = pgTable(
       .references(() => languages.id),
     name: varchar('name', { length: 255 }).notNull().unique(),
     abbreviation: varchar('abbreviation', { length: 50 }).notNull().unique(),
-    // Legacy compatibility columns remain authoritative to release-1 binaries.
-    provider: bibleProviderEnum('provider').notNull().default('dbl'),
-    externalId: varchar('external_id', { length: 255 }),
-    hasAudio: boolean('has_audio').notNull().default(false),
     textResourceId: integer('text_resource_id').references(() => bible_provider_resources.id, {
       onDelete: 'restrict',
     }),
@@ -265,11 +258,6 @@ export const bibles = pgTable(
     uniqueIndex('idx_bibles_text_resource_id')
       .on(table.textResourceId)
       .where(sql`${table.textResourceId} IS NOT NULL`),
-    // Provider identity: a given provider + externalId pair maps to exactly one row.
-    // Partial: only rows with a non-null externalId are covered (seed data has none).
-    uniqueIndex('idx_bibles_provider_external_id')
-      .on(table.provider, table.externalId)
-      .where(sql`${table.externalId} IS NOT NULL`),
   ]
 );
 

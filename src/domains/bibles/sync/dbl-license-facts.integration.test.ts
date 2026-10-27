@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as schema from '@/db/schema';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
+import * as schema from '@/db/testing/expanded-catalog-schema';
 import * as resources from '@/domains/bible-provider-resources/bible-provider-resources.service';
 import { getBibleById } from '@/domains/bibles/bibles.service';
 import { makeDblTestClient } from '@/lib/services/dbl/dbl.test-fixtures';

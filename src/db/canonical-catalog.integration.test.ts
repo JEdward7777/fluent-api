@@ -4,13 +4,13 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { DemoCtx } from '@/db/seeds/demo/context';
 
 import { canonicalBibles, canonicalResources } from '@/db/canonical-schema';
-import * as schema from '@/db/schema';
 import { seedBsbBibleTexts } from '@/db/seeds/bible-texts-bsb';
 import { seedBibles } from '@/db/seeds/bibles';
 import { seedSpecBibles } from '@/db/seeds/demo/bibles';
 import { loadDblSeedExternalIds } from '@/db/seeds/demo/ingest';
 import { contractCatalogFixture } from '@/db/testing/contract-catalog-fixture';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
+import * as schema from '@/db/testing/expanded-catalog-schema';
 import * as classifications from '@/domains/bible-provider-resources/classification/license-classifications.repository';
 import * as bibles from '@/domains/bibles/bibles.repository';
 import { getAllBibles, getBibleById } from '@/domains/bibles/bibles.service';

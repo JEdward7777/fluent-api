@@ -4,6 +4,8 @@ import { expect, it } from 'vitest';
 
 import { seedBsbBibleTexts } from '@/db/seeds/bible-texts-bsb';
 import { seedBibles } from '@/db/seeds/bibles';
+import { runInTransaction } from '@/db/transaction';
+import * as resources from '@/domains/bible-provider-resources/bible-provider-resources.service';
 import { createLicenseDatabaseAdapter } from '@/domains/bible-provider-resources/classification/license-classifications.service';
 import {
   createBible,
@@ -26,7 +28,7 @@ export function registerCanonicalCatalogCases(sql: postgres.Sql) {
         INSERT INTO languages(lang_name,lang_code_iso_639_3) VALUES ('English seed','eng'),('Gujarati seed','guj') ON CONFLICT DO NOTHING;
         INSERT INTO books(code,eng_display_name) VALUES ('GEN','Genesis'),('EXO','Exodus'),('JHN','John') ON CONFLICT DO NOTHING;
       `);
-      } else await contractCatalogFixture({ exec: (query) => sql.unsafe(query) });
+      } else await contractCatalogFixture({ exec: (query) => sql.begin((tx) => tx.unsafe(query)) });
       await seedBibles();
       await seedBsbBibleTexts();
       expect(await getAllBibles()).toMatchObject({
@@ -121,4 +123,117 @@ export function registerCanonicalCatalogCases(sql: postgres.Sql) {
         ])
       );
     });
+  it('keeps contracted notice revisions commit-ordered, no-op stable and transactionally rolled back without compatibility helpers', async () => {
+    expect(
+      await sql`SELECT proname FROM pg_proc WHERE proname IN ('bridge_bible_text_resource','bridge_legacy_bible_audio','bridge_recording_license_notice','lock_catalog_bridge_writer')`
+    ).toEqual([]);
+    const [resource] =
+      await sql`SELECT id FROM bible_provider_resources WHERE provider='aquifer' AND external_id='1'`;
+    const read = () => sql`SELECT updated_at FROM bibles WHERE abbreviation='BSB'`;
+    const before = await read();
+    const revision = await sql`SELECT updated_at FROM catalogue_watermark`;
+    await sql`UPDATE bible_provider_resources SET recording_license_notice=recording_license_notice,text_license_notice=text_license_notice WHERE id=${resource!.id}`;
+    expect(await read()).toEqual(before);
+    expect(await sql`SELECT updated_at FROM catalogue_watermark`).toEqual(revision);
+    await expect(
+      sql.begin(async (tx) => {
+        await tx`UPDATE bible_provider_resources SET text_license_notice='rollback' WHERE id=${resource!.id}`;
+        throw new Error('rollback');
+      })
+    ).rejects.toThrow('rollback');
+    expect(await read()).toEqual(before);
+    expect(await sql`SELECT updated_at FROM catalogue_watermark`).toEqual(revision);
+    const early = await sql.reserve();
+    const later = await sql.reserve();
+    let committed = false;
+    let pending: Promise<postgres.RowList<postgres.Row[]>> | undefined;
+    try {
+      await early`BEGIN`;
+      await early`UPDATE bible_provider_resources SET recording_license_notice='contract recording',text_license_notice='contract text' WHERE id=${resource!.id}`;
+      const [changed] = await early`SELECT updated_at FROM bibles WHERE abbreviation='BSB'`;
+      const [connection] = await later`SELECT pg_backend_pid() AS pid`;
+      pending =
+        later`INSERT INTO books(code,eng_display_name) VALUES('contract-cursor','Contract cursor') RETURNING updated_at`.execute();
+      await expect
+        .poll(async () => {
+          const [state] =
+            await sql`SELECT cardinality(pg_blocking_pids(${connection!.pid})) AS count`;
+          return Number(state!.count);
+        })
+        .toBeGreaterThan(0);
+      await early`COMMIT`;
+      committed = true;
+      const [cursor] = await pending;
+      expect((cursor!.updated_at as Date).getTime()).toBeGreaterThan(
+        (changed!.updated_at as Date).getTime()
+      );
+      expect((await read())[0]!.updated_at).toEqual(changed!.updated_at);
+    } finally {
+      if (!committed) await early`ROLLBACK`;
+      await pending?.catch(() => {});
+      early.release();
+      later.release();
+    }
+  });
+  it.each(['resource', 'Bible'] as const)(
+    'serializes a real chunked DBL facts transaction against a concurrent later %s writer',
+    async (kind) => {
+      const prefix = `contract-chunk-${kind}-`;
+      await sql`INSERT INTO bible_provider_resources(provider,external_id,display_name,text_license_notice)
+      SELECT 'dbl',${prefix} || n::text,'Before','Before' FROM generate_series(0,100) n`;
+      for (const index of [0, 100]) {
+        await sql`INSERT INTO bibles(language_id,name,abbreviation,text_resource_id)
+        SELECT 1,${`${prefix}${index}`},${`${prefix}${index}`},id FROM bible_provider_resources WHERE provider='dbl' AND external_id=${`${prefix}${index}`}`;
+      }
+      const facts = Array.from({ length: 101 }, (_, index) => ({
+        externalId: `${prefix}${index}`,
+        displayName: 'After',
+        textLicenseNotice: 'After',
+        hasAudio: false,
+      }));
+      const later = await sql.reserve();
+      let pending: Promise<postgres.RowList<postgres.Row[]>> | undefined;
+      try {
+        const result = await runInTransaction(async (tx) => {
+          // Schedule at the actual 100-row chunk boundary. No artificial locks:
+          // both chunks execute the production repository through its service.
+          const first = await resources.upsertDblTextFacts(facts.slice(0, 100), 'unknown', tx);
+          if (!first.ok) return first;
+          const [connection] = await later`SELECT pg_backend_pid() AS pid`;
+          pending = (
+            kind === 'resource'
+              ? later`UPDATE bible_provider_resources SET tts_license_status='forbidden' WHERE provider='dbl' AND external_id=${`${prefix}100`} RETURNING id`
+              : later`UPDATE bibles SET name=${`${prefix}concurrent`},updated_at=next_catalogue_watermark() WHERE abbreviation=${`${prefix}100`} RETURNING id`
+          ).execute();
+          await expect
+            .poll(async () => {
+              const [state] =
+                await sql`SELECT cardinality(pg_blocking_pids(${connection!.pid})) AS count`;
+              return Number(state!.count);
+            })
+            .toBeGreaterThan(0);
+          return resources.upsertDblTextFacts(facts.slice(100), 'unknown', tx);
+        });
+        expect(result).toMatchObject({ ok: true, data: { inserted: 0, updated: 1 } });
+        await pending;
+        const rows =
+          await sql`SELECT text_license_notice,display_name,tts_license_status FROM bible_provider_resources WHERE external_id LIKE ${`${prefix}%`}`;
+        expect(rows).toHaveLength(101);
+        expect(
+          rows.every((row) => row.text_license_notice === 'After' && row.display_name === 'After')
+        ).toBe(true);
+        const [last] =
+          await sql`SELECT tts_license_status FROM bible_provider_resources WHERE external_id=${`${prefix}100`}`;
+        expect(last!.tts_license_status).toBe(kind === 'resource' ? 'forbidden' : 'unknown');
+        const revision = await sql`SELECT updated_at FROM catalogue_watermark`;
+        expect(
+          await runInTransaction((tx) => resources.upsertDblTextFacts(facts, 'unknown', tx))
+        ).toMatchObject({ ok: true, data: { inserted: 0, updated: 0 } });
+        expect(await sql`SELECT updated_at FROM catalogue_watermark`).toEqual(revision);
+      } finally {
+        await pending?.catch(() => {});
+        later.release();
+      }
+    }
+  );
 }
