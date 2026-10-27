@@ -7,6 +7,7 @@ import type { WorkerMetricsHooks } from './usfm-export.worker';
 
 import { db } from '../db';
 import { bible_books, bible_texts, project_units } from '../db/schema';
+import * as biblesService from '../domains/bibles/bibles.service';
 import * as chapterAssignmentsService from '../domains/chapter-assignments/chapter-assignments.service';
 import * as usfmImportService from '../domains/projects/usfm-import.service';
 import { ensureWorkerQueue } from '../lib/dead-letter-queues';
@@ -42,9 +43,8 @@ export async function registerDblIngestTextWorker(boss: PgBoss, metricsHooks?: W
       });
 
       // Resolve the internal Bible record to get its DBL externalId.
-      const bible = await db.query.bibles.findFirst({
-        where: (bibles, { eq }) => eq(bibles.id, bibleId),
-      });
+      const bibleResult = await biblesService.getBibleRecordById(bibleId);
+      const bible = bibleResult.ok ? bibleResult.data : undefined;
 
       if (!bible || !bible.externalId) {
         throw new Error(`Bible not found or missing externalId for bibleId: ${bibleId}`);

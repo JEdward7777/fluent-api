@@ -337,6 +337,13 @@
       "when": 1793118080512,
       "tag": "0046_provider_resource_link_bridge",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793120266964,
+      "tag": "0047_canonical_resource_watermarks",
+      "breakpoints": true
     }
   ]
 }

@@ -47,7 +47,7 @@ describe('catalogue sync watermarks (PGlite)', () => {
 
   describe('provider-resource license trigger (DB boundary)', () => {
     it.each(schema.bibleProviderEnum.enumValues)(
-      'matches %s text identity, old identity, no-op and rollback',
+      'tracks %s FK identity, no-op and rollback',
       async (provider) => {
         const [language] = await database
           .insert(schema.languages)
@@ -75,6 +75,13 @@ describe('catalogue sync watermarks (PGlite)', () => {
         const [resource] = await database
           .insert(schema.bible_provider_resources)
           .values({ provider, externalId: 'same', ttsLicenseStatus: 'allowed' })
+          .onConflictDoUpdate({
+            target: [
+              schema.bible_provider_resources.provider,
+              schema.bible_provider_resources.externalId,
+            ],
+            set: { ttsLicenseStatus: 'allowed' },
+          })
           .returning();
         const read = async () =>
           (await database.select().from(schema.bibles).where(eq(schema.bibles.id, bible.id)))[0];
@@ -116,37 +123,17 @@ describe('catalogue sync watermarks (PGlite)', () => {
           .update(schema.bible_provider_resources)
           .set({ ttsLicenseStatus: 'forbidden' })
           .where(eq(schema.bible_provider_resources.id, resource.id));
-        expect((await read()).updatedAt).toEqual(moved.updatedAt);
+        expect((await read()).updatedAt!.getTime()).toBeGreaterThan(moved.updatedAt!.getTime());
         const nextProvider = provider === 'youversion' ? 'dbl' : 'youversion';
-        const oldAndNew = await database
-          .insert(schema.bibles)
-          .values([
-            {
-              languageId: language.id,
-              name: 'Old identity',
-              abbreviation: 'OLDID',
-              provider,
-              externalId: 'moved',
-            },
-            {
-              languageId: language.id,
-              name: 'New identity',
-              abbreviation: 'NEWID',
-              provider: nextProvider,
-              externalId: 'moved',
-            },
-          ])
-          .returning();
+        const beforeProviderMove = await read();
         await database
           .update(schema.bible_provider_resources)
           .set({ provider: nextProvider })
           .where(eq(schema.bible_provider_resources.id, resource.id));
-        const afterProviderMove = await database.select().from(schema.bibles);
-        for (const before of oldAndNew) {
-          expect(
-            afterProviderMove.find((row) => row.id === before.id)!.updatedAt!.getTime()
-          ).toBeGreaterThan(before.updatedAt!.getTime());
-        }
+        expect((await read()).provider).toBe(nextProvider);
+        expect((await read()).updatedAt!.getTime()).toBeGreaterThan(
+          beforeProviderMove.updatedAt!.getTime()
+        );
       }
     );
 
@@ -157,28 +144,36 @@ describe('catalogue sync watermarks (PGlite)', () => {
           .insert(schema.languages)
           .values({ langName: 'English' })
           .returning();
+        const resources = await database
+          .insert(schema.bible_provider_resources)
+          .values([
+            { provider, externalId: '1' },
+            { provider, externalId: '2' },
+          ])
+          .returning();
         const created = await biblesRepo.create({
           languageId: language.id,
           name: 'Created',
           abbreviation: 'CRT',
-          provider,
-          externalId: '1',
+          textResourceId: resources[0].id,
         });
         expect(created).toMatchObject({
           ok: true,
           data: { provider, externalId: '1', hasAudio: false },
         });
         if (!created.ok) return;
-        const updated = await biblesRepo.update(created.data.id, { provider, externalId: '2' });
+        const updated = await biblesRepo.update(created.data.id, {
+          textResourceId: resources[1].id,
+        });
         expect(updated).toMatchObject({
           ok: true,
           data: { provider, externalId: '2', hasAudio: false },
         });
-        expect(await database.select().from(schema.bible_provider_resources)).toEqual([]);
+        expect(await database.select().from(schema.bible_provider_resources)).toHaveLength(2);
       }
     );
 
-    it('bumps text-linked bibles on real license INSERT', async () => {
+    it('bumps linked bibles when an old binary upserts real license facts', async () => {
       const [language] = await database
         .insert(schema.languages)
         .values({ langName: 'English', langCodeIso6393: 'eng' })
@@ -196,12 +191,21 @@ describe('catalogue sync watermarks (PGlite)', () => {
       const before = bible!.updatedAt!;
       await new Promise((resolve) => setTimeout(resolve, 5));
 
-      await database.insert(schema.bible_provider_resources).values({
-        provider: 'dbl',
-        externalId: 'text-insert',
-        ttsLicenseStatus: 'allowed',
-        licenseNotice: 'notice',
-      });
+      await database
+        .insert(schema.bible_provider_resources)
+        .values({
+          provider: 'dbl',
+          externalId: 'text-insert',
+          ttsLicenseStatus: 'allowed',
+          licenseNotice: 'notice',
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.bible_provider_resources.provider,
+            schema.bible_provider_resources.externalId,
+          ],
+          set: { ttsLicenseStatus: 'allowed', licenseNotice: 'notice' },
+        });
 
       const [after] = await database
         .select()
@@ -307,7 +311,7 @@ describe('catalogue sync watermarks (PGlite)', () => {
           .insert(schema.bibles)
           .values([
             { languageId: language!.id, name: 'Old', abbreviation: 'OLD', externalId: 'old-text' },
-            { languageId: language!.id, name: 'New', abbreviation: 'NEW', externalId: 'new-text' },
+            { languageId: language!.id, name: 'New', abbreviation: 'NEW' },
             {
               languageId: language!.id,
               name: 'Audio',
@@ -337,10 +341,7 @@ describe('catalogue sync watermarks (PGlite)', () => {
         const after = await database.select().from(schema.bibles);
         for (const before of linked) {
           const updated = after.find((row) => row.id === before.id)!;
-          const shouldBump =
-            before.abbreviation === 'OLD' ||
-            before.abbreviation === 'AUD' ||
-            (field === 'externalId' && before.abbreviation === 'NEW');
+          const shouldBump = before.abbreviation === 'OLD' || before.abbreviation === 'AUD';
           if (shouldBump)
             expect(updated.updatedAt!.getTime()).toBeGreaterThan(before.updatedAt!.getTime());
           else expect(updated.updatedAt).toEqual(before.updatedAt);

@@ -104,26 +104,26 @@ describe('catalogue watermark allocator paths (PGlite)', () => {
     fromAllocator(langAfter!.updatedAt!);
     expect(langAfter!.updatedAt!.getTime()).toBeGreaterThan(ormUpdated!.updatedAt!.getTime());
 
+    const [textResource] = await database
+      .insert(schema.bible_provider_resources)
+      .values({ provider: 'dbl', externalId: 'alpha-future' })
+      .returning();
     // bibles upsert conflict arm
     const bibleInsert = await biblesRepo.upsertFromDbl([
       {
         languageId: langAfter!.id,
         name: 'Alpha',
         abbreviation: 'ALP',
-        provider: 'dbl',
-        externalId: 'alpha-future',
-        hasAudio: false,
+        textResourceId: textResource.id,
       },
     ]);
     expect(bibleInsert.ok).toBe(true);
     const bibleChange = await biblesRepo.upsertFromDbl([
       {
         languageId: langAfter!.id,
-        name: 'Alpha',
+        name: 'Alpha Updated',
         abbreviation: 'ALP',
-        provider: 'dbl',
-        externalId: 'alpha-future',
-        hasAudio: true,
+        textResourceId: textResource.id,
       },
     ]);
     expect(bibleChange.ok).toBe(true);
@@ -131,7 +131,7 @@ describe('catalogue watermark allocator paths (PGlite)', () => {
       .select()
       .from(schema.bibles)
       .where(eq(schema.bibles.externalId, 'alpha-future'));
-    expect(bibleAfter!.hasAudio).toBe(true);
+    expect(bibleAfter!.hasAudio).toBe(false);
     fromAllocator(bibleAfter!.updatedAt!);
     expect(bibleAfter!.updatedAt!.getTime()).toBeGreaterThan(langAfter!.updatedAt!.getTime());
 
@@ -230,6 +230,10 @@ describe('catalogue watermark allocator paths (PGlite)', () => {
   });
 
   it('bibles upsert stamps updatedAt only when a tracked column changes', async () => {
+    const [textResource] = await database
+      .insert(schema.bible_provider_resources)
+      .values({ provider: 'dbl', externalId: 'alpha-1' })
+      .returning();
     const [language] = await database
       .insert(schema.languages)
       .values({ langName: 'English', langCodeIso6393: 'eng' })
@@ -240,9 +244,7 @@ describe('catalogue watermark allocator paths (PGlite)', () => {
         languageId: language!.id,
         name: 'Alpha',
         abbreviation: 'ALP',
-        provider: 'dbl',
-        externalId: 'alpha-1',
-        hasAudio: false,
+        textResourceId: textResource.id,
       },
     ]);
     const [before] = await database
@@ -256,9 +258,7 @@ describe('catalogue watermark allocator paths (PGlite)', () => {
         languageId: language!.id,
         name: 'Alpha',
         abbreviation: 'ALP',
-        provider: 'dbl',
-        externalId: 'alpha-1',
-        hasAudio: false,
+        textResourceId: textResource.id,
       },
     ]);
     const [afterNoop] = await database
@@ -271,18 +271,16 @@ describe('catalogue watermark allocator paths (PGlite)', () => {
     await biblesRepo.upsertFromDbl([
       {
         languageId: language!.id,
-        name: 'Alpha',
+        name: 'Alpha Updated',
         abbreviation: 'ALP',
-        provider: 'dbl',
-        externalId: 'alpha-1',
-        hasAudio: true,
+        textResourceId: textResource.id,
       },
     ]);
     const [afterChange] = await database
       .select()
       .from(schema.bibles)
       .where(eq(schema.bibles.externalId, 'alpha-1'));
-    expect(afterChange!.hasAudio).toBe(true);
+    expect(afterChange!.name).toBe('Alpha Updated');
     expect(afterChange!.updatedAt!.getTime()).toBeGreaterThan(before!.updatedAt!.getTime());
   });
 });

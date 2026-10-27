@@ -9,8 +9,6 @@ import { normalizeIso6393Code } from '@/domains/languages/import/iso';
 import * as languagesRepository from '@/domains/languages/languages.repository';
 import { dblClient } from '@/lib/services/dbl/dbl.client';
 
-import type { DblBibleUpsertInput } from '../bibles.repository';
-
 import * as biblesRepository from '../bibles.repository';
 
 export interface DblBibleSyncSummary {
@@ -22,7 +20,13 @@ export interface DblBibleSyncSummary {
   licenseFacts: { inserted: number; updated: number; distinctNotices: number; nullNotices: number };
 }
 
-interface DblCatalogRow extends DblBibleUpsertInput {
+interface DblCatalogRow {
+  languageId: number;
+  name: string;
+  abbreviation: string;
+  provider: 'dbl';
+  externalId: string;
+  hasAudio: boolean;
   textLicenseNotice: string | null;
 }
 
@@ -183,14 +187,21 @@ export async function persistDblBibleCatalog(
         externalId: row.externalId,
         textLicenseNotice: row.textLicenseNotice,
         displayName: row.name,
+        hasAudio: row.hasAudio,
       })),
       typeof initialStatus === 'string' ? initialStatus : 'unknown',
       tx,
       policy?.statuses
     );
     if (!facts.ok) return facts;
+    const ids = new Map(facts.data.resources.map((resource) => [resource.externalId, resource.id]));
     const bibles = await biblesRepository.upsertFromDbl(
-      catalog.rows.map(({ textLicenseNotice: _notice, ...row }) => row),
+      catalog.rows.map((row) => ({
+        languageId: row.languageId,
+        name: row.name,
+        abbreviation: row.abbreviation,
+        textResourceId: ids.get(row.externalId)!,
+      })),
       tx
     );
     if (!bibles.ok) return bibles;
@@ -203,7 +214,8 @@ export async function persistDblBibleCatalog(
         ...bibles.data,
         ...(policy ? { licensePolicy: policy.summary } : {}),
         licenseFacts: {
-          ...facts.data,
+          inserted: facts.data.inserted,
+          updated: facts.data.updated,
           distinctNotices: new Set(notices.filter((notice) => notice !== null)).size,
           nullNotices: notices.filter((notice) => notice === null).length,
         },

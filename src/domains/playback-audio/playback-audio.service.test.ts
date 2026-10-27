@@ -9,6 +9,7 @@ import { getBibles, getBibleText } from '@/lib/services/aquifer/aquifer.client';
 import { dblClient } from '@/lib/services/dbl/dbl.client';
 import { parseDblTimestampSeconds } from '@/lib/services/dbl/dbl.timecodes';
 import { err, ErrorCode, ok } from '@/lib/types';
+import { makeBible } from '@/test/utils/test-helpers';
 
 import { getSourceChapterVerseNumbers } from './playback-audio.repository';
 import {
@@ -43,17 +44,14 @@ const recording = {
   licenseNotice: 'Recording notice',
   displayName: null,
 };
-const source = {
-  id: 1,
-  languageId: 1,
+const source = makeBible({
   name: 'BSB',
   abbreviation: 'BSB',
   ...text,
+  textResourceId: 8,
   audioResourceId: 11,
   hasAudio: true,
-  createdAt: null,
-  updatedAt: null,
-};
+});
 const catalogue = [{ id: 1, name: 'BSB', abbreviation: 'BSB', hasAudio: true }];
 const chapter = {
   number: 3,
@@ -254,7 +252,9 @@ describe('explicit playback identities and policy', () => {
 
 describe('dBL actual audio identity and timing', () => {
   beforeEach(() => {
-    vi.mocked(getBibleRecordById).mockResolvedValue(ok({ ...source, audioResourceId: null }));
+    vi.mocked(getBibleRecordById).mockResolvedValue(
+      ok({ ...source, textResourceId: null, audioResourceId: null })
+    );
     vi.mocked(dblClient.getBible).mockResolvedValue(ok(dblBible));
     vi.mocked(dblClient.getAudioChapter).mockImplementation(async (id) =>
       ok({

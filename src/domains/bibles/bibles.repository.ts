@@ -1,9 +1,15 @@
-import { eq, gte, ilike, or, sql } from 'drizzle-orm';
+import { and, eq, gte, ilike, or, sql } from 'drizzle-orm';
 
 import type { DbTransaction, Result } from '@/lib/types';
 
 import { db } from '@/db';
-import { bibles, languages } from '@/db/schema';
+import {
+  bibleProjection,
+  canonicalBibles as bibles,
+  canonicalResources,
+} from '@/db/canonical-schema';
+import { languages } from '@/db/schema';
+import { runInTransaction } from '@/db/transaction';
 import { handleConstraintError } from '@/lib/db-errors';
 import { logger } from '@/lib/logger';
 import { err, ErrorCode, ok } from '@/lib/types';
@@ -13,8 +19,15 @@ import type { Bible, CreateBible, SourceSearchResponse, UpdateBible } from './bi
 export async function getAll(updatedAfter?: Date): Promise<Result<Bible[]>> {
   try {
     const rows = updatedAfter
-      ? await db.select().from(bibles).where(gte(bibles.updatedAt, updatedAfter))
-      : await db.select().from(bibles);
+      ? await db
+          .select(bibleProjection)
+          .from(bibles)
+          .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
+          .where(gte(bibles.updatedAt, updatedAfter))
+      : await db
+          .select(bibleProjection)
+          .from(bibles)
+          .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id));
     return ok(rows);
   } catch (error) {
     logger.error({ cause: error, message: 'Failed to get all bibles' });
@@ -24,7 +37,12 @@ export async function getAll(updatedAfter?: Date): Promise<Result<Bible[]>> {
 
 export async function getById(id: number, tx?: DbTransaction): Promise<Result<Bible>> {
   try {
-    const [bible] = await (tx ?? db).select().from(bibles).where(eq(bibles.id, id)).limit(1);
+    const [bible] = await (tx ?? db)
+      .select(bibleProjection)
+      .from(bibles)
+      .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
+      .where(eq(bibles.id, id))
+      .limit(1);
     if (!bible) return err(ErrorCode.BIBLE_NOT_FOUND);
     return ok(bible);
   } catch (error) {
@@ -35,7 +53,13 @@ export async function getById(id: number, tx?: DbTransaction): Promise<Result<Bi
 
 export async function getByLanguageId(languageId: number): Promise<Result<Bible[]>> {
   try {
-    return ok(await db.select().from(bibles).where(eq(bibles.languageId, languageId)));
+    return ok(
+      await db
+        .select(bibleProjection)
+        .from(bibles)
+        .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
+        .where(eq(bibles.languageId, languageId))
+    );
   } catch (error) {
     logger.error({
       cause: error,
@@ -48,9 +72,11 @@ export async function getByLanguageId(languageId: number): Promise<Result<Bible[
 
 export async function create(data: CreateBible): Promise<Result<Bible>> {
   try {
-    const [bible] = await db.insert(bibles).values(data).returning();
-    if (!bible) return err(ErrorCode.INTERNAL_ERROR);
-    return ok(bible);
+    return await runInTransaction(async (tx) => {
+      const [written] = await tx.insert(bibles).values(data).returning({ id: bibles.id });
+      if (!written) return err(ErrorCode.INTERNAL_ERROR);
+      return getById(written.id, tx);
+    });
   } catch (error) {
     return handleConstraintError(error);
   }
@@ -58,9 +84,24 @@ export async function create(data: CreateBible): Promise<Result<Bible>> {
 
 export async function update(id: number, data: UpdateBible): Promise<Result<Bible>> {
   try {
-    const [bible] = await db.update(bibles).set(data).where(eq(bibles.id, id)).returning();
-    if (!bible) return err(ErrorCode.BIBLE_NOT_FOUND);
-    return ok(bible);
+    const changes = Object.entries(data).filter(([, value]) => value !== undefined);
+    if (!changes.length) return getById(id);
+    return await runInTransaction(async (tx) => {
+      await tx
+        .update(bibles)
+        .set(data)
+        .where(
+          and(
+            eq(bibles.id, id),
+            or(
+              ...changes.map(
+                ([key, value]) => sql`${bibles[key as keyof UpdateBible]} IS DISTINCT FROM ${value}`
+              )
+            )
+          )
+        );
+      return getById(id, tx);
+    });
   } catch (error) {
     return handleConstraintError(error);
   }
@@ -88,14 +129,15 @@ export async function searchSourceBibles(query: string): Promise<Result<SourceSe
         bibleId: bibles.id,
         bibleName: bibles.name,
         bibleAbbreviation: bibles.abbreviation,
-        bibleProvider: bibles.provider,
-        bibleHasAudio: bibles.hasAudio,
+        bibleProvider: bibleProjection.provider,
+        bibleHasAudio: bibleProjection.hasAudio,
         languageId: languages.id,
         langName: languages.langName,
         langCodeIso6393: languages.langCodeIso6393,
       })
       .from(bibles)
       .innerJoin(languages, eq(bibles.languageId, languages.id))
+      .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
       .where(
         cleanQuery.length > 0
           ? or(
@@ -189,13 +231,11 @@ export async function searchSourceBibles(query: string): Promise<Result<SourceSe
 
 const UPSERT_CHUNK_SIZE = 100;
 
-export interface DblBibleUpsertInput {
+interface DblBibleUpsertInput {
   languageId: number;
   name: string;
   abbreviation: string;
-  provider: 'dbl';
-  externalId: string;
-  hasAudio: boolean;
+  textResourceId: number;
 }
 
 interface DblBibleUpsertSummary {
@@ -204,7 +244,7 @@ interface DblBibleUpsertSummary {
 }
 
 /**
- * Upserts bibles keyed on `(provider, external_id)` — the natural identity
+ * Upserts bibles keyed on `text_resource_id` — the natural identity
  * for externally-sourced Bibles. Uses DBL as the authoritative source for
  * the name, abbreviation, and language association if a conflict occurs.
  */
@@ -225,28 +265,25 @@ export async function upsertFromDbl(
           .insert(bibles)
           .values(chunk)
           .onConflictDoUpdate({
-            target: [bibles.provider, bibles.externalId],
-            targetWhere: sql`${bibles.externalId} IS NOT NULL`,
+            target: bibles.textResourceId,
+            targetWhere: sql`${bibles.textResourceId} IS NOT NULL`,
             set: {
               name: sql`excluded.name`,
               abbreviation: sql`excluded.abbreviation`,
               languageId: sql`excluded.language_id`,
-              hasAudio: sql`excluded.has_audio`,
               // Advance watermark only when a tracked column actually changes.
               updatedAt: sql`
                 CASE
                   WHEN bibles.name IS DISTINCT FROM excluded.name
                     OR bibles.abbreviation IS DISTINCT FROM excluded.abbreviation
                     OR bibles.language_id IS DISTINCT FROM excluded.language_id
-                    OR bibles.has_audio IS DISTINCT FROM excluded.has_audio
                   THEN next_catalogue_watermark()
                   ELSE bibles.updated_at
                 END`,
             },
             setWhere: sql`bibles.name IS DISTINCT FROM excluded.name
               OR bibles.abbreviation IS DISTINCT FROM excluded.abbreviation
-              OR bibles.language_id IS DISTINCT FROM excluded.language_id
-              OR bibles.has_audio IS DISTINCT FROM excluded.has_audio`,
+              OR bibles.language_id IS DISTINCT FROM excluded.language_id`,
           })
           .returning({ wasInsert: sql<boolean>`(xmax = 0)` });
 

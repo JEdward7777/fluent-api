@@ -6,9 +6,12 @@ import type { DbTransaction, Result } from '@/lib/types';
 
 import { db } from '@/db';
 import {
-  bible_provider_resources,
+  canonicalResources as bible_provider_resources,
+  bibleProjection,
+  canonicalBibles as bibles,
+} from '@/db/canonical-schema';
+import {
   bible_texts,
-  bibles,
   books,
   chapter_assignments,
   languages,
@@ -112,8 +115,8 @@ export async function findAssignmentsProgress(
         ttsLicenseStatus: sql<
           'allowed' | 'forbidden' | 'unknown'
         >`coalesce(${bible_provider_resources.ttsLicenseStatus}, 'unknown')`,
-        textBibleProvider: bibles.provider,
-        textBibleExternalId: bibles.externalId,
+        textBibleProvider: bibleProjection.provider,
+        textBibleExternalId: bible_provider_resources.externalId,
         selectedRecordingId: recording.id,
         selectedRecordingProvider: recording.provider,
         selectedRecordingExternalId: recording.externalId,
@@ -156,15 +159,7 @@ export async function findAssignmentsProgress(
       .innerJoin(projects, eq(project_units.projectId, projects.id))
       .innerJoin(books, eq(chapter_assignments.bookId, books.id))
       .innerJoin(bibles, eq(bibles.id, chapter_assignments.bibleId))
-      // The provider enums share labels but remain distinct PostgreSQL types.
-      // Compare their text values alongside the external ID for every provider.
-      .leftJoin(
-        bible_provider_resources,
-        and(
-          sql`${bibles.provider}::text = ${bible_provider_resources.provider}::text`,
-          eq(bibles.externalId, bible_provider_resources.externalId)
-        )
-      )
+      .leftJoin(bible_provider_resources, eq(bibles.textResourceId, bible_provider_resources.id))
       .leftJoin(recording, eq(bibles.audioResourceId, recording.id))
       .leftJoin(targetLang, eq(projects.targetLanguage, targetLang.id))
       .leftJoin(sourceLang, eq(projects.sourceLanguage, sourceLang.id))

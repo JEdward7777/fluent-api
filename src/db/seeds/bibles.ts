@@ -2,7 +2,11 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
 
 import { db } from '@/db';
-import { bible_books, bible_provider_resources, bibles, books, languages } from '@/db/schema';
+import {
+  canonicalResources as bible_provider_resources,
+  canonicalBibles as bibles,
+} from '@/db/canonical-schema';
+import { bible_books, books, languages } from '@/db/schema';
 
 import { resolveBibleByIdentity } from './bible-identity';
 import { BSB_BIBLE, BSB_BOOK_CODES, IRV_BIBLE, IRV_BOOK_CODES } from './reference-bibles';
@@ -32,6 +36,7 @@ async function seedIrvGujarati() {
       {
         provider: 'dbl',
         externalId: IRV_BIBLE.externalId,
+        hasAudio: true,
         ttsLicenseStatus: 'allowed',
         licenseNotice: IRV_BIBLE.licenseNotice,
         displayName: IRV_BIBLE.name,
@@ -56,6 +61,11 @@ async function seedIrvGujarati() {
       )
     );
   if (!recording) throw new Error('IRV audio recording resource missing');
+  const [text] = await db
+    .select({ id: bible_provider_resources.id })
+    .from(bible_provider_resources)
+    .where(and(eq(bible_provider_resources.provider, 'dbl'), eq(bible_provider_resources.externalId, IRV_BIBLE.externalId)));
+  if (!text) throw new Error('IRV text resource missing');
 
   // 3. Resolve the bible row by upstream identity (see resolveBibleByIdentity)
   // and reconcile it, or create it fresh.
@@ -69,12 +79,11 @@ async function seedIrvGujarati() {
   if (resolved.existing) {
     const bible = resolved.existing;
     bibleId = bible.id;
-    const patch: { externalId?: string; hasAudio?: boolean; audioResourceId?: number } = {};
-    if (bible.externalId !== IRV_BIBLE.externalId) patch.externalId = IRV_BIBLE.externalId;
+    const patch: { textResourceId?: number; audioResourceId?: number } = {};
+    if (bible.textResourceId !== text.id) patch.textResourceId = text.id;
     // A curated recording selection wins on rerun — only fill audio fields
     // when unset.
     if (bible.audioResourceId === null) {
-      patch.hasAudio = true;
       patch.audioResourceId = recording.id;
     }
     if (Object.keys(patch).length) {
@@ -87,8 +96,7 @@ async function seedIrvGujarati() {
         name: resolved.name,
         abbreviation: resolved.abbreviation,
         languageId: language.id,
-        externalId: IRV_BIBLE.externalId,
-        hasAudio: true,
+        textResourceId: text.id,
         audioResourceId: recording.id,
       })
       .returning({ id: bibles.id });
@@ -176,6 +184,16 @@ async function seedBereanStandardBible() {
       )
     );
   if (!recording) throw new Error('Aquifer BSB recording resource missing');
+  const [text] = await db
+    .select({ id: bible_provider_resources.id })
+    .from(bible_provider_resources)
+    .where(
+      and(
+        eq(bible_provider_resources.provider, 'dbl'),
+        eq(bible_provider_resources.externalId, BSB_BIBLE.externalId)
+      )
+    );
+  if (!text) throw new Error('DBL BSB text resource missing');
 
   const [language] = await db
     .select({ id: languages.id })
@@ -198,8 +216,8 @@ async function seedBereanStandardBible() {
   if (resolved.existing) {
     const bible = resolved.existing;
     bibleId = bible.id;
-    const patch: { externalId?: string; audioResourceId?: number } = {};
-    if (bible.externalId !== BSB_BIBLE.externalId) patch.externalId = BSB_BIBLE.externalId;
+    const patch: { textResourceId?: number; audioResourceId?: number } = {};
+    if (bible.textResourceId !== text.id) patch.textResourceId = text.id;
     // A curated recording selection wins on rerun — only fill audio fields
     // when unset.
     if (bible.audioResourceId === null) patch.audioResourceId = recording.id;
@@ -213,8 +231,7 @@ async function seedBereanStandardBible() {
         name: resolved.name,
         abbreviation: resolved.abbreviation,
         languageId: language.id,
-        provider: 'dbl',
-        externalId: BSB_BIBLE.externalId,
+        textResourceId: text.id,
         audioResourceId: recording.id,
       })
       .returning({ id: bibles.id });

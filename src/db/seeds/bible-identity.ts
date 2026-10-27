@@ -1,18 +1,19 @@
 import { and, eq } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { bibles } from '@/db/schema';
+import { bibleProjection, canonicalBibles as bibles, canonicalResources } from '@/db/canonical-schema';
 
 import { suffixedAbbreviation } from './reference-bibles';
 
 export interface SeedBibleRow {
   id: number;
-  provider: (typeof bibles.$inferSelect)['provider'];
+  provider: 'dbl' | 'aquifer' | 'youversion';
   abbreviation: string;
   name: string;
   externalId: string | null;
   hasAudio: boolean;
   audioResourceId: number | null;
+  textResourceId: number | null;
 }
 
 /** The three point lookups resolution needs — injectable so the branch table is unit-testable. */
@@ -24,12 +25,13 @@ export interface BibleLookups {
 
 const columns = {
   id: bibles.id,
-  provider: bibles.provider,
+  provider: bibleProjection.provider,
   abbreviation: bibles.abbreviation,
   name: bibles.name,
-  externalId: bibles.externalId,
-  hasAudio: bibles.hasAudio,
+  externalId: canonicalResources.externalId,
+  hasAudio: bibleProjection.hasAudio,
   audioResourceId: bibles.audioResourceId,
+  textResourceId: bibles.textResourceId,
 };
 
 const dbLookups: BibleLookups = {
@@ -37,7 +39,8 @@ const dbLookups: BibleLookups = {
     const [row] = await db
       .select(columns)
       .from(bibles)
-      .where(and(eq(bibles.provider, 'dbl'), eq(bibles.externalId, externalId)))
+      .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
+      .where(and(eq(canonicalResources.provider, 'dbl'), eq(canonicalResources.externalId, externalId)))
       .limit(1);
     return row;
   },
@@ -45,12 +48,13 @@ const dbLookups: BibleLookups = {
     const [row] = await db
       .select(columns)
       .from(bibles)
+      .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
       .where(eq(bibles.abbreviation, abbreviation))
       .limit(1);
     return row;
   },
   async byName(name) {
-    const [row] = await db.select(columns).from(bibles).where(eq(bibles.name, name)).limit(1);
+    const [row] = await db.select(columns).from(bibles).leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id)).where(eq(bibles.name, name)).limit(1);
     return row;
   },
 };

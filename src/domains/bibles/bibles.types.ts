@@ -1,30 +1,36 @@
 import { z } from '@hono/zod-openapi';
 
-import type { selectBiblesSchema } from '@/db/schema';
-
-import { insertBiblesSchema, patchBiblesSchema, ttsLicenseStatusEnum } from '@/db/schema';
+import { ttsLicenseStatusEnum } from '@/db/schema';
 
 export const ttsLicenseStatusSchema = z.enum(ttsLicenseStatusEnum.enumValues);
 export type TtsLicenseStatus = z.infer<typeof ttsLicenseStatusSchema>;
 
-// ─── DB-derived types ─────────────────────────────────────────────
-
-export type Bible = z.infer<typeof selectBiblesSchema>;
-function requireExplicitProvider(
-  data: { externalId?: string | null; provider?: string },
-  context: z.RefinementCtx
-) {
-  if (data.externalId != null && data.provider === undefined) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['provider'],
-      message: 'Provider is required with an external ID',
-    });
-  }
+export interface Bible {
+  id: number;
+  languageId: number;
+  name: string;
+  abbreviation: string;
+  textResourceId: number | null;
+  audioResourceId: number | null;
+  provider: 'dbl' | 'aquifer' | 'youversion';
+  externalId: string | null;
+  hasAudio: boolean;
+  createdAt: Date | null;
+  updatedAt: Date | null;
 }
 
-export const createBibleSchema = insertBiblesSchema.superRefine(requireExplicitProvider);
-export const updateBibleSchema = patchBiblesSchema.superRefine(requireExplicitProvider);
+// Explicit SuperAdmin contract: legacy identity payloads must fail, not turn
+// into an unlinked Bible through Zod's default unknown-key stripping.
+export const createBibleSchema = z
+  .object({
+    languageId: z.number().int().positive(),
+    name: z.string().min(1).max(255),
+    abbreviation: z.string().min(1).max(50),
+    textResourceId: z.number().int().positive().nullable().optional(),
+    audioResourceId: z.number().int().positive().nullable().optional(),
+  })
+  .strict();
+export const updateBibleSchema = createBibleSchema.partial();
 export type CreateBible = z.infer<typeof createBibleSchema>;
 export type UpdateBible = z.infer<typeof updateBibleSchema>;
 

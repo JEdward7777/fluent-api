@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { err, ErrorCode } from '@/lib/types';
+import { err, ErrorCode, ok } from '@/lib/types';
 import { fakeBoss, jobResult, makeBible } from '@/test/utils/test-helpers';
 
 import { db } from '../db';
 import { bible_books } from '../db/schema';
+import { getBibleRecordById } from '../domains/bibles/bibles.service';
 import { registerDblIngestTextWorker } from './ingest-bible-text.worker';
+
+vi.mock('../domains/bibles/bibles.service', () => ({ getBibleRecordById: vi.fn() }));
 
 // Mock dependencies
 vi.mock('../db', () => ({
@@ -62,10 +65,12 @@ describe('dblIngestTextWorker', () => {
     async (provider) => {
       const { boss, work } = fakeBoss();
       await registerDblIngestTextWorker(boss);
-      vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
-        ...makeBible({ provider }),
-        textResourceId: null,
-      });
+      vi.mocked(getBibleRecordById).mockImplementation(async () =>
+        ok({
+          ...makeBible({ provider }),
+          textResourceId: null,
+        })
+      );
       const handler = work.mock.calls[0][2];
       await expect(handler([jobResult({ bibleId: 1, bookCodes: ['GEN'] })])).rejects.toThrow(
         'Unsupported text ingestion provider'
@@ -117,11 +122,13 @@ describe('dblIngestTextWorker', () => {
     // an array, even at batchSize: 1 — see the array-wrapped call below.
     const handler = work.mock.calls[0][2];
 
-    vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
-      provider: 'dbl',
-      id: 1,
-      externalId: 'ext-bible-1',
-    } as any);
+    vi.mocked(getBibleRecordById).mockImplementation(async () =>
+      ok({
+        provider: 'dbl',
+        id: 1,
+        externalId: 'ext-bible-1',
+      } as any)
+    );
     vi.mocked(db.query.books.findFirst).mockResolvedValue({ id: 1, code: 'GEN' } as any);
 
     mockDblClientInstance.getChapters.mockResolvedValue({
@@ -156,11 +163,13 @@ describe('dblIngestTextWorker', () => {
     const { logger } = await import('../lib/logger');
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined as any);
 
-    vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
-      provider: 'dbl',
-      id: 1,
-      externalId: 'ext-bible-1',
-    } as any);
+    vi.mocked(getBibleRecordById).mockImplementation(async () =>
+      ok({
+        provider: 'dbl',
+        id: 1,
+        externalId: 'ext-bible-1',
+      } as any)
+    );
     // No book in the DB matches this code.
     vi.mocked(db.query.books.findFirst).mockResolvedValue(undefined);
 
@@ -179,11 +188,13 @@ describe('dblIngestTextWorker', () => {
     await registerDblIngestTextWorker(boss);
     const handler = work.mock.calls[0][2];
 
-    vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
-      provider: 'dbl',
-      id: 1,
-      externalId: 'ext-bible-1',
-    } as any);
+    vi.mocked(getBibleRecordById).mockImplementation(async () =>
+      ok({
+        provider: 'dbl',
+        id: 1,
+        externalId: 'ext-bible-1',
+      } as any)
+    );
     vi.mocked(db.query.books.findFirst).mockResolvedValue({ id: 1, code: 'GEN' } as any);
     mockDblClientInstance.getChapters.mockResolvedValue({
       ok: false,
@@ -212,11 +223,13 @@ describe('dblIngestTextWorker', () => {
     };
 
     beforeEach(() => {
-      vi.mocked(db.query.bibles.findFirst).mockResolvedValue({
-        provider: 'dbl',
-        id: 1,
-        externalId: 'ext-bible-1',
-      } as any);
+      vi.mocked(getBibleRecordById).mockImplementation(async () =>
+        ok({
+          provider: 'dbl',
+          id: 1,
+          externalId: 'ext-bible-1',
+        } as any)
+      );
       vi.mocked(db.query.books.findFirst).mockResolvedValue({ id: 7, code: 'GEN' } as any);
       mockDblClientInstance.getChapters.mockResolvedValue({
         ok: true,

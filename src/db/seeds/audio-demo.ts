@@ -3,8 +3,10 @@ import { fileURLToPath } from 'node:url';
 
 import { db } from '@/db';
 import {
-  bible_provider_resources,
-  bibles,
+  canonicalResources as bible_provider_resources,
+  canonicalBibles as bibles,
+} from '@/db/canonical-schema';
+import {
   books,
   chapter_assignments,
   languages,

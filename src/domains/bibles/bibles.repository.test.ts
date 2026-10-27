@@ -17,7 +17,7 @@ describe('bibles.getAll', () => {
   it('returns all bibles without a where clause when updatedAfter is omitted', async () => {
     const rows = [{ id: 1, name: 'ESV', abbreviation: 'ESV', languageId: 1 }];
     const fromFn = vi.fn().mockResolvedValue(rows);
-    mockDb.select.mockReturnValue({ from: fromFn });
+    mockDb.select.mockReturnValue({ from: () => ({ leftJoin: fromFn }) });
 
     const result = await getAll();
 
@@ -29,7 +29,7 @@ describe('bibles.getAll', () => {
     const rows: unknown[] = [];
     const whereFn = vi.fn().mockResolvedValue(rows);
     const fromFn = vi.fn().mockReturnValue({ where: whereFn });
-    mockDb.select.mockReturnValue({ from: fromFn });
+    mockDb.select.mockReturnValue({ from: () => ({ leftJoin: fromFn }) });
 
     const result = await getAll(new Date('2025-01-01T00:00:00.000Z'));
 
@@ -55,7 +55,7 @@ describe('searchSourceBibles', () => {
     const limitFn = vi.fn().mockResolvedValue(fakeRows);
     const orderByFn = vi.fn().mockReturnValue({ limit: limitFn });
     const whereFn = vi.fn().mockReturnValue({ orderBy: orderByFn });
-    const innerJoinFn = vi.fn().mockReturnValue({ where: whereFn });
+    const innerJoinFn = vi.fn().mockReturnValue({ leftJoin: () => ({ where: whereFn }) });
     const fromFn = vi.fn().mockReturnValue({ innerJoin: innerJoinFn });
     mockDb.select.mockReturnValue({ from: fromFn });
 

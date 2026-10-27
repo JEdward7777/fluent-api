@@ -1222,7 +1222,6 @@ export const selectOrganizationsSchema = createSelectSchema(organizations);
 export const selectLanguagesSchema = createSelectSchema(languages);
 export const selectProjectsSchema = createSelectSchema(projects);
 // The expand slice preserves the legacy public contract until the application switch.
-export const selectBiblesSchema = createSelectSchema(bibles).omit({ textResourceId: true });
 export const selectBooksSchema = createSelectSchema(books);
 export const selectBibleBooksSchema = createSelectSchema(bible_books);
 export const selectProjectUnitsSchema = createSelectSchema(project_units);
@@ -1361,23 +1360,6 @@ export const insertProjectUnitBibleBooksSchema = createInsertSchema(project_unit
     bookId: true,
   })
   .omit({
-    createdAt: true,
-    updatedAt: true,
-  });
-
-export const insertBiblesSchema = createInsertSchema(bibles, {
-  languageId: (schema) => schema.int(),
-  name: (schema) => schema.min(1).max(255),
-  abbreviation: (schema) => schema.min(1).max(50),
-})
-  .required({
-    languageId: true,
-    name: true,
-    abbreviation: true,
-  })
-  .omit({
-    id: true,
-    textResourceId: true,
     createdAt: true,
     updatedAt: true,
   });
@@ -1606,7 +1588,6 @@ export const patchRolesSchema = insertRolesSchema.partial();
 export const patchOrganizationsSchema = insertOrganizationsSchema.partial();
 export const patchLanguagesSchema = insertLanguagesSchema.partial();
 export const patchProjectsSchema = insertProjectsSchema.partial();
-export const patchBiblesSchema = insertBiblesSchema.partial();
 export const patchBibleBooksSchema = insertBibleBooksSchema.partial();
 export const patchProjectUnitsSchema = insertProjectUnitsSchema.partial();
 export const patchProjectWorkflowStagesSchema = insertProjectWorkflowStagesSchema.partial();

@@ -4,7 +4,7 @@ import type { TtsLicenseStatus } from '@/domains/bibles/bibles.types';
 import type { DbTransaction, Result } from '@/lib/types';
 
 import { db } from '@/db';
-import { bible_provider_resources } from '@/db/schema';
+import { canonicalResources as bible_provider_resources } from '@/db/canonical-schema';
 import { logger } from '@/lib/logger';
 import { err, ErrorCode, ok } from '@/lib/types';
 
@@ -94,6 +94,7 @@ export interface DblTextLicenseFact {
   externalId: string;
   textLicenseNotice: string | null;
   displayName: string;
+  hasAudio: boolean;
 }
 
 /** The caller transaction also owns the Bible upsert; conflict never overwrites curated status. */
@@ -122,9 +123,10 @@ export async function upsertDblTextFacts(
           set: {
             textLicenseNotice: sql`excluded.text_license_notice`,
             displayName: sql`excluded.display_name`,
+            hasAudio: sql`excluded.has_audio`,
             ...(statuses ? { ttsLicenseStatus: sql`excluded.tts_license_status` } : {}),
           },
-          setWhere: sql`bible_provider_resources.text_license_notice IS DISTINCT FROM excluded.text_license_notice OR bible_provider_resources.display_name IS DISTINCT FROM excluded.display_name ${statuses ? sql`OR bible_provider_resources.tts_license_status IS DISTINCT FROM excluded.tts_license_status` : sql``}`,
+          setWhere: sql`bible_provider_resources.text_license_notice IS DISTINCT FROM excluded.text_license_notice OR bible_provider_resources.display_name IS DISTINCT FROM excluded.display_name OR bible_provider_resources.has_audio IS DISTINCT FROM excluded.has_audio ${statuses ? sql`OR bible_provider_resources.tts_license_status IS DISTINCT FROM excluded.tts_license_status` : sql``}`,
         })
         .returning({ wasInsert: sql<boolean>`(xmax = 0)` });
       for (const row of rows) {
@@ -132,7 +134,24 @@ export async function upsertDblTextFacts(
         else updated++;
       }
     }
-    return ok({ inserted, updated });
+    const resources = facts.length
+      ? await tx
+          .select({
+            id: bible_provider_resources.id,
+            externalId: bible_provider_resources.externalId,
+          })
+          .from(bible_provider_resources)
+          .where(
+            and(
+              eq(bible_provider_resources.provider, 'dbl'),
+              inArray(
+                bible_provider_resources.externalId,
+                facts.map((fact) => fact.externalId)
+              )
+            )
+          )
+      : [];
+    return ok({ inserted, updated, resources });
   } catch (cause) {
     logger.error({ cause, message: 'Failed to upsert DBL text license facts' });
     return err(ErrorCode.INTERNAL_ERROR);

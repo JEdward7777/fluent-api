@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { canonicalBibles } from '@/db/canonical-schema';
 import * as schema from '@/db/schema';
+import { contractCatalogFixture } from '@/db/testing/contract-catalog-fixture';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
 import { VERSE_AUDIO_CONFLICT_STATUS } from '@/domains/verse-audio/verse-audio.types';
 
@@ -177,7 +179,7 @@ describe('chapter-assignments-progress repository (PGlite integration)', () => {
   });
 
   it.each(schema.bibleProviderEnum.enumValues)(
-    'joins %s text policy by provider and external ID',
+    'joins %s text policy by canonical FK',
     async (provider) => {
       const externalId = `parity-${provider}`;
       const [resource] = await database
@@ -185,8 +187,8 @@ describe('chapter-assignments-progress repository (PGlite integration)', () => {
         .values({ provider, externalId, ttsLicenseStatus: 'forbidden' })
         .returning();
       await database
-        .update(schema.bibles)
-        .set({ provider, externalId })
+        .update(canonicalBibles)
+        .set({ textResourceId: resource.id })
         .where(eq(schema.bibles.id, bibleId));
       try {
         const result = await progressRepo.findAssignmentsProgress({ projectId });
@@ -252,5 +254,11 @@ describe('chapter-assignments-progress repository (PGlite integration)', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toEqual([]);
+  });
+  it('reads provider policy and recording identity after physical legacy-column removal', async () => {
+    const before = await progressRepo.findAssignmentsProgress({ projectId });
+    expect(before.ok).toBe(true);
+    await contractCatalogFixture(client);
+    expect(await progressRepo.findAssignmentsProgress({ projectId })).toEqual(before);
   });
 });
