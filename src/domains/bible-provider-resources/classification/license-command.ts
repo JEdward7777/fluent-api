@@ -46,7 +46,12 @@ export async function runLicenseCommand(
     workflow = new LicenseWorkflow(options, {
       apiKey: dependencies.apiKey,
       fs,
-      database: dependencies.database,
+      database:
+        dependencies.database ??
+        (() =>
+          import('./license-classifications.service').then((module) =>
+            module.createLicenseDatabaseAdapter()
+          )),
       transport: dependencies.transport,
       now: dependencies.now,
       legacySkipFreshness: true,

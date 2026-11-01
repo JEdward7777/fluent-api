@@ -180,11 +180,15 @@ export class LicenseWorkflow {
     try {
       const fs = this.dependencies.fs ?? licenseFileIo;
       const needsDatabase = options.source === 'database' || options.destination !== 'json';
-      if (needsDatabase && !this.database)
-        this.database = await (this.dependencies.database?.() ??
-          import('./license-classifications.service').then((module) =>
-            module.createLicenseDatabaseAdapter()
-          ));
+      if (needsDatabase && !this.database) {
+        if (this.dependencies.database) this.database = await this.dependencies.database();
+        else {
+          const { createOwnedLicenseDatabaseAdapter } =
+            await import('./license-classifications.service');
+          const { default: environment } = await import('@/env');
+          this.database = createOwnedLicenseDatabaseAdapter(environment.DATABASE_URL);
+        }
+      }
       const loaded = await this.database?.load();
       const snapshot = loaded ? freezeReviewValue(loaded) : undefined;
       if (options.destination !== 'json' && !snapshot?.tableExists)
