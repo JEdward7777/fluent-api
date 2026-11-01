@@ -5,6 +5,7 @@ import type { LicenseDatabaseAdapter } from './license-database.types';
 import type { LicenseInspection, LicenseWorkflowDependencies } from './license-workflow.types';
 
 import { freezeReviewValue } from '../license-review-revision';
+import { isIssuedLicensePractice } from './license-practice';
 import { inspectLicensePreflight } from './license-preflight';
 import {
   LicenseBootstrapRequiredError,
@@ -20,8 +21,34 @@ export async function inspectLicenseWorkflowInputs(input: {
   configurationRevision: number;
 }): Promise<{ inspection: LicenseInspection; database?: LicenseDatabaseAdapter }> {
   const { options, dependencies } = input;
-  if (!dependencies.apiKey.trim())
+  if (!dependencies.apiKey.trim() && !dependencies.practice)
     throw new Error('A nonempty GEMINI_API_KEY is required before reading any source');
+  if (dependencies.practice) {
+    if (!isIssuedLicensePractice(dependencies.practice))
+      throw new Error('Unissued practice capability');
+    if (
+      dependencies.apiKey ||
+      dependencies.database ||
+      dependencies.transport ||
+      dependencies.fs ||
+      dependencies.legacySkipFreshness ||
+      input.database
+    )
+      throw new Error('Practice cannot hold model, database or file override capabilities');
+    const practice = dependencies.practice;
+    if (
+      options.source !== 'json' ||
+      options.destination !== 'json' ||
+      options.input !== practice.input ||
+      options.output !== practice.output ||
+      options.cacheDir !== practice.cacheDir ||
+      options.reportDir !== practice.reportDir ||
+      options.force ||
+      options.reviewer ||
+      options.reviewReason
+    )
+      throw new Error('Practice is confined to its JSON scratch paths');
+  }
   if (!options.source || !options.destination)
     throw new Error('Select both source and destination before analysis');
   if (!/^google:[^\s:]+$/.test(options.model))

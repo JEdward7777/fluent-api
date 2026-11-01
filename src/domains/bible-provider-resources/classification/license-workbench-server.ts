@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
 
 import type { LicenseCommandOptions } from './license-command-options';
 
@@ -96,6 +97,50 @@ function createLicenseWorkbenchApp(
       return c.text(error instanceof Error ? error.message : 'Stop failed', 409);
     }
   });
+  const revisionSchema = z
+    .object({
+      configurationRevision: z.number().int().positive(),
+      contentRevision: z.number().int().positive(),
+    })
+    .strict();
+  app.post('/api/practice/edit', async (c) => {
+    const parsed = revisionSchema
+      .extend({
+        normalizedText: z.string(),
+        status: z.enum(['allowed', 'forbidden', 'unknown']),
+        reason: z.string().trim().min(1),
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid practice edit', 400);
+    try {
+      session.editPractice(parsed.data);
+      return c.json(session.visible);
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Edit failed', 409);
+    }
+  });
+  app.post('/api/practice/preview', async (c) => {
+    const parsed = revisionSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid practice preview', 400);
+    try {
+      await session.previewPractice(parsed.data.configurationRevision, parsed.data.contentRevision);
+      return c.json(session.visible);
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Preview failed', 409);
+    }
+  });
+  app.post('/api/practice/save', async (c) => {
+    const parsed = revisionSchema
+      .extend({ operationId: z.string().uuid() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid practice save', 400);
+    try {
+      await session.savePractice(parsed.data);
+      return c.json(session.visible);
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Save failed', 409);
+    }
+  });
   app.get('/api/ping', (c) => c.json({ ok: true }));
   app.post('/api/ping', (c) => c.json({ ok: true }));
   app.get('*', async (c) => {
@@ -110,10 +155,11 @@ function createLicenseWorkbenchApp(
 
 export async function startLicenseWorkbenchServer(
   options: LicenseCommandOptions,
-  requestedPort: number
+  requestedPort: number,
+  practice = false
 ) {
   const token = randomBytes(32).toString('base64url');
-  const session = new LicenseWorkbenchSession(options);
+  const session = new LicenseWorkbenchSession(options, practice);
   let selectedPort = requestedPort;
   const listen = () =>
     new Promise<Server>((resolve, reject) => {

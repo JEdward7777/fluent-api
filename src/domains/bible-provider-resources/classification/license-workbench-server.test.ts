@@ -1,3 +1,4 @@
+import { readFile, rm } from 'node:fs/promises';
 import { get } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -13,6 +14,70 @@ afterEach(async () => {
 });
 
 describe('local license workbench server', () => {
+  it('allocates practice scratch only at Inspect and rejects forged real targets and attestation', async () => {
+    const fixture = await makeCommandFixture();
+    const session = await startLicenseWorkbenchServer(
+      { ...fixture.options, input: fixture.input },
+      0,
+      true
+    );
+    active.push(session);
+    const base = `http://127.0.0.1:${session.port}`;
+    const headers = {
+      'x-workbench-token': new URL(session.url).hash.slice(1),
+      origin: base,
+      'content-type': 'application/json',
+    };
+    const call = (path: string, method = 'GET', body?: unknown) =>
+      fetch(`${base}/api/${path}`, {
+        method,
+        headers,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    try {
+      const before = await (await call('setup')).json();
+      expect(before.practice).toBe(true);
+      expect(before.scratch).toBeNull();
+      const forged = {
+        configurationRevision: before.configurationRevision,
+        discardReviewedState: false,
+        source: 'json',
+        destination: 'database',
+        input: fixture.input,
+        output: fixture.output,
+        model: before.model,
+        sampleCount: before.sampleCount,
+        force: false,
+        noCache: false,
+        cacheDir: before.cacheDir,
+        reportFormats: before.reportFormats,
+        reportDir: before.reportDir,
+        preserveExistingNonUnknowns: false,
+      };
+      expect((await call('setup', 'POST', forged)).status).toBe(409);
+      expect((await call('setup', 'POST', { ...forged, destination: 'json' })).status).toBe(409);
+      expect((await call('practice/attest', 'POST', { reviewedBy: 'Forged' })).status).toBe(404);
+      expect(
+        (
+          await call('inspect', 'POST', {
+            operationId: crypto.randomUUID(),
+            configurationRevision: 1,
+          })
+        ).status
+      ).toBe(202);
+      let after = await (await call('setup')).json();
+      for (let attempt = 0; attempt < 30 && after.latestOperation?.state === 'running'; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        after = await (await call('setup')).json();
+      }
+      expect(after.state).toBe('inspected');
+      expect(after.scratch).toContain('fluent-license-practice-');
+      expect(await readFile(fixture.input, 'utf8')).toBe(fixture.sourceBytes);
+      await rm(after.scratch, { recursive: true, force: true });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
   it('guards setup and mutation with exact token, Host and Origin', async () => {
     const session = await startLicenseWorkbenchServer(options.options, 0);
     active.push(session);
@@ -100,6 +165,12 @@ describe('local license workbench server', () => {
       delete changed.analysis;
       delete changed.activeOperationId;
       delete changed.latestOperation;
+      delete changed.practice;
+      delete changed.scratch;
+      delete changed.originalHash;
+      delete changed.selectedSource;
+      delete changed.practiceRows;
+      delete changed.preview;
       const applied = await api('setup', 'POST', changed);
       expect(applied.status).toBe(200);
       expect(applied.body.configurationRevision).toBe(2);

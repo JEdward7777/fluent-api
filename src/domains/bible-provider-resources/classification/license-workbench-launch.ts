@@ -12,7 +12,10 @@ is separate and may call Gemini and write the request cache. Save publishes poli
 CLI --plan-only with a database source may call Gemini and write cache, reports, or JSON;
 it never commits classification policy. --yes and --plan-only select CLI automation.
 --open-report stays in CLI. Browser mode cannot use --yes, --plan-only or --open-report.
---practice will use an offline JSON-to-JSON scratch copy; it cannot attest or target a DB.
+--practice opens offline JSON-to-JSON review. Optional --input=PATH selects saved JSON;
+without it, Inspect copies the bundled example. Practice creates a private scratch folder
+only after Inspect, saves incomplete JSON there, and never attests or targets a DB.
+Use --ui=web in non-terminal practice. Practice rejects CLI automation and real-target flags.
 JSON→JSON reviews saved evidence; database→JSON exports a candidate; JSON→database
 imports reviewed policy (nonempty replacement needs --force); database→database maintains
 policy. --destination=both writes both targets with the existing compensation protocol.
@@ -52,14 +55,38 @@ export function parseLicenseWorkbenchLaunch(args: string[], interactive: boolean
     remaining.push(arg);
   }
   if (
+    !values.practice &&
     ui === 'web' &&
     remaining.some((arg) => ['--yes', '--plan-only', '--open-report'].includes(arg))
   )
     throw new Error('Browser mode uses its own confirmation actions; use --ui=cli for automation');
-  if (values.practice)
-    throw new Error(
-      'Offline --practice is being prepared; no workbench or real workflow was started'
-    );
+  if (values.practice) {
+    if (
+      ui === 'cli' ||
+      remaining.some((arg) =>
+        /^--(?:yes|plan-only|open-report|output|report-dir|cache-dir|source|destination|force|reviewer|review-reason|model|sample-count|no-cache|report-formats|preserve-existing-non-unknowns)(?:=|$)/.test(
+          arg
+        )
+      )
+    )
+      throw new Error(
+        'Practice accepts only --input, --port and --ui=web; it cannot select real targets, automation or reviewers'
+      );
+    if (!interactive && ui !== 'web')
+      throw new Error('Non-terminal practice requires explicit --ui=web');
+    const parsed = parseLicenseCommandOptions(remaining, true);
+    if (parsed.help) return { kind: 'help' as const };
+    const port = values.port === undefined ? 0 : Number(values.port);
+    if (!Number.isSafeInteger(port) || (values.port !== undefined && port < 1) || port > 65535)
+      throw new Error('--port must be an integer from 1 to 65535');
+    const inputSelected = remaining.some((arg) => arg === '--input' || arg.startsWith('--input='));
+    return {
+      kind: 'web' as const,
+      options: { ...parsed.options, input: inputSelected ? parsed.options.input : '' },
+      port,
+      practice: true as const,
+    };
+  }
   const web =
     ui === 'web' ||
     (ui === undefined &&

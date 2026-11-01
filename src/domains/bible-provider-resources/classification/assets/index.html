@@ -23,6 +23,14 @@
           <li>Save</li>
         </ol>
       </nav>
+      <section id="practice-banner" class="notice" hidden aria-label="Practice mode">
+        <strong>Offline practice · JSON → JSON only</strong>
+        <p>Inspect copies the source into private scratch. The source stays unchanged.</p>
+        <p>Scratch saves remain incomplete. No model, database or attestation is available.</p>
+        <p id="practice-location">
+          Inspect allocates scratch. Restart for a fresh session. Discard scratch when finished.
+        </p>
+      </section>
       <section aria-labelledby="setup-heading">
         <h2 id="setup-heading">Choose inputs</h2>
         <p>Editing this form reads no input. Apply settings before Inspect inputs.</p>
@@ -78,7 +86,7 @@
           >
           <button type="submit">Apply settings</button>
         </form>
-        <details>
+        <details id="cli-details">
           <summary>Equivalent CLI command</summary>
           <p>Use these settings in terminal review. Credentials stay in the server environment.</p>
           <p>For a database source, CLI plan-only may call Gemini and write cache or reports.</p>
@@ -91,8 +99,30 @@
           ><button id="stop" type="button" hidden>Stop after current key</button>
         </div>
         <p id="inspect-help">Inspect reads selected files, database and request cache as needed.</p>
-        <p>Analysis may call Gemini and write cache; it does not publish policy or artifacts.</p>
+        <p id="analysis-help">Analysis may call Gemini and write cache.</p>
         <div id="inspection" hidden></div>
+        <div id="practice-review" hidden>
+          <h2>Practice review</h2>
+          <label
+            >Classification
+            <select id="practice-row"></select
+          ></label>
+          <label
+            >Decision
+            <select id="practice-status">
+              <option value="allowed">Allowed</option>
+              <option value="forbidden">Forbidden</option>
+              <option value="unknown">Unknown</option>
+            </select></label
+          >
+          <label>Reason for this edit <input id="practice-reason" /></label>
+          <div class="actions">
+            <button id="practice-edit" type="button">Apply review edit</button
+            ><button id="practice-preview" type="button">Preview scratch output</button
+            ><button id="practice-save" type="button" disabled>Save incomplete scratch JSON</button>
+          </div>
+          <p id="practice-preview-result"></p>
+        </div>
       </section>
       <section aria-labelledby="operations-heading">
         <h2 id="operations-heading">What the selections mean</h2>
@@ -102,8 +132,7 @@
           <li><strong>JSON → database:</strong> import reviewed policy.</li>
           <li><strong>Database → database:</strong> maintain existing authoritative decisions.</li>
         </ul>
-        <p>Both writes file and database targets. Ordinary sync propagates policy later.</p>
-        <p>A nonempty table needs force and reviewed attestation before replacement.</p>
+        <p id="alternatives-note">Both writes file and database targets.</p>
       </section>
     </main>
   </body>
