@@ -1,3 +1,5 @@
+import { initReview, updateReview } from './review.js';
+
 const launchedToken = window.location.hash.slice(1);
 if (launchedToken) window.sessionStorage.setItem('license-workbench-token', launchedToken);
 const token = launchedToken || window.sessionStorage.getItem('license-workbench-token');
@@ -24,8 +26,10 @@ async function request(path, method = 'GET', body) {
   if (!response.ok) throw new Error(await response.text());
   return response.json();
 }
+initReview(request);
 function render(next, populate = false) {
   setup = next;
+  updateReview(next);
   if (populate) {
     for (const key of [
       'source',
@@ -134,8 +138,8 @@ function render(next, populate = false) {
     status.textContent = `Incomplete practice JSON saved to ${next.preview?.output}. Discard the scratch directory when finished.`;
   else if (next.analysis)
     status.textContent = next.practice
-      ? `Practice analysis ready: ${next.analysis.rows} rows. Review and save only to scratch.`
-      : `Analysis ready: ${next.analysis.rows} rows. Review controls follow in the next workbench step.`;
+      ? `Practice analysis ready: ${next.analysis.rows} rows. Review the evidence below, then save only to scratch.`
+      : `Analysis ready: ${next.analysis.rows} rows. Review the evidence below before previewing changes.`;
   else if (next.state === 'inspected')
     status.textContent = 'Inputs inspected. Review the request estimate, then start analysis.';
   else if (next.latestOperation?.state === 'failed')
