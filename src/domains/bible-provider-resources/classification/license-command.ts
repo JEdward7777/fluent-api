@@ -3,20 +3,18 @@ import { dirname, resolve } from 'node:path';
 
 import type { LlmTransport } from '@/lib/llm/structured-request';
 
-import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseReviewIo } from '../license-review.types';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type { LicenseFileIo } from './license-write';
 
 import { attestLicenseArtifact, checkLicenseArtifactReview } from '../license-artifact';
-import { createLicenseClassifier } from '../license-classifier';
 import { licenseInlineSummary } from '../license-report-model';
 import { renderLicenseReports } from '../license-reports';
 import { runLicenseReview } from '../license-review';
 import { freezeLicenseRevision, freezeReviewValue } from '../license-review-revision';
-import { analyzeDatabaseLicenses } from './license-analysis';
 import { planLicenseDatabaseChanges } from './license-database-projection';
+import { LicenseBootstrapRequiredError, LicenseWorkflow } from './license-workflow';
 import { licenseFileIo, writeLicenseDestinations } from './license-write';
 
 interface CommandDependencies {
@@ -30,12 +28,6 @@ interface CommandDependencies {
   now?: () => string;
 }
 
-function parseArtifact(bytes: string): LicenseArtifact {
-  const checked = checkLicenseArtifactReview(JSON.parse(bytes));
-  if (checked.status === 'invalid') throw new Error(checked.reason);
-  return checked.artifact;
-}
-
 /** Resolve configuration before analysis. No DB module is imported by the offline path. */
 export async function runLicenseCommand(
   input: LicenseCommandOptions,
@@ -43,6 +35,7 @@ export async function runLicenseCommand(
 ): Promise<number> {
   const { io } = dependencies;
   let database: LicenseDatabaseAdapter | undefined;
+  let workflow: LicenseWorkflow | undefined;
   try {
     if (!dependencies.apiKey.trim())
       throw new Error('A nonempty GEMINI_API_KEY is required before reading any source');
@@ -50,62 +43,20 @@ export async function runLicenseCommand(
     if (!options.source || !options.destination)
       throw new Error('Select both source and destination before analysis');
     const fs = dependencies.fs ?? licenseFileIo;
-    const classify = createLicenseClassifier({
+    workflow = new LicenseWorkflow(options, {
       apiKey: dependencies.apiKey,
-      model: options.model,
-      sampleCount: options.sampleCount,
-      cacheDir: options.cacheDir,
-      noCache: options.noCache,
+      fs,
+      database: dependencies.database,
       transport: dependencies.transport,
+      now: dependencies.now,
     });
-    const needsDatabase = options.source === 'database' || options.destination !== 'json';
-    if (needsDatabase) {
-      database = await (dependencies.database?.() ??
-        import('./license-classifications.service').then((module) =>
-          module.createLicenseDatabaseAdapter()
-        ));
-    }
-    const loaded = await database?.load();
-    const snapshot = loaded ? freezeReviewValue(loaded) : undefined;
-    if (options.destination !== 'json' && !snapshot?.tableExists)
-      throw new Error(
-        'The license_classifications table must exist before a database destination can be used'
-      );
-    if (
-      options.source === 'database' &&
-      options.destination !== 'json' &&
-      !snapshot?.classifications.length
-    ) {
-      await io.write(
-        'Review required: an empty classification table bootstraps only from attested JSON. Export database-to-JSON, review it, then import that JSON.'
-      );
-      return 3;
-    }
-    const inputBytes = options.source === 'json' ? await fs.read(options.input) : null;
-    if (options.source === 'json' && inputBytes === null)
-      throw new Error(`JSON source not found: ${options.input}`);
-    const samePath = resolve(options.output) === resolve(options.input);
-    const outputBytes =
-      samePath && options.source === 'json' ? inputBytes : await fs.read(options.output);
-    const base =
-      options.source === 'database' && outputBytes !== null
-        ? parseArtifact(outputBytes)
-        : undefined;
-    let artifact =
-      options.source === 'json'
-        ? parseArtifact(inputBytes!)
-        : await analyzeDatabaseLicenses({
-            catalog: snapshot!.context.resources.map(
-              ({ ttsLicenseStatus: _status, ...row }) => row
-            ),
-            classifications: snapshot!.classifications,
-            base,
-            classify,
-            model: options.model,
-            sampleCount: options.sampleCount,
-          });
-    const originalSourceArtifact = options.source === 'json' ? artifact : undefined;
-    artifact = freezeLicenseRevision(artifact);
+    const inspection = await workflow.inspect(workflow.status.configurationRevision);
+    database = workflow.databaseAdapter;
+    const snapshot = inspection.database;
+    const { inputBytes, outputBytes } = inspection;
+    const analysis = await workflow.startAnalysis(workflow.status.configurationRevision);
+    let { artifact } = analysis;
+    const { originalSourceArtifact } = analysis;
     if (inputBytes !== null)
       await io.write(
         `Untouched JSON source SHA-256: ${createHash('sha256').update(inputBytes).digest('hex')}`
@@ -235,8 +186,8 @@ export async function runLicenseCommand(
     return resultCode();
   } catch (error) {
     await io.write(error instanceof Error ? error.message : String(error));
-    return 1;
+    return error instanceof LicenseBootstrapRequiredError ? 3 : 1;
   } finally {
-    await database?.close?.();
+    await workflow?.close();
   }
 }
