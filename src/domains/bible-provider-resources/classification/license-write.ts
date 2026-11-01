@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -36,7 +37,11 @@ class LicenseWriteUncertainError extends Error {
 export const licenseFileIo: LicenseFileIo = {
   read: async (path) => {
     try {
-      return await readFile(path, 'utf8');
+      const bytes = await readFile(path);
+      const text = bytes.toString('utf8');
+      if (!Buffer.from(text, 'utf8').equals(bytes))
+        throw new Error(`File is not valid UTF-8; cannot establish exact baseline: ${path}`);
+      return text;
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
       throw error;
