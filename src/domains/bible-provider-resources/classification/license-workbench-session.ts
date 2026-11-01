@@ -2,8 +2,10 @@ import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
 
 import type { LicenseCommandOptions } from './license-command-options';
+import type { LicensePractice } from './license-practice';
 import type { LicenseInspection } from './license-workflow.types';
 
+import { createLicensePractice } from './license-practice';
 import { LicenseWorkflow } from './license-workflow';
 
 const path = z.string().trim().min(1);
@@ -63,9 +65,28 @@ export class LicenseWorkbenchSession {
   private readonly operations = new Map<string, RecordedOperation>();
   private activeOperationId?: string;
   private latestOperationId?: string;
+  private practice?: LicensePractice;
+  private readonly practiceMode: boolean;
+  private selectedPracticePath: string | null;
 
-  constructor(options: LicenseCommandOptions) {
+  constructor(options: LicenseCommandOptions, practiceMode = false) {
     this.options = { ...options };
+    this.practiceMode = practiceMode;
+    this.selectedPracticePath = practiceMode && options.input !== '' ? options.input : null;
+    if (practiceMode)
+      this.options = {
+        ...options,
+        source: 'json',
+        destination: 'json',
+        force: false,
+        noCache: false,
+        cacheDir: undefined,
+        reportDir: undefined,
+        reportFormats: 'none',
+        preserveExistingNonUnknowns: false,
+      };
+    if (practiceMode)
+      this.databaseTarget = 'Offline practice: no database connection or provider requests';
   }
 
   get visible() {
@@ -73,14 +94,20 @@ export class LicenseWorkbenchSession {
     const { options, inspected } = this;
     return {
       step: 'Choose inputs',
+      practice: this.practiceMode,
+      scratch: this.practice?.scratch ?? null,
+      originalHash: this.practice?.originalHash ?? null,
+      selectedSource: this.selectedPracticePath,
       state: status?.state ?? 'configuring',
       configurationRevision: this.configurationRevision,
       contentRevision: status?.contentRevision ?? 0,
       readyForInspect: Boolean(options.source && options.destination),
       source: options.source ?? null,
       destination: options.destination ?? null,
-      input: options.input,
-      output: options.output,
+      input: this.practiceMode ? (this.selectedPracticePath ?? 'Bundled example') : options.input,
+      output: this.practiceMode
+        ? (this.practice?.options.output ?? 'Allocated after Inspect')
+        : options.output,
       sampleCount: options.sampleCount,
       model: options.model,
       force: options.force,
@@ -112,6 +139,21 @@ export class LicenseWorkbenchSession {
             contentRevision: this.workflow.analyzed.contentRevision,
           }
         : null,
+      practiceRows: this.practiceMode
+        ? (this.workflow?.analyzed?.artifact.classifications.map((row) => ({
+            normalizedText: row.normalizedText,
+            status: row.status,
+            rationale: row.rationale,
+          })) ?? [])
+        : [],
+      preview:
+        this.practiceMode && this.workflow?.previewed
+          ? {
+              contentRevision: this.workflow.previewed.contentRevision,
+              wholeFileHash: this.workflow.previewed.plan.wholeFileHash,
+              output: this.workflow.previewed.plan.targets[0]?.path,
+            }
+          : null,
       activeOperationId: this.activeOperationId ?? null,
       latestOperation: this.latestOperationId ? this.operation(this.latestOperationId) : null,
     };
@@ -125,6 +167,47 @@ export class LicenseWorkbenchSession {
   async configure(body: z.infer<typeof setupSchema>) {
     if (body.configurationRevision !== this.visible.configurationRevision)
       throw new Error('Configuration changed; reload setup before applying');
+    if (this.practiceMode) {
+      if (
+        this.activeOperationId ||
+        (this.workflow &&
+          [
+            'inspecting',
+            'analyzing',
+            'previewing',
+            'saving',
+            'exporting',
+            'reconfiguring',
+          ].includes(this.workflow.status.state))
+      )
+        throw new Error('Cannot configure while an operation runs');
+      if (this.workflow?.status.state === 'uncertain')
+        throw new Error('Save outcome uncertain; inspect scratch targets before restarting');
+      if (
+        body.source !== 'json' ||
+        body.destination !== 'json' ||
+        body.output !== this.visible.output ||
+        body.force ||
+        body.noCache ||
+        body.cacheDir !== this.visible.cacheDir ||
+        body.reportDir !== this.visible.reportDir ||
+        body.reportFormats !== this.visible.reportFormats ||
+        body.model !== this.visible.model ||
+        body.sampleCount !== this.visible.sampleCount ||
+        body.preserveExistingNonUnknowns
+      )
+        throw new Error('Practice setup only permits selecting a saved JSON input');
+      if (this.workflow?.analyzed && !body.discardReviewedState)
+        throw new Error('Explicit discard is required before changing reviewed unsaved state');
+      await this.workflow?.close();
+      this.workflow = undefined;
+      this.practice = undefined;
+      this.selectedPracticePath = body.input === 'Bundled example' ? null : body.input.trim();
+      this.configurationRevision++;
+      this.inspected = undefined;
+      this.latestOperationId = undefined;
+      return this.visible;
+    }
     const options: LicenseCommandOptions = {
       ...this.options,
       source: body.source ?? undefined,
@@ -168,25 +251,33 @@ export class LicenseWorkbenchSession {
       throw new Error('Configuration changed; reload setup before continuing');
     if (!this.options.source || !this.options.destination)
       throw new Error('Choose both source and destination');
-    if (kind === 'inspect' && !this.workflow) {
+    if (kind === 'inspect' && !this.workflow && !this.practiceMode) {
       loadDotenv({ quiet: true });
       this.workflow = new LicenseWorkflow(this.options, {
         apiKey: process.env.GEMINI_API_KEY ?? '',
       });
     }
-    if (!this.workflow) throw new Error('Inspect inputs before starting analysis');
+    if (!this.workflow && kind !== 'inspect')
+      throw new Error('Inspect inputs before starting analysis');
     const operation: VisibleOperation = { operationId: body.operationId, kind, state: 'running' };
     this.operations.set(body.operationId, { fingerprint, snapshot: operation });
     this.activeOperationId = body.operationId;
     this.latestOperationId = body.operationId;
-    const coreRequest = {
-      ...body,
-      configurationRevision: this.workflow.status.configurationRevision,
-    };
-    const promise =
-      kind === 'inspect'
+    const promise = (async () => {
+      if (kind === 'inspect' && this.practiceMode && !this.workflow) {
+        this.practice = await createLicensePractice(this.selectedPracticePath);
+        this.workflow = this.practice.workflow;
+        this.options = this.practice.options;
+      }
+      if (!this.workflow) throw new Error('Inspect inputs before starting analysis');
+      const coreRequest = {
+        ...body,
+        configurationRevision: this.workflow.status.configurationRevision,
+      };
+      return kind === 'inspect'
         ? this.workflow.inspect(coreRequest)
         : this.workflow.startAnalysis(coreRequest);
+    })();
     void promise.then(
       (result) => {
         if (kind === 'inspect' && 'preflight' in result)
@@ -220,6 +311,50 @@ export class LicenseWorkbenchSession {
   stop() {
     if (!this.workflow) throw new Error('No analysis is running');
     return this.workflow.requestStopAnalysis();
+  }
+
+  editPractice(body: {
+    configurationRevision: number;
+    contentRevision: number;
+    normalizedText: string;
+    status: 'allowed' | 'forbidden' | 'unknown';
+    reason: string;
+  }) {
+    if (!this.practiceMode || !this.workflow) throw new Error('Practice review is unavailable');
+    if (body.configurationRevision !== this.configurationRevision)
+      throw new Error('Stale configuration revision');
+    return this.workflow.editReview(
+      {
+        kind: 'disposition',
+        normalizedText: body.normalizedText,
+        status: body.status,
+        reason: body.reason,
+      },
+      this.workflow.status.configurationRevision,
+      body.contentRevision
+    );
+  }
+
+  async previewPractice(configurationRevision: number, contentRevision: number) {
+    if (!this.practiceMode || !this.workflow) throw new Error('Practice preview is unavailable');
+    if (configurationRevision !== this.configurationRevision)
+      throw new Error('Stale configuration revision');
+    return this.workflow.preview(this.workflow.status.configurationRevision, contentRevision);
+  }
+
+  async savePractice(body: {
+    operationId: string;
+    configurationRevision: number;
+    contentRevision: number;
+  }) {
+    if (!this.practiceMode || !this.workflow) throw new Error('Practice save is unavailable');
+    if (body.configurationRevision !== this.configurationRevision)
+      throw new Error('Stale configuration revision');
+    return this.workflow.save({
+      ...body,
+      configurationRevision: this.workflow.status.configurationRevision,
+      agreeToReplace: false,
+    });
   }
 
   async close() {

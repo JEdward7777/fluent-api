@@ -97,6 +97,18 @@ export class LicenseWorkflow {
     expectedRevision: number,
     discardReviewedState = false
   ) {
+    if (this.dependencies.practice) {
+      const practice = this.dependencies.practice;
+      if (
+        options.source !== 'json' ||
+        options.destination !== 'json' ||
+        options.input !== practice.input ||
+        options.output !== practice.output ||
+        options.cacheDir !== practice.cacheDir ||
+        options.reportDir !== practice.reportDir
+      )
+        throw new Error('Practice is confined to its JSON scratch paths');
+    }
     this.requireRevision(expectedRevision);
     if (
       ['inspecting', 'analyzing', 'previewing', 'reconfiguring', 'saving', 'exporting'].includes(
@@ -380,6 +392,8 @@ export class LicenseWorkflow {
   }
 
   exportReport(request: LicenseReportExportRequest): Promise<LicenseReportExportResult> {
+    if (this.dependencies.practice)
+      throw new Error('Practice cannot export reports outside its scratch workflow');
     const frozen = freezeReviewValue(request);
     return this.operations.run(
       frozen.operationId,
@@ -435,6 +449,7 @@ export class LicenseWorkflow {
     expectedContentRevision: number,
     expectedReviewHash: string
   ) {
+    if (this.dependencies.practice) throw new Error('Practice cannot attest a review');
     this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
     if (!this.analysis || this.state !== 'previewed' || !this.previewResult)
       throw new Error('Preview this exact revision before attestation');
