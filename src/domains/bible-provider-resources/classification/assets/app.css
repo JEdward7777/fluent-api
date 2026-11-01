@@ -1,0 +1,104 @@
+:root {
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+  color: #172b3a;
+  background: #f3f6f8;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 76rem;
+  margin: auto;
+  padding: 2rem 1rem 5rem;
+}
+header,
+section {
+  background: white;
+  border: 1px solid #d7e0e6;
+  border-radius: 0.6rem;
+  padding: 1.4rem;
+  margin-bottom: 1rem;
+}
+h1 {
+  font-size: clamp(2rem, 5vw, 3rem);
+  line-height: 1.15;
+  margin: 0.2rem 0;
+}
+h2 {
+  margin-top: 0;
+}
+.eyebrow {
+  color: #245773;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+nav ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+}
+nav li {
+  background: #e3e9ed;
+  padding: 0.55rem 0.8rem;
+  border-radius: 0.35rem;
+}
+nav [aria-current] {
+  background: #164f6e;
+  color: white;
+}
+dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.6rem;
+}
+dl div {
+  border: 1px solid #d7e0e6;
+  border-radius: 0.4rem;
+  padding: 0.7rem;
+  min-width: 0;
+}
+dt {
+  color: #536a79;
+  font-size: 0.85rem;
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.notice {
+  border-left: 0.3rem solid #986f15;
+  background: #fff8e7;
+  padding: 0.8rem;
+}
+button {
+  border: 0;
+  border-radius: 0.35rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+}
+button:focus-visible {
+  outline: 3px solid #0b6b9b;
+  outline-offset: 3px;
+}
+button:disabled {
+  background: #d8e0e4;
+  color: #4e606b;
+  cursor: not-allowed;
+}
+@media (max-width: 38rem) {
+  main {
+    padding-top: 0.8rem;
+  }
+  header,
+  section {
+    padding: 1rem;
+  }
+}
