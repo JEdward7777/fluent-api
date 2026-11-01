@@ -5,12 +5,14 @@ import type { LlmTransport } from '@/lib/llm/structured-request';
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter, LicenseDatabaseSnapshot } from './license-database.types';
+import type { LicensePreflight } from './license-preflight';
 import type { LicenseFileIo } from './license-write';
 
 import { checkLicenseArtifactReview } from '../license-artifact';
 import { createLicenseClassifier } from '../license-classifier';
 import { freezeLicenseRevision, freezeReviewValue } from '../license-review-revision';
 import { analyzeDatabaseLicenses } from './license-analysis';
+import { inspectLicensePreflight } from './license-preflight';
 import { licenseFileIo } from './license-write';
 
 type LicenseWorkflowState =
@@ -29,6 +31,7 @@ interface LicenseInspection {
   inputBytes: string | null;
   outputBytes: string | null;
   database?: LicenseDatabaseSnapshot;
+  preflight: LicensePreflight;
 }
 
 interface LicenseAnalysis {
@@ -44,12 +47,34 @@ interface LicenseWorkflowDependencies {
   database?: () => Promise<LicenseDatabaseAdapter>;
   transport?: LlmTransport;
   now?: () => string;
+  /** The legacy terminal command preserves its existing snapshot behavior. */
+  legacySkipFreshness?: boolean;
+}
+
+class LicenseInspectionStaleError extends Error {
+  constructor() {
+    super('Inspected inputs changed. Inspect inputs again before starting analysis.');
+    this.name = 'LicenseInspectionStaleError';
+  }
 }
 
 function parseArtifact(bytes: string): LicenseArtifact {
   const checked = checkLicenseArtifactReview(JSON.parse(bytes));
   if (checked.status === 'invalid') throw new Error(checked.reason);
   return checked.artifact;
+}
+
+function comparableDatabase(snapshot: LicenseDatabaseSnapshot | undefined) {
+  if (!snapshot) return undefined;
+  const byBytes = <T>(rows: T[]) => rows.map((row) => JSON.stringify(row)).sort();
+  return {
+    tableExists: snapshot.tableExists,
+    classifications: byBytes(snapshot.classifications),
+    context: {
+      ...snapshot.context,
+      resources: byBytes(snapshot.context.resources),
+    },
+  };
 }
 
 export class LicenseBootstrapRequiredError extends Error {
@@ -166,11 +191,23 @@ export class LicenseWorkflow {
       const samePath = resolve(options.output) === resolve(options.input);
       const outputBytes =
         samePath && options.source === 'json' ? inputBytes : await fs.read(options.output);
+      const preflight = await inspectLicensePreflight({
+        database: options.source === 'database' ? snapshot : undefined,
+        jsonClassificationKeys:
+          options.source === 'json'
+            ? parseArtifact(inputBytes!).classifications.map((row) => row.normalizedText)
+            : undefined,
+        model: options.model,
+        sampleCount: options.sampleCount,
+        cacheDir: options.cacheDir,
+        noCache: options.noCache,
+      });
       this.inspection = freezeReviewValue({
         configurationRevision: this.configurationRevision,
         inspectedAt: this.dependencies.now?.() ?? new Date().toISOString(),
         inputBytes,
         outputBytes,
+        preflight,
         ...(snapshot ? { database: snapshot } : {}),
       });
       this.state = 'inspected';
@@ -199,6 +236,8 @@ export class LicenseWorkflow {
     this.state = 'analyzing';
     this.beginBusy();
     try {
+      if (!this.dependencies.legacySkipFreshness)
+        await this.requireFreshInspection(inspection, options);
       const base =
         options.source === 'database' && inspection.outputBytes !== null
           ? parseArtifact(inspection.outputBytes)
@@ -233,11 +272,46 @@ export class LicenseWorkflow {
       this.state = 'reviewing';
       return this.analysis;
     } catch (error) {
-      this.state = 'error';
+      if (error instanceof LicenseInspectionStaleError) {
+        this.inspection = undefined;
+        this.state = 'configuring';
+      } else this.state = 'error';
       throw error;
     } finally {
       this.endBusy();
     }
+  }
+
+  private async requireFreshInspection(
+    inspection: LicenseInspection,
+    options: LicenseCommandOptions
+  ) {
+    const fs = this.dependencies.fs ?? licenseFileIo;
+    const samePath = resolve(options.output) === resolve(options.input);
+    const inputBytes = options.source === 'json' ? await fs.read(options.input) : null;
+    const outputBytes =
+      samePath && options.source === 'json' ? inputBytes : await fs.read(options.output);
+    if (inputBytes !== inspection.inputBytes || outputBytes !== inspection.outputBytes)
+      throw new LicenseInspectionStaleError();
+    const database = this.database ? await this.database.load() : undefined;
+    if (
+      JSON.stringify(comparableDatabase(database)) !==
+      JSON.stringify(comparableDatabase(inspection.database))
+    )
+      throw new LicenseInspectionStaleError();
+    const preflight = await inspectLicensePreflight({
+      database: options.source === 'database' ? database : undefined,
+      jsonClassificationKeys:
+        options.source === 'json'
+          ? parseArtifact(inputBytes!).classifications.map((row) => row.normalizedText)
+          : undefined,
+      model: options.model,
+      sampleCount: options.sampleCount,
+      cacheDir: options.cacheDir,
+      noCache: options.noCache,
+    });
+    if (JSON.stringify(preflight) !== JSON.stringify(inspection.preflight))
+      throw new LicenseInspectionStaleError();
   }
 
   close() {
