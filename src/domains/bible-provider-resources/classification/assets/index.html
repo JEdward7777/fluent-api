@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>License workbench · Choose inputs</title>
+    <link rel="stylesheet" href="/app.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Local developer tool</p>
+        <h1>License workbench</h1>
+        <p>Review license evidence and prepare classification decisions in five visible steps.</p>
+      </header>
+      <nav aria-label="Workflow steps">
+        <ol>
+          <li aria-current="step">Choose inputs</li>
+          <li>Analyze</li>
+          <li>Review</li>
+          <li>Preview changes</li>
+          <li>Save</li>
+        </ol>
+      </nav>
+      <section aria-labelledby="setup-heading">
+        <h2 id="setup-heading">Choose inputs</h2>
+        <p>Opening this page reads no inputs. Inspect and Analyze each need an explicit action.</p>
+        <p id="status" role="status">Connecting to the local session…</p>
+        <div id="settings" hidden>
+          <dl>
+            <div>
+              <dt>Source</dt>
+              <dd id="source"></dd>
+            </div>
+            <div>
+              <dt>Destination</dt>
+              <dd id="destination"></dd>
+            </div>
+            <div>
+              <dt>Input path</dt>
+              <dd id="input"></dd>
+            </div>
+            <div>
+              <dt>Output path</dt>
+              <dd id="output"></dd>
+            </div>
+            <div>
+              <dt>Model</dt>
+              <dd id="model"></dd>
+            </div>
+            <div>
+              <dt>Samples per missing key</dt>
+              <dd id="sampleCount"></dd>
+            </div>
+          </dl>
+        </div>
+        <p class="notice">Inspect inputs is unavailable. Classification cannot start yet.</p>
+        <button type="button" disabled aria-describedby="inspect-help">Inspect inputs</button>
+        <p id="inspect-help">Inspect reads inputs. Analyze may call Gemini or write cache.</p>
+      </section>
+      <section aria-labelledby="operations-heading">
+        <h2 id="operations-heading">What the selections mean</h2>
+        <ul>
+          <li><strong>JSON → JSON:</strong> review saved evidence without new inference.</li>
+          <li><strong>Database → JSON:</strong> analyze notices and prepare a candidate file.</li>
+          <li><strong>JSON → database:</strong> replace policy. Nonempty tables require force.</li>
+          <li><strong>Database → database:</strong> maintain existing authoritative decisions.</li>
+        </ul>
+        <p>Both writes file and database targets. Ordinary sync propagates policy later.</p>
+      </section>
+    </main>
+  </body>
+</html>
