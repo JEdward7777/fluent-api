@@ -29,3 +29,10 @@ export interface LicenseDatabaseAdapter {
   ) => Promise<void>;
   close?: () => Promise<void>;
 }
+
+export class LicensePolicyDriftError extends Error {
+  constructor() {
+    super('License classification policy changed since preview; inspect and preview again');
+    this.name = 'LicensePolicyDriftError';
+  }
+}

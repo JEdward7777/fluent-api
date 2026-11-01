@@ -125,7 +125,8 @@ describe('license command source/destination and responsibility boundary', () =>
       expect.anything(),
       true,
       expect.any(Function),
-      true
+      true,
+      undefined
     );
   });
   it.each([

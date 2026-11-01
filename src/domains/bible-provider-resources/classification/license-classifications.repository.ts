@@ -14,6 +14,7 @@ import type {
 
 import { licenseArtifactSchema, licenseClassificationSchema } from '../license-artifact.schemas';
 import { licenseDatabaseProjection } from './license-database-projection';
+import { LicensePolicyDriftError } from './license-database.types';
 
 type LicenseDb = typeof import('@/db').db;
 
@@ -166,10 +167,7 @@ export async function applyClassifications(
               )
           );
         });
-      if (!matches)
-        throw new Error(
-          'License classification policy changed since preview; inspect and preview again'
-        );
+      if (!matches) throw new LicensePolicyDriftError();
     }
     if (replace && existing.size && !force)
       throw new Error(
