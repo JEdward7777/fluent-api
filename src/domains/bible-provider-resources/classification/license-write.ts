@@ -6,6 +6,7 @@ import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseDatabaseAdapter, StoredLicenseClassification } from './license-database.types';
 
 import { checkLicenseArtifactReview, serializeLicenseArtifact } from '../license-artifact';
+import { LicensePolicyDriftError } from './license-database.types';
 
 export interface LicenseFileIo {
   read: (path: string) => Promise<string | null>;
@@ -24,6 +25,12 @@ export class LicenseFileDriftError extends Error {
   constructor(path: string) {
     super(`Inspected file changed: ${path}. Inspect and preview again before saving.`);
     this.name = 'LicenseFileDriftError';
+  }
+}
+class LicenseWriteUncertainError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = 'LicenseWriteUncertainError';
   }
 }
 export const licenseFileIo: LicenseFileIo = {
@@ -168,16 +175,19 @@ export async function writeLicenseDestinations(options: {
       }
     }
     const message = cause instanceof Error ? cause.message : String(cause);
-    if (cause instanceof LicenseFileDriftError && !staged.some((file) => file.replaced))
+    if (
+      (cause instanceof LicenseFileDriftError || cause instanceof LicensePolicyDriftError) &&
+      !staged.some((file) => file.replaced)
+    )
       throw cause;
     if (failures.length)
-      throw new Error(
+      throw new LicenseWriteUncertainError(
         `Database/file operation failed: ${message}. DIVERGENCE: unable to restore ${failures.join(', ')}. Recovery files: ${retained.join(', ') || 'none written'}; retained temporary files: ${retainedTemporary.join(', ') || 'none confirmed'}${recoveryFailures.length ? `; recovery writes failed: ${recoveryFailures.join(', ')}` : ''}. Inspect actual files and license_classifications before retrying.`,
-        { cause }
+        cause
       );
-    throw new Error(
+    throw new LicenseWriteUncertainError(
       `License write failed; prior JSON restored where applicable. Database commit outcome may be uncertain; inspect license_classifications before retrying: ${message}`,
-      { cause }
+      cause
     );
   } finally {
     for (const file of staged) {
