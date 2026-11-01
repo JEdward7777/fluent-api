@@ -1,0 +1,10 @@
+export function licenseWorkbenchBrowserError(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (message.includes('GEMINI_API_KEY'))
+    return 'A nonempty GEMINI_API_KEY is required before reading any source';
+  if (message.includes('Inspect inputs before')) return message;
+  if (message.includes('Stale license')) return 'Inputs changed; inspect again before continuing';
+  if (message.includes('not found'))
+    return 'Selected JSON source was not found; check its path and inspect again';
+  return 'Operation failed. Check selected inputs and server configuration, then try again.';
+}

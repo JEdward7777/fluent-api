@@ -160,6 +160,39 @@
           </div>
           <p id="practice-preview-result"></p>
         </div>
+        <section id="normal-preview" hidden aria-labelledby="preview-heading">
+          <h2 id="preview-heading">Preview exact changes</h2>
+          <p>Preview checks the inspected sources and target. No policy or artifact is written.</p>
+          <button id="normal-preview-button" type="button">Preview current revision</button>
+          <div id="preview-result" role="status"></div>
+          <form id="attestation" hidden>
+            <h3>Attest this exact review</h3>
+            <p>Sign only evidence you personally reviewed. Retained unknowns need human notes.</p>
+            <p>Attestation changes JSON bytes. Preview again afterward.</p>
+            <label>Reviewer name <input name="reviewedBy" required maxlength="200" /></label>
+            <label>Reason <textarea name="reviewReason" required></textarea></label>
+            <label><input name="responsibility" type="checkbox" required /> I reviewed.</label>
+            <button type="submit">Attest exact review hash</button>
+          </form>
+          <div id="report-export" hidden>
+            <h3>Export a report separately</h3>
+            <p>Inspect the target before export. Export does not Save policy or JSON.</p>
+            <label
+              >Format
+              <select id="report-format">
+                <option value="html">HTML</option>
+                <option value="markdown">Markdown</option>
+              </select></label
+            >
+            <label>Report path <input id="report-path" required /></label>
+            <button id="report-inspect" type="button">Inspect report target</button>
+            <p id="report-target" role="status"></p>
+            <label id="report-agreement" hidden
+              ><input id="report-overwrite" type="checkbox" /> Overwrite this report.</label
+            >
+            <button id="report-write" type="button" disabled>Export inspected report</button>
+          </div>
+        </section>
       </section>
       <section aria-labelledby="operations-heading">
         <h2 id="operations-heading">What the selections mean</h2>
