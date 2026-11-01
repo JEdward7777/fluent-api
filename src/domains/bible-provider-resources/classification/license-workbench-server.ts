@@ -19,6 +19,7 @@ const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/review.js', ['review.js', 'text/javascript; charset=utf-8']],
 ] as const);
 
 function sameToken(actual: string | undefined, expected: string) {
@@ -54,6 +55,33 @@ function createLicenseWorkbenchApp(
     await next();
   });
   app.get('/api/setup', (c) => c.json(session.visible));
+  const reviewQuerySchema = z.object({
+    search: z.string().max(500).default(''),
+    status: z.enum(['all', 'allowed', 'forbidden', 'unknown']).default('all'),
+    source: z.enum(['all', 'table', 'rule', 'gemini', 'manual']).default('all'),
+    page: z.coerce.number().int().positive().default(1),
+  });
+  app.get('/api/review', (c) => {
+    const parsed = reviewQuerySchema.safeParse({
+      search: c.req.query('search'),
+      status: c.req.query('status'),
+      source: c.req.query('source'),
+      page: c.req.query('page'),
+    });
+    if (!parsed.success) return c.text('Invalid review query', 400);
+    try {
+      return c.json(session.listReview(parsed.data));
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Review unavailable', 409);
+    }
+  });
+  app.get('/api/review/:id', (c) => {
+    try {
+      return c.json(session.reviewDetail(c.req.param('id')));
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Review unavailable', 404);
+    }
+  });
   app.get('/api/operations/:id', (c) => {
     const operation = session.operation(c.req.param('id'));
     return operation ? c.json(operation) : c.text('Unknown operation', 404);
@@ -144,7 +172,7 @@ function createLicenseWorkbenchApp(
   app.get('/api/ping', (c) => c.json({ ok: true }));
   app.post('/api/ping', (c) => c.json({ ok: true }));
   app.get('*', async (c) => {
-    const asset = assets.get(c.req.path as '/' | '/app.css' | '/app.js');
+    const asset = assets.get(c.req.path as '/' | '/app.css' | '/app.js' | '/review.js');
     if (!asset) return c.text('Not found', 404);
     const [name, contentType] = asset;
     c.header('Content-Type', contentType);
