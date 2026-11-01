@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { createLicenseArtifact } from '../license-artifact';
 import { makeLicenseArtifact } from '../license-artifact.test-fixtures';
 import {
   getLicenseWorkbenchReviewDetail,
@@ -7,6 +8,35 @@ import {
 } from './license-workbench-review';
 
 describe('license workbench review projection', () => {
+  it('keeps protocol row identity out of legal unconsumed classification extensions', () => {
+    const original = makeLicenseArtifact();
+    const extended = structuredClone(original);
+    Object.assign(extended.classifications[0], {
+      id: 'extension-row-id',
+      configurationRevision: 999,
+      contentRevision: 999,
+    });
+    const artifact = createLicenseArtifact(extended);
+    const page = listLicenseWorkbenchReview(artifact, {
+      search: '',
+      status: 'all',
+      source: 'all',
+      page: 1,
+    });
+    const projected = page.rows.find(
+      (row) => row.normalizedText === original.classifications[0].normalizedText
+    )!;
+    const detail = getLicenseWorkbenchReviewDetail(artifact, projected.id);
+    expect(projected.id).toMatch(/^[a-f0-9]{64}$/);
+    expect(detail?.id).toBe(projected.id);
+    expect(detail).not.toHaveProperty('configurationRevision');
+    expect(detail).not.toHaveProperty('contentRevision');
+    expect(artifact.classifications[0]).toMatchObject({
+      id: 'extension-row-id',
+      configurationRevision: 999,
+      contentRevision: 999,
+    });
+  });
   it('keeps stable IDs across search and pages, including an empty normalized key', () => {
     const artifact = makeLicenseArtifact();
     const example = artifact.classifications[0];

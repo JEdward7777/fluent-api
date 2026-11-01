@@ -45,6 +45,7 @@ export type LicenseReviewEdit =
       normalizedText: string;
       status: LicenseArtifact['classifications'][number]['status'];
       reason: string;
+      unknownNote?: string;
     }
   | { kind: 'unknown-note'; normalizedText: string; note: string };
 
