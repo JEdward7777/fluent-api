@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
-import type { LicenseDatabaseAdapter } from './license-database.types';
+import type { LicenseDatabaseAdapter, StoredLicenseClassification } from './license-database.types';
 
 import { checkLicenseArtifactReview, serializeLicenseArtifact } from '../license-artifact';
 
@@ -13,6 +13,18 @@ export interface LicenseFileIo {
   rename: (from: string, to: string) => Promise<void>;
   remove: (path: string) => Promise<void>;
   mkdir: (path: string) => Promise<void>;
+}
+
+interface LicenseExpectedFile {
+  path: string;
+  bytes: string | null;
+}
+
+export class LicenseFileDriftError extends Error {
+  constructor(path: string) {
+    super(`Inspected file changed: ${path}. Inspect and preview again before saving.`);
+    this.name = 'LicenseFileDriftError';
+  }
 }
 export const licenseFileIo: LicenseFileIo = {
   read: async (path) => {
@@ -39,57 +51,137 @@ export async function writeLicenseDestinations(options: {
   replace: boolean;
   force?: boolean;
   fs?: LicenseFileIo;
+  /** Invocation-scoped source and target bytes. Omit to preserve legacy CLI behavior. */
+  expectedFiles?: LicenseExpectedFile[];
+  expectedPolicy?: StoredLicenseClassification[];
 }) {
   const fs = options.fs ?? licenseFileIo;
   const { bytes } = serializeLicenseArtifact(options.artifact);
   if (checkLicenseArtifactReview(JSON.parse(bytes)).status === 'invalid')
     throw new Error('Invalid staged JSON');
-  const staged: { path: string; temporary: string; previous: string | null; replaced: boolean }[] =
-    [];
+  const expected = options.expectedFiles;
+  if (expected) {
+    const paths = new Set(expected.map((file) => file.path));
+    if (paths.size !== expected.length) throw new Error('Duplicate expected file path');
+    for (const file of options.files) {
+      const baseline = expected.find((candidate) => candidate.path === file.path);
+      if (!baseline || baseline.bytes !== file.previous)
+        throw new Error(`Missing or mismatched expected bytes for target: ${file.path}`);
+    }
+  }
+  const staged: {
+    path: string;
+    temporary: string;
+    previous: string | null;
+    replaced: boolean;
+    retained: boolean;
+  }[] = [];
+  const requireExpectedFiles = async () => {
+    for (const file of expected ?? []) {
+      const published = staged.some(
+        (candidate) => candidate.path === file.path && candidate.replaced
+      );
+      if ((await fs.read(file.path)) !== (published ? bytes : file.bytes))
+        throw new LicenseFileDriftError(file.path);
+    }
+  };
   try {
+    await requireExpectedFiles();
     // Preflight every file before staging any DB mutation. Sources were captured before review.
     for (const file of options.files) {
       await fs.mkdir(dirname(file.path));
       const temporary = `${file.path}.${randomUUID()}.tmp`;
-      staged.push({ ...file, temporary, replaced: false });
+      staged.push({ ...file, temporary, replaced: false, retained: false });
       await fs.write(temporary, bytes);
     }
+    await requireExpectedFiles();
     const publish = async () => {
+      await requireExpectedFiles();
       for (const file of staged) {
+        // A last-moment read detects ordinary external edits, but is not an OS compare-and-swap.
+        await requireExpectedFiles();
         await fs.rename(file.temporary, file.path);
         file.replaced = true;
       }
     };
     if (options.database)
-      await options.database.apply(options.artifact, options.replace, publish, options.force);
+      await options.database.apply(
+        options.artifact,
+        options.replace,
+        publish,
+        options.force,
+        options.expectedPolicy
+      );
     else await publish();
   } catch (cause) {
     const failures: string[] = [];
+    const retained: string[] = [];
+    const retainedTemporary: string[] = [];
+    const recoveryFailures: string[] = [];
+    const preserveRecovery = async (file: (typeof staged)[number]) => {
+      const suffix = randomUUID();
+      const copies = [
+        ...(file.previous === null
+          ? []
+          : [{ path: `${file.path}.${suffix}.prior.recovery`, bytes: file.previous }]),
+        { path: `${file.path}.${suffix}.staged.recovery`, bytes },
+      ];
+      for (const copy of copies) {
+        try {
+          await fs.write(copy.path, copy.bytes);
+          retained.push(copy.path);
+        } catch {
+          recoveryFailures.push(copy.path);
+        }
+      }
+    };
     // Reverse publication order; retain exact prior bytes, not a reserialized approximation.
     for (const file of [...staged].reverse()) {
       if (!file.replaced) continue;
       try {
+        if (expected && (await fs.read(file.path)) !== bytes) {
+          // Preserve the external edit and both known revisions for manual reconciliation.
+          await preserveRecovery(file);
+          failures.push(file.path);
+          continue;
+        }
         if (file.previous === null) await fs.remove(file.path);
         else {
           await fs.write(file.temporary, file.previous);
           await fs.rename(file.temporary, file.path);
         }
       } catch {
+        await preserveRecovery(file);
+        try {
+          const temporaryBytes = await fs.read(file.temporary);
+          if (temporaryBytes !== null) {
+            file.retained = true;
+            const role = temporaryBytes === file.previous ? 'prior bytes' : 'contents uncertain';
+            retainedTemporary.push(`${file.temporary} (${role})`);
+          }
+        } catch {
+          // Keep an unreadable temporary path: it may hold the only surviving prior bytes.
+          file.retained = true;
+          retainedTemporary.push(`${file.temporary} (unverified; read failed)`);
+        }
         failures.push(file.path);
       }
     }
     const message = cause instanceof Error ? cause.message : String(cause);
+    if (cause instanceof LicenseFileDriftError && !staged.some((file) => file.replaced))
+      throw cause;
     if (failures.length)
       throw new Error(
-        `Database/file operation failed: ${message}. DIVERGENCE: unable to restore ${failures.join(', ')}. Restore these files from their prior reviewed revision and compare license_classifications before retrying.`,
+        `Database/file operation failed: ${message}. DIVERGENCE: unable to restore ${failures.join(', ')}. Recovery files: ${retained.join(', ') || 'none written'}; retained temporary files: ${retainedTemporary.join(', ') || 'none confirmed'}${recoveryFailures.length ? `; recovery writes failed: ${recoveryFailures.join(', ')}` : ''}. Inspect actual files and license_classifications before retrying.`,
         { cause }
       );
     throw new Error(
-      `License write failed; prior JSON restored. Verify license_classifications before retrying if the database commit outcome was uncertain: ${message}`,
+      `License write failed; prior JSON restored where applicable. Database commit outcome may be uncertain; inspect license_classifications before retrying: ${message}`,
       { cause }
     );
   } finally {
     for (const file of staged) {
+      if (file.retained) continue;
       try {
         await fs.remove(file.temporary);
       } catch (error) {
