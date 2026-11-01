@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bible_texts, chapter_assignments, project_units, projects, user_roles } from '@/db/schema';
+import { CHAPTER_ASSIGNMENT_STATUS } from '@/domains/chapter-assignments/chapter-assignments.types';
 
 import { seedAudioDemo } from './audio-demo';
 import { seedBsbBibleTexts } from './bible-texts-bsb';
@@ -42,18 +43,30 @@ function updateResult() {
 }
 
 function queueDemoReferences() {
-  for (const ref of [
-    { id: 1 },
-    { id: 2 },
-    { id: 3, languageId: 4 },
-    { id: 43 },
-    { id: 5 },
-    { id: 6 },
-    { id: 7 },
+  for (const rows of [
+    [{ id: 1 }],
+    [{ id: 2, email: 'pm@fluent.local' }],
+    [
+      { id: 10, email: 't@fluent.local' },
+      { id: 11, email: 't2@fluent.local' },
+    ],
+    [{ id: 3, languageId: 4 }],
+    [{ id: 43 }],
+    [{ id: 5 }],
+    [{ id: 6 }],
+    [
+      { id: 7, name: 'Project Manager' },
+      { id: 8, name: 'Project Translator' },
+    ],
   ]) {
-    dbMock.select.mockImplementationOnce(() => selectResult([ref]));
+    dbMock.select.mockImplementationOnce(() => selectResult(rows));
   }
 }
+
+const demoUsers = {
+  managerEmail: 'pm@fluent.local',
+  translatorEmails: ['t@fluent.local', 't2@fluent.local'],
+};
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -121,10 +134,11 @@ describe('audio seed persistence contracts (regular gate, no database or provide
       txMock.insert.mockImplementation((table) =>
         table === projects ? projectInsert : table === project_units ? unitInsert : insert
       );
-      await seedAudioDemo('local', 'Fluent Dev', 'pm@fluent.local');
+      await seedAudioDemo('local', 'Fluent Dev', demoUsers);
       expect(txMock.execute).toHaveBeenCalledOnce(); // serialized seed-marker lookup
       if (exists) {
         expect(txMock.insert.mock.calls.map(([table]) => table)).toEqual([
+          user_roles,
           user_roles,
           chapter_assignments,
         ]);
@@ -142,13 +156,31 @@ describe('audio seed persistence contracts (regular gate, no database or provide
           name: 'Source Audio Demo — BSB John',
         });
       }
+      expect(insert.values).toHaveBeenCalledWith([
+        {
+          userId: 10,
+          orgId: 1,
+          projectId: 8,
+          roleId: 8,
+          createdBy: 2,
+        },
+        {
+          userId: 11,
+          orgId: 1,
+          projectId: 8,
+          roleId: 8,
+          createdBy: 2,
+        },
+      ]);
       expect(insert.values).toHaveBeenCalledWith(
         expect.objectContaining({
           projectUnitId: 9,
           bibleId: 3,
           bookId: 43,
           chapterNumber: 3,
-          assignedUserId: 2,
+          assignedUserId: 10,
+          peerCheckerId: 11,
+          status: CHAPTER_ASSIGNMENT_STATUS.DRAFT,
           isAiEnabled: false,
         })
       );
@@ -179,7 +211,7 @@ describe('audio seed persistence contracts (regular gate, no database or provide
       )
       .mockImplementationOnce(() => selectResult([{ id: 9, name: '' }]))
       .mockImplementationOnce(() => selectResult([{ projectUnitId: 9 }]));
-    await seedAudioDemo('local', 'Fluent Dev', 'pm@fluent.local');
+    await seedAudioDemo('local', 'Fluent Dev', demoUsers);
     expect(txMock.update.mock.calls.map(([table]) => table)).toEqual([projects, project_units]);
     expect(projectUpdate.set).toHaveBeenCalledWith({ sourceBibleId: 3 });
     expect(unitUpdate.set).toHaveBeenCalledWith({ name: 'Renamed BSB demo' });
@@ -191,11 +223,13 @@ describe('audio seed persistence contracts (regular gate, no database or provide
       )
       .mockImplementationOnce(() => selectResult([{ id: 9, name: 'Renamed BSB demo' }]))
       .mockImplementationOnce(() => selectResult([{ projectUnitId: 9 }]));
-    await seedAudioDemo('local', 'Fluent Dev', 'pm@fluent.local');
+    await seedAudioDemo('local', 'Fluent Dev', demoUsers);
     expect(txMock.update).toHaveBeenCalledTimes(2);
     expect(txMock.insert.mock.calls.map(([table]) => table)).toEqual([
       user_roles,
+      user_roles,
       chapter_assignments,
+      user_roles,
       user_roles,
       chapter_assignments,
     ]);

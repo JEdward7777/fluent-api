@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import {
@@ -16,19 +16,31 @@ import {
   user_roles,
   users,
 } from '@/db/schema';
+import { CHAPTER_ASSIGNMENT_STATUS } from '@/domains/chapter-assignments/chapter-assignments.types';
 import { ROLES } from '@/lib/roles';
 
 export const AUDIO_DEMO_SEED = 'source-audio-bsb-jhn';
 const AUDIO_DEMO_PROJECT_NAME = 'Source Audio Demo — BSB John';
 
+interface AudioDemoUsers {
+  managerEmail?: string;
+  translatorEmails?: readonly string[];
+}
+
 /** Only local setup creates a demo project; shared Dev/QA need their own chosen QA assignment. */
 export async function seedAudioDemo(
   envName: string,
   orgName: string,
-  userEmail?: string
+  demoUsers: AudioDemoUsers = {}
 ): Promise<void> {
   if (envName !== 'local') return;
-  if (!userEmail) throw new Error('Audio demo needs a configured local project manager.');
+  if (!demoUsers.managerEmail) {
+    throw new Error('Audio demo needs a configured local project manager.');
+  }
+  const translatorEmails = demoUsers.translatorEmails ?? [];
+  if (translatorEmails.length !== 2 || new Set(translatorEmails).size !== 2) {
+    throw new Error('Audio demo needs two distinct configured local project translators.');
+  }
   await db
     .insert(bible_provider_resources)
     .values({
@@ -40,16 +52,54 @@ export async function seedAudioDemo(
     })
     .onConflictDoNothing();
 
-  const [org] = await db.select().from(organizations).where(eq(organizations.name, orgName));
-  const [user] = await db.select().from(users).where(eq(users.email, userEmail));
-  const [bible] = await db.select().from(bibles).where(eq(bibles.abbreviation, 'BSB'));
-  const [book] = await db.select().from(books).where(eq(books.code, 'JHN'));
-  const [target] = await db.select().from(languages).where(eq(languages.langCodeIso6393, 'guj'));
-  const [pericopes] = await db.select().from(pericope_sets).where(eq(pericope_sets.name, 'FCBH'));
-  const [role] = await db.select().from(roles).where(eq(roles.name, ROLES.PROJECT_MANAGER));
-  if (!org || !user || !bible || !book || !target || !pericopes || !role) {
+  const [
+    orgRows,
+    managerRows,
+    translatorRows,
+    bibleRows,
+    bookRows,
+    targetRows,
+    pericopeRows,
+    roleRows,
+  ] = await Promise.all([
+    db.select().from(organizations).where(eq(organizations.name, orgName)),
+    db.select().from(users).where(eq(users.email, demoUsers.managerEmail)),
+    db.select().from(users).where(inArray(users.email, translatorEmails)),
+    db.select().from(bibles).where(eq(bibles.abbreviation, 'BSB')),
+    db.select().from(books).where(eq(books.code, 'JHN')),
+    db.select().from(languages).where(eq(languages.langCodeIso6393, 'guj')),
+    db.select().from(pericope_sets).where(eq(pericope_sets.name, 'FCBH')),
+    db
+      .select()
+      .from(roles)
+      .where(inArray(roles.name, [ROLES.PROJECT_MANAGER, ROLES.PROJECT_TRANSLATOR])),
+  ]);
+  const [org] = orgRows;
+  const [manager] = managerRows;
+  const [bible] = bibleRows;
+  const [book] = bookRows;
+  const [target] = targetRows;
+  const [pericopes] = pericopeRows;
+  const managerRole = roleRows.find((role) => role.name === ROLES.PROJECT_MANAGER);
+  const translatorRole = roleRows.find((role) => role.name === ROLES.PROJECT_TRANSLATOR);
+  const translators = translatorEmails.map((email) =>
+    translatorRows.find((translator) => translator.email === email)
+  );
+  const [translator, peerChecker] = translators;
+  if (
+    !org ||
+    !manager ||
+    !translator ||
+    !peerChecker ||
+    !bible ||
+    !book ||
+    !target ||
+    !pericopes ||
+    !managerRole ||
+    !translatorRole
+  ) {
     throw new Error(
-      'Audio demo needs organization, user, BSB/JHN, Gujarati, FCBH and roles seeded first.'
+      'Audio demo needs its organization, manager, two translators, BSB/JHN, Gujarati, FCBH and roles seeded first.'
     );
   }
 
@@ -75,7 +125,7 @@ export async function seedAudioDemo(
           sourceBibleId: bible.id,
           targetLanguage: target.id,
           organization: org.id,
-          createdBy: user.id,
+          createdBy: manager.id,
           status: 'active',
           pericopeSetId: pericopes.id,
           metadata: { seed: AUDIO_DEMO_SEED },
@@ -122,12 +172,24 @@ export async function seedAudioDemo(
     await tx
       .insert(user_roles)
       .values({
-        userId: user.id,
+        userId: manager.id,
         orgId: org.id,
         projectId: project.id,
-        roleId: role.id,
-        createdBy: user.id,
+        roleId: managerRole.id,
+        createdBy: manager.id,
       })
+      .onConflictDoNothing();
+    await tx
+      .insert(user_roles)
+      .values(
+        [translator, peerChecker].map((projectTranslator) => ({
+          userId: projectTranslator.id,
+          orgId: org.id,
+          projectId: project.id,
+          roleId: translatorRole.id,
+          createdBy: manager.id,
+        }))
+      )
       .onConflictDoNothing();
     await tx
       .insert(chapter_assignments)
@@ -136,7 +198,9 @@ export async function seedAudioDemo(
         bibleId: bible.id,
         bookId: book.id,
         chapterNumber: 3,
-        assignedUserId: user.id,
+        assignedUserId: translator.id,
+        peerCheckerId: peerChecker.id,
+        status: CHAPTER_ASSIGNMENT_STATUS.DRAFT,
         isAiEnabled: false,
       })
       .onConflictDoNothing({

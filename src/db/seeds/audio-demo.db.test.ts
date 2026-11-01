@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { db } from '@/db';
@@ -10,13 +10,16 @@ import {
   project_unit_bible_books,
   project_units,
   projects,
+  roles,
   translated_verses,
+  user_roles,
   users,
 } from '@/db/schema';
 import { findAssignmentsProgress } from '@/domains/chapter-assignments/progress/chapter-assignments-progress.repository';
 import { getChapterPericopes } from '@/domains/pericopes/pericopes.service';
 import { getAssignedChaptersByUserId } from '@/domains/users/chapter-assignments/users-chapter-assignments.service';
 import { auth } from '@/lib/auth';
+import { ROLES } from '@/lib/roles';
 import { server } from '@/server/server';
 import '@/domains/bibles/bibles.route';
 import '@/domains/bibles/bible-texts/bible-texts.route';
@@ -26,20 +29,52 @@ import { AUDIO_DEMO_SEED, seedAudioDemo } from './audio-demo';
 import { seedBsbBibleTexts } from './bible-texts-bsb';
 import { seedBibles } from './bibles';
 
-const localUser = (() => {
-  const user = localConfig.seedUsers.find((candidate) => candidate.role === 'project_manager');
-  if (!user) throw new Error('Local test config needs a configured project manager.');
-  return user;
+const localDemoUsers = (() => {
+  const manager = localConfig.seedUsers.find((candidate) => candidate.role === 'project_manager');
+  const translators = localConfig.seedUsers.filter(
+    (candidate) => candidate.role === 'project_translator'
+  );
+  if (!manager || translators.length !== 2) {
+    throw new Error('Local test config needs a manager and two translators.');
+  }
+  return {
+    manager,
+    translators,
+    seedInput: {
+      managerEmail: manager.email,
+      translatorEmails: translators.map((translator) => translator.email),
+    },
+  };
 })();
 
 async function fixture() {
   const [bible] = await db.select().from(bibles).where(eq(bibles.abbreviation, 'BSB'));
-  const [user] = await db.select().from(users).where(eq(users.email, localUser.email));
+  const [manager] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, localDemoUsers.manager.email));
+  const translatorRows = await db
+    .select()
+    .from(users)
+    .where(
+      inArray(
+        users.email,
+        localDemoUsers.translators.map((translator) => translator.email)
+      )
+    );
   const [project] = await db
     .select()
     .from(projects)
     .where(sql`${projects.metadata}->>'seed' = ${AUDIO_DEMO_SEED}`);
-  if (!bible || !user || !project) throw new Error('Run local platform db:setup first.');
+  const translator = translatorRows.find(
+    (candidate) => candidate.email === localDemoUsers.translators[0]?.email
+  );
+  const peerChecker = translatorRows.find(
+    (candidate) => candidate.email === localDemoUsers.translators[1]?.email
+  );
+  if (!bible || !manager || !translator || !peerChecker || !project) {
+    throw new Error('Run local platform db:setup first.');
+  }
   const [unit] = await db
     .select()
     .from(project_units)
@@ -52,7 +87,7 @@ async function fixture() {
       and(eq(chapter_assignments.projectUnitId, unit.id), eq(chapter_assignments.chapterNumber, 3))
     );
   if (!assignment) throw new Error('Demo assignment missing');
-  return { bible, user, project, unit, assignment };
+  return { bible, manager, translator, peerChecker, project, unit, assignment };
 }
 
 describe('seeded BSB audio fixture (real database and authentication)', () => {
@@ -60,7 +95,10 @@ describe('seeded BSB audio fixture (real database and authentication)', () => {
   beforeAll(async () => {
     await fixture();
     const login = await auth.api.signInEmail({
-      body: { email: localUser.email, password: localUser.password },
+      body: {
+        email: localDemoUsers.translators[0]!.email,
+        password: localDemoUsers.translators[0]!.password,
+      },
     });
     headers = { Authorization: `Bearer ${login.token}` };
   });
@@ -87,12 +125,27 @@ describe('seeded BSB audio fixture (real database and authentication)', () => {
   });
 
   it('gives the seeded user a drafting assignment with 36 texts and pericope coverage', async () => {
-    const { bible, user, project, unit, assignment } = await fixture();
-    expect(project.createdBy).toBe(user.id);
-    expect(assignment.assignedUserId).toBe(user.id);
+    const { bible, manager, translator, peerChecker, project, unit, assignment } = await fixture();
+    expect(project.createdBy).toBe(manager.id);
+    expect(assignment.assignedUserId).toBe(translator.id);
+    expect(assignment.peerCheckerId).toBe(peerChecker.id);
+    expect(assignment.status).toBe('draft');
+    const projectRoles = await db
+      .select({ email: users.email, role: roles.name })
+      .from(user_roles)
+      .innerJoin(users, eq(users.id, user_roles.userId))
+      .innerJoin(roles, eq(roles.id, user_roles.roleId))
+      .where(eq(user_roles.projectId, project.id));
+    expect(projectRoles).toEqual(
+      expect.arrayContaining([
+        { email: manager.email, role: ROLES.PROJECT_MANAGER },
+        { email: translator.email, role: ROLES.PROJECT_TRANSLATOR },
+        { email: peerChecker.email, role: ROLES.PROJECT_TRANSLATOR },
+      ])
+    );
     expect(project.sourceBibleId).toEqual(expect.any(Number));
     expect(unit.name.trim()).not.toBe('');
-    const assigned = await getAssignedChaptersByUserId(user.id, project.organization);
+    const assigned = await getAssignedChaptersByUserId(translator.id, project.organization);
     expect(assigned).toMatchObject({
       ok: true,
       data: expect.arrayContaining([
@@ -130,13 +183,13 @@ describe('seeded BSB audio fixture (real database and authentication)', () => {
       await db.update(projects).set({ sourceBibleId: null }).where(eq(projects.id, project.id));
       await db.update(project_units).set({ name: '' }).where(eq(project_units.id, unit.id));
 
-      await seedAudioDemo('local', localConfig.orgName, localUser.email);
+      await seedAudioDemo('local', localConfig.orgName, localDemoUsers.seedInput);
       const repaired = await fixture();
       expect(repaired.project.sourceBibleId).toBe(bible.id);
       expect(repaired.unit.name).toBe(project.name);
       expect(repaired.assignment).toEqual(assignment);
 
-      await seedAudioDemo('local', localConfig.orgName, localUser.email);
+      await seedAudioDemo('local', localConfig.orgName, localDemoUsers.seedInput);
       const repeated = await fixture();
       expect(repeated.project).toEqual(repaired.project);
       expect(repeated.unit).toEqual(repaired.unit);
@@ -172,7 +225,7 @@ describe('seeded BSB audio fixture (real database and authentication)', () => {
   });
 
   it('reruns shared seeds without replacing verses, assignments or translator work', async () => {
-    const { bible, user, project, unit, assignment } = await fixture();
+    const { bible, translator, project, unit, assignment } = await fixture();
     const before = await db
       .select()
       .from(bible_texts)
@@ -185,7 +238,7 @@ describe('seeded BSB audio fixture (real database and authentication)', () => {
       .values({
         projectUnitId: unit.id,
         bibleTextId: verse.id,
-        assignedUserId: user.id,
+        assignedUserId: translator.id,
         content: 'Seed rerun sentinel',
       })
       .onConflictDoNothing()
@@ -198,7 +251,7 @@ describe('seeded BSB audio fixture (real database and authentication)', () => {
         .orderBy(translated_verses.id);
       await seedBibles();
       await seedBsbBibleTexts();
-      await seedAudioDemo('local', localConfig.orgName, localUser.email);
+      await seedAudioDemo('local', localConfig.orgName, localDemoUsers.seedInput);
       const after = await fixture();
       expect(after.bible).toMatchObject({
         externalId: 'bba9f40183526463-01',

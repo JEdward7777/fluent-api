@@ -20,6 +20,12 @@ describe('local audio fixture', () => {
     );
   });
 
+  it('fails clearly when local setup does not have two translators', async () => {
+    await expect(
+      seedAudioDemo('local', 'Fluent Dev', { managerEmail: 'pm@fluent.local' })
+    ).rejects.toThrow('two distinct configured local project translators');
+  });
+
   it('has the complete captured John corpus, with unchanged verse addresses and John 3 coverage', () => {
     const verses = loadBsbJohn();
     expect(verses).toHaveLength(878);

@@ -20,6 +20,12 @@ const localUser = (() => {
   if (!user) throw new Error('Local test config needs a configured project manager.');
   return user;
 })();
+const localDemoUsers = {
+  managerEmail: localUser.email,
+  translatorEmails: localConfig.seedUsers
+    .filter((candidate) => candidate.role === 'project_translator')
+    .map((candidate) => candidate.email),
+};
 let headers: Headers;
 let projectId: number;
 
@@ -152,7 +158,7 @@ describe('independent provider rows, schema and read-only authenticated lookup',
         .where(eq(bible_provider_resources.id, audio.id));
       await db.update(bibles).set({ audioResourceId: alternate.id }).where(eq(bibles.id, bible.id));
       await seedBibles();
-      await seedAudioDemo('local', localConfig.orgName, localUser.email);
+      await seedAudioDemo('local', localConfig.orgName, localDemoUsers);
       expect(await getById(text.id)).toMatchObject({
         ok: true,
         data: { ttsLicenseStatus: 'forbidden', licenseNotice: '' },

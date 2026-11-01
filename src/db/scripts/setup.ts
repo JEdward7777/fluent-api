@@ -59,6 +59,10 @@ async function setup() {
     envName === 'local'
       ? config.seedUsers.find((user) => user.role === 'project_manager')
       : undefined;
+  const localProjectTranslators =
+    envName === 'local'
+      ? config.seedUsers.filter((user) => user.role === 'project_translator')
+      : [];
   if (envName === 'local' && !localProjectManager) {
     throw new Error('Audio demo needs a configured local project manager.');
   }
@@ -163,7 +167,10 @@ async function setup() {
   await seedBibleTexts();
   await seedBsbBibleTexts();
   await seedPericopeSets();
-  await seedAudioDemo(envName, config.orgName, localProjectManager?.email);
+  await seedAudioDemo(envName, config.orgName, {
+    managerEmail: localProjectManager?.email,
+    translatorEmails: localProjectTranslators.map((user) => user.email),
+  });
   console.log('');
 
   // ── Summary ───────────────────────────────────────────────────────────────
