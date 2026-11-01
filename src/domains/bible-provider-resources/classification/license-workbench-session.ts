@@ -3,9 +3,14 @@ import { z } from 'zod';
 
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicensePractice } from './license-practice';
+import type { LicenseReviewQuery } from './license-workbench-review';
 import type { LicenseInspection } from './license-workflow.types';
 
 import { createLicensePractice } from './license-practice';
+import {
+  getLicenseWorkbenchReviewDetail,
+  listLicenseWorkbenchReview,
+} from './license-workbench-review';
 import { LicenseWorkflow } from './license-workflow';
 
 const path = z.string().trim().min(1);
@@ -143,7 +148,6 @@ export class LicenseWorkbenchSession {
         ? (this.workflow?.analyzed?.artifact.classifications.map((row) => ({
             normalizedText: row.normalizedText,
             status: row.status,
-            rationale: row.rationale,
           })) ?? [])
         : [],
       preview:
@@ -162,6 +166,38 @@ export class LicenseWorkbenchSession {
   operation(id: string) {
     const operation = this.operations.get(id);
     return operation ? { ...operation.snapshot } : null;
+  }
+
+  listReview(query: LicenseReviewQuery) {
+    const analysis = this.workflow?.analyzed;
+    if (!analysis) throw new Error('Start analysis before reviewing evidence');
+    return {
+      configurationRevision: this.configurationRevision,
+      contentRevision: analysis.contentRevision,
+      ...listLicenseWorkbenchReview(
+        analysis.artifact,
+        query,
+        this.workflow?.reviewDatabaseContext,
+        this.options.preserveExistingNonUnknowns
+      ),
+    };
+  }
+
+  reviewDetail(id: string) {
+    const analysis = this.workflow?.analyzed;
+    if (!analysis) throw new Error('Start analysis before reviewing evidence');
+    const detail = getLicenseWorkbenchReviewDetail(
+      analysis.artifact,
+      id,
+      this.workflow?.reviewDatabaseContext,
+      this.options.preserveExistingNonUnknowns
+    );
+    if (!detail) throw new Error('Review row was not found');
+    return {
+      configurationRevision: this.configurationRevision,
+      contentRevision: analysis.contentRevision,
+      ...detail,
+    };
   }
 
   async configure(body: z.infer<typeof setupSchema>) {

@@ -159,3 +159,103 @@ pre {
 #practice-preview-result {
   overflow-wrap: anywhere;
 }
+.review-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.7rem;
+}
+.review-filter label {
+  flex: 1 1 12rem;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  min-width: 52rem;
+  border-collapse: collapse;
+  text-align: left;
+}
+#review th:first-child {
+  width: 32%;
+}
+#review th:nth-child(2) {
+  width: 28%;
+}
+#review th:nth-child(3),
+#review th:nth-child(4),
+#review td:nth-child(3),
+#review td:nth-child(4) {
+  min-width: 7rem;
+  white-space: nowrap;
+}
+th,
+td {
+  padding: 0.65rem;
+  border-bottom: 1px solid #d7e0e6;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+td button {
+  text-align: left;
+  max-width: 34rem;
+  overflow-wrap: anywhere;
+}
+#review td small {
+  display: block;
+  margin-top: 0.35rem;
+  overflow-wrap: anywhere;
+  color: #536a79;
+}
+.evidence-block {
+  border: 1px solid #d7e0e6;
+  padding: 0.8rem;
+  margin: 0.7rem 0;
+}
+.evidence-block h4,
+.evidence-block h5 {
+  margin: 0 0 0.5rem;
+}
+#review-detail {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 38rem) {
+  #review table,
+  #review tbody,
+  #review tr,
+  #review td {
+    display: block;
+    width: 100%;
+  }
+  #review table {
+    min-width: 0;
+  }
+  #review td:nth-child(3),
+  #review td:nth-child(4) {
+    white-space: normal;
+  }
+  #review thead {
+    display: none;
+  }
+  #review tr {
+    border: 1px solid #d7e0e6;
+    border-radius: 0.4rem;
+    margin: 0.7rem 0;
+  }
+  #review td {
+    border: 0;
+    padding: 0.35rem 0.6rem;
+  }
+  #review td::before {
+    content: attr(data-label);
+    display: block;
+    color: #536a79;
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+  #review td button {
+    max-width: 100%;
+    width: 100%;
+  }
+}
