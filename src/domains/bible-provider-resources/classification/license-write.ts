@@ -28,8 +28,19 @@ export class LicenseFileDriftError extends Error {
     this.name = 'LicenseFileDriftError';
   }
 }
-class LicenseWriteUncertainError extends Error {
-  constructor(message: string, cause: unknown) {
+export interface LicenseWriteRecovery {
+  diverged: boolean;
+  affectedPaths: string[];
+  recoveryFiles: string[];
+  retainedTemporary: string[];
+  recoveryFailures: string[];
+}
+export class LicenseWriteUncertainError extends Error {
+  constructor(
+    message: string,
+    cause: unknown,
+    readonly recovery: LicenseWriteRecovery
+  ) {
     super(message, { cause });
     this.name = 'LicenseWriteUncertainError';
   }
@@ -188,11 +199,25 @@ export async function writeLicenseDestinations(options: {
     if (failures.length)
       throw new LicenseWriteUncertainError(
         `Database/file operation failed: ${message}. DIVERGENCE: unable to restore ${failures.join(', ')}. Recovery files: ${retained.join(', ') || 'none written'}; retained temporary files: ${retainedTemporary.join(', ') || 'none confirmed'}${recoveryFailures.length ? `; recovery writes failed: ${recoveryFailures.join(', ')}` : ''}. Inspect actual files and license_classifications before retrying.`,
-        cause
+        cause,
+        {
+          diverged: true,
+          affectedPaths: failures,
+          recoveryFiles: retained,
+          retainedTemporary,
+          recoveryFailures,
+        }
       );
     throw new LicenseWriteUncertainError(
       `License write failed; prior JSON restored where applicable. Database commit outcome may be uncertain; inspect license_classifications before retrying: ${message}`,
-      cause
+      cause,
+      {
+        diverged: false,
+        affectedPaths: options.files.map((file) => file.path),
+        recoveryFiles: retained,
+        retainedTemporary,
+        recoveryFailures,
+      }
     );
   } finally {
     for (const file of staged) {

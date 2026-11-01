@@ -1,4 +1,6 @@
+import { licenseWorkbenchPreviewLines } from './preview-text.js';
 import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
+import { initSave, renderSave, saveStatusUnconfirmed } from './save.js';
 
 const launchedToken = window.location.hash.slice(1);
 if (launchedToken) window.sessionStorage.setItem('license-workbench-token', launchedToken);
@@ -35,9 +37,9 @@ function clearReportPlan() {
 }
 
 function renderExactPreview(next) {
-  normalPreview.hidden = next.practice || !next.analysis;
+  normalPreview.hidden = next.practice || (!next.analysis && !next.saveOutcome);
   if (normalPreview.hidden) return;
-  const blocked = hasUnsavedReviewDraft() || sessionUnconfirmed;
+  const blocked = hasUnsavedReviewDraft() || sessionUnconfirmed || saveStatusUnconfirmed() || dirty;
   previewButton.disabled =
     blocked ||
     dirty ||
@@ -65,7 +67,11 @@ function renderExactPreview(next) {
   if (blocked) {
     previewResult.textContent = sessionUnconfirmed
       ? 'Session status is unavailable. Reload before any preview, attestation or export.'
-      : 'Apply this row edit or discard it before preview or attestation.';
+      : saveStatusUnconfirmed()
+        ? 'Save acknowledgment is unresolved. Inspect actual targets before another mutation.'
+        : dirty
+          ? 'Apply settings and inspect again before preview, attestation or Save.'
+          : 'Apply this row edit or discard it before preview or attestation.';
     return;
   }
   if (!preview) {
@@ -73,40 +79,7 @@ function renderExactPreview(next) {
       'No current preview. Review edits and attestation require a fresh preview.';
     return;
   }
-  const lines = [
-    `Configuration ${preview.configurationRevision}; content revision ${preview.contentRevision}.`,
-    `Review SHA-256: ${preview.reviewContentHash}. Whole JSON SHA-256: ${preview.wholeFileHash}.`,
-    `Source: ${next.source} ${next.input}. ${next.inspected?.sourceHash ? `Inspected source SHA-256: ${next.inspected.sourceHash}.` : 'Source identity is the frozen database snapshot.'} Destination: ${next.destination}. ${next.databaseTarget}.`,
-    ...preview.targets.map(
-      (target) =>
-        `${target.role}: ${target.path} (${target.existed ? `will replace SHA-256 ${target.previousHash}` : 'new file'}).`
-    ),
-    preview.replace
-      ? 'JSON import replaces the whole classification table. It changes no resource-cache rows now.'
-      : next.destination === 'json'
-        ? 'This Save writes JSON only; it does not import policy.'
-        : 'Database maintenance writes changed classification rows only.',
-    preview.requiresForceAgreement
-      ? 'The target policy table is nonempty. Force must be selected in setup, and separate replacement agreement is required at Save.'
-      : '',
-    preview.policy
-      ? `Policy diff: ${preview.policy.inserts.length} inserts, ${preview.policy.updates.length} updates, ${preview.policy.deletes.length} deletes.`
-      : 'No immediate policy diff in this JSON-only Save.',
-    ...(preview.policy
-      ? [
-          `Insert keys: ${preview.policy.inserts.join(' | ') || '(none)'}.`,
-          `Update keys: ${preview.policy.updates.join(' | ') || '(none)'}.`,
-          `Delete keys: ${preview.policy.deletes.join(' | ') || '(none)'}.`,
-        ]
-      : []),
-    preview.forecast
-      ? `${preview.forecast.context.disclaimer} Later ordinary sync forecast: ${preview.forecast.changedStatuses} status changes, ${preview.forecast.gains ?? 'unavailable'} gains, ${preview.forecast.losses ?? 'unavailable'} losses; ${preview.forecast.missingClassifications} missing classifications.`
-      : '',
-    preview.forecast?.preservationWarning ?? '',
-    preview.incomplete
-      ? `JSON is incomplete. ${preview.review?.reasons.join(' ') ?? ''} It can be saved as JSON but cannot be imported as policy.`
-      : 'Review is attested. The exact hash above is bound to this preview.',
-  ];
+  const lines = licenseWorkbenchPreviewLines(next);
   previewResult.replaceChildren(
     ...lines.filter(Boolean).map((line) => {
       const paragraph = document.createElement('p');
@@ -119,7 +92,12 @@ function renderExactPreview(next) {
 function syncPracticeDraftControls() {
   if (!setup?.practice || !setup.analysis) return;
   const blocked = hasUnsavedReviewDraft();
-  const busy = sessionUnconfirmed || practiceBusy || Boolean(setup.activeOperationId);
+  const busy =
+    sessionUnconfirmed ||
+    saveStatusUnconfirmed() ||
+    dirty ||
+    practiceBusy ||
+    Boolean(setup.activeOperationId);
   document.getElementById('practice-preview').disabled = blocked || busy || setup.state === 'saved';
   document.getElementById('practice-save').disabled = blocked || busy || !setup.preview;
   document.getElementById('practice-preview-result').textContent = blocked
@@ -150,7 +128,10 @@ initReview(
   },
   () => {
     syncPracticeDraftControls();
-    if (setup) renderExactPreview(setup);
+    if (setup) {
+      renderExactPreview(setup);
+      renderSave(setup);
+    }
   }
 );
 function render(next, populate = false) {
@@ -228,6 +209,8 @@ function render(next, populate = false) {
     ...(next.preserveExistingNonUnknowns ? ['--preserve-existing-non-unknowns'] : []),
   ].join(' ');
   const busy =
+    sessionUnconfirmed ||
+    saveStatusUnconfirmed() ||
     Boolean(next.activeOperationId) ||
     ['inspecting', 'analyzing', 'previewing', 'saving', 'exporting', 'reconfiguring'].includes(
       next.state
@@ -263,7 +246,12 @@ function render(next, populate = false) {
     const preflight = next.inspected.preflight;
     inspection.textContent = `Inspected ${next.inspected.inspectedAt}. ${preflight.distinctKeys} distinct keys; ${preflight.tableHits} table hits; ${preflight.ruleHits} rule hits; ${preflight.modelKeys} model keys. ${preflight.validCacheHits} valid cache hits; ${preflight.expectedUncachedRequests} expected requests, up to ${preflight.maximumAttempts} attempts. Cost unavailable: ${preflight.cost.reason}`;
   }
-  if (next.practice && next.state === 'saved')
+  if (next.state === 'uncertain')
+    status.textContent =
+      'Save outcome uncertain. Inspect actual targets before starting a new process.';
+  else if (!next.practice && next.state === 'saved')
+    status.textContent = 'Save completed. See the written paths, hashes and policy result below.';
+  else if (next.practice && next.state === 'saved')
     status.textContent = `Incomplete practice JSON saved to ${next.preview?.output}. Discard the scratch directory when finished.`;
   else if (next.analysis)
     status.textContent = next.practice
@@ -278,8 +266,12 @@ function render(next, populate = false) {
   else status.textContent = `Session ${next.state}. Apply settings, then Inspect inputs.`;
   const practiceReview = document.getElementById('practice-review');
   practiceReview.hidden = !next.practice || !next.analysis;
-  syncPracticeDraftControls();
   renderExactPreview(next);
+  renderSave(next);
+  syncPracticeDraftControls();
+  setReviewBusy(
+    sessionUnconfirmed || saveStatusUnconfirmed() || practiceBusy || Boolean(next.activeOperationId)
+  );
 }
 async function refresh() {
   render(await request('setup'));
@@ -293,6 +285,11 @@ form.addEventListener('input', () => {
   dirty = true;
   inspect.disabled = true;
   analyze.disabled = true;
+  if (setup) {
+    renderExactPreview(setup);
+    renderSave(setup);
+    syncPracticeDraftControls();
+  }
   status.textContent = 'Settings changed. Apply settings before inspecting.';
 });
 form.addEventListener('submit', async (event) => {
@@ -335,6 +332,7 @@ form.addEventListener('submit', async (event) => {
   }
 });
 async function start(kind) {
+  if (sessionUnconfirmed || saveStatusUnconfirmed()) return;
   try {
     await request(kind, 'POST', {
       operationId: crypto.randomUUID(),
@@ -356,7 +354,7 @@ stop.addEventListener('click', async () => {
   }
 });
 async function practiceAction(path, body) {
-  if (practiceBusy) return;
+  if (practiceBusy || sessionUnconfirmed || saveStatusUnconfirmed() || dirty) return;
   if (hasUnsavedReviewDraft()) {
     status.textContent = 'Apply or discard the open row edit before previewing or saving.';
     return;
@@ -388,12 +386,26 @@ async function recoverActionFailure(message, report = false) {
     if (setup) {
       renderExactPreview(setup);
       syncPracticeDraftControls();
+      setReviewBusy(true);
     }
     status.textContent = `${message} Session status unavailable; inspect actual targets and reload before retrying.`;
   }
   status.tabIndex = -1;
   status.focus();
 }
+initSave({
+  request,
+  getSetup: () => setup,
+  refresh,
+  recover: recoverActionFailure,
+  hasDraft: hasUnsavedReviewDraft,
+  isBlocked: () => sessionUnconfirmed || practiceBusy || dirty,
+  setPracticeBusy: (value) => {
+    practiceBusy = value;
+    setReviewBusy(value);
+  },
+  render,
+});
 previewButton.addEventListener('click', () => {
   void practiceAction('preview', {
     configurationRevision: setup.configurationRevision,
@@ -402,7 +414,14 @@ previewButton.addEventListener('click', () => {
 });
 attestation.addEventListener('submit', (event) => {
   event.preventDefault();
-  if (!setup.preview || !attestation.elements.responsibility.checked) return;
+  if (
+    dirty ||
+    sessionUnconfirmed ||
+    saveStatusUnconfirmed() ||
+    !setup.preview ||
+    !attestation.elements.responsibility.checked
+  )
+    return;
   void practiceAction('attest', {
     configurationRevision: setup.configurationRevision,
     contentRevision: setup.contentRevision,
@@ -456,13 +475,6 @@ reportWrite.addEventListener('click', async () => {
 });
 document.getElementById('practice-preview').addEventListener('click', () => {
   void practiceAction('practice/preview', {
-    configurationRevision: setup.configurationRevision,
-    contentRevision: setup.contentRevision,
-  });
-});
-document.getElementById('practice-save').addEventListener('click', () => {
-  void practiceAction('practice/save', {
-    operationId: crypto.randomUUID(),
     configurationRevision: setup.configurationRevision,
     contentRevision: setup.contentRevision,
   });

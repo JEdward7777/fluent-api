@@ -159,7 +159,9 @@ pre {
 #practice-location,
 #practice-preview-result,
 #preview-result,
-#report-target {
+#report-target,
+#save-result,
+#status {
   overflow-wrap: anywhere;
 }
 .review-filter {
