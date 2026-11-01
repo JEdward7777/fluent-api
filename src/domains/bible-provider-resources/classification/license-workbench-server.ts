@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 
 import type { LicenseCommandOptions } from './license-command-options';
 
+import { LicenseWorkbenchSession, operationSchema, setupSchema } from './license-workbench-session';
+
 const assetDirectory = join(dirname(fileURLToPath(import.meta.url)), 'assets');
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
@@ -26,7 +28,7 @@ function sameToken(actual: string | undefined, expected: string) {
 }
 
 function createLicenseWorkbenchApp(
-  options: LicenseCommandOptions,
+  session: LicenseWorkbenchSession,
   getPort: () => number,
   token: string
 ) {
@@ -50,22 +52,50 @@ function createLicenseWorkbenchApp(
     }
     await next();
   });
-  app.get('/api/setup', (c) =>
-    c.json({
-      step: 'Choose inputs',
-      state: 'configuring',
-      readyForInspect: false,
-      source: options.source ?? null,
-      destination: options.destination ?? null,
-      input: options.input,
-      output: options.output,
-      sampleCount: options.sampleCount,
-      model: options.model,
-      force: options.force,
-      noCache: options.noCache,
-      preserveExistingNonUnknowns: options.preserveExistingNonUnknowns,
-    })
-  );
+  app.get('/api/setup', (c) => c.json(session.visible));
+  app.get('/api/operations/:id', (c) => {
+    const operation = session.operation(c.req.param('id'));
+    return operation ? c.json(operation) : c.text('Unknown operation', 404);
+  });
+  app.post('/api/setup', async (c) => {
+    const parsed = setupSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid setup fields', 400);
+    try {
+      return c.json(await session.configure(parsed.data));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      return c.text(
+        message.includes('revision') ||
+          message.includes('discard') ||
+          message.includes('Cannot configure')
+          ? message
+          : 'Could not apply settings; check server configuration',
+        409
+      );
+    }
+  });
+  for (const kind of ['inspect', 'analysis'] as const) {
+    app.post(`/api/${kind}`, async (c) => {
+      const parsed = operationSchema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) return c.text('Invalid operation fields', 400);
+      try {
+        return c.json(session.start(kind, parsed.data), 202);
+      } catch (error) {
+        return c.text(error instanceof Error ? error.message : 'Operation failed', 409);
+      }
+    });
+  }
+  app.post('/api/stop', (c) => {
+    // Stop has no configuration or path fields to override.
+    if (c.req.header('content-length') && c.req.header('content-length') !== '0')
+      return c.text('Stop does not accept a request body', 400);
+    try {
+      session.stop();
+      return c.json({ stopped: true });
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Stop failed', 409);
+    }
+  });
   app.get('/api/ping', (c) => c.json({ ok: true }));
   app.post('/api/ping', (c) => c.json({ ok: true }));
   app.get('*', async (c) => {
@@ -83,10 +113,11 @@ export async function startLicenseWorkbenchServer(
   requestedPort: number
 ) {
   const token = randomBytes(32).toString('base64url');
+  const session = new LicenseWorkbenchSession(options);
   let selectedPort = requestedPort;
   const listen = () =>
     new Promise<Server>((resolve, reject) => {
-      const app = createLicenseWorkbenchApp(options, () => selectedPort, token);
+      const app = createLicenseWorkbenchApp(session, () => selectedPort, token);
       const listener = getRequestListener(app.fetch);
       const candidate = createServer((request, response) => {
         if (
@@ -120,9 +151,11 @@ export async function startLicenseWorkbenchServer(
     server,
     port: selectedPort,
     url: `http://127.0.0.1:${selectedPort}/#${token}`,
-    close: () =>
-      new Promise<void>((resolve, reject) =>
+    close: async () => {
+      await session.close();
+      await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve()))
-      ),
+      );
+    },
   };
 }
