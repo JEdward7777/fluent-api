@@ -140,9 +140,12 @@ export function overrideLicenseClassification(
   value: unknown,
   normalizedText: string,
   status: LicenseArtifact['classifications'][number]['status'],
-  reason: string
+  reason: string,
+  unknownNote?: string
 ) {
   if (!reason.trim()) throw new Error('A human override requires a nonempty rationale');
+  if (unknownNote !== undefined && (!unknownNote.trim() || status !== 'unknown'))
+    throw new Error('An explicit human row note must be nonempty and requires unknown status');
   let warning: string | null = null;
   const artifact = reviseLicenseArtifact(value, (draft) => {
     const row = draft.classifications.find(
@@ -156,7 +159,7 @@ export function overrideLicenseClassification(
     row.source = 'manual';
     row.rationale = reason;
     delete row.rowNote;
-    if (status === 'unknown') row.rowNote = reason;
+    if (status === 'unknown') row.rowNote = unknownNote ?? reason;
   });
   return { artifact, warning };
 }
