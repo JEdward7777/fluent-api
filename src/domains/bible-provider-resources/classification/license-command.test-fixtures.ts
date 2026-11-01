@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { vi } from 'vitest';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
-import type { LicenseDatabaseSnapshot } from './license-database.types';
+import type {
+  LicenseDatabaseSnapshot,
+  StoredLicenseClassification,
+} from './license-database.types';
 
 import { attestLicenseArtifact, serializeLicenseArtifact } from '../license-artifact';
 import { makeLicenseArtifact, REVIEWER } from '../license-artifact.test-fixtures';
@@ -45,7 +48,13 @@ export async function makeCommandFixture(attested = true) {
   const adapter = {
     load: vi.fn(async () => structuredClone(snapshot)),
     apply: vi.fn(
-      async (value: LicenseArtifact, _replace: boolean, publish?: () => Promise<void>) => {
+      async (
+        value: LicenseArtifact,
+        _replace: boolean,
+        publish?: () => Promise<void>,
+        _force?: boolean,
+        _expectedPolicy?: StoredLicenseClassification[]
+      ) => {
         await publish?.();
         applied.push(structuredClone(value));
       }
