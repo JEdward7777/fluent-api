@@ -99,6 +99,68 @@ export function licenseDatabaseProjection(artifact: LicenseArtifact) {
   });
 }
 
+export function licenseRationaleText(content: unknown) {
+  return typeof content === 'string'
+    ? content
+    : content &&
+        !Array.isArray(content) &&
+        typeof content === 'object' &&
+        'text' in content &&
+        typeof content.text === 'string'
+      ? content.text
+      : JSON.stringify(content) || 'No recorded rationale';
+}
+
+/** Keep maintenance's legacy-table preservation predicate identical to the transaction writer. */
+export function selectLicenseMaintenanceRows(
+  artifact: LicenseArtifact,
+  existing: {
+    normalizedText: string;
+    status: LicenseClassification['status'];
+    rationale: unknown;
+    storedRationale?: unknown;
+  }[]
+) {
+  const before = new Map(existing.map((row) => [row.normalizedText, row]));
+  const sources = new Map(artifact.classifications.map((row) => [row.normalizedText, row.source]));
+  return licenseDatabaseProjection(artifact).filter((row) => {
+    const old = before.get(row.normalizedText);
+    return (
+      sources.get(row.normalizedText) !== 'table' ||
+      !old ||
+      old.status !== row.status ||
+      licenseRationaleText(old.storedRationale ?? old.rationale) !== row.rationale.text
+    );
+  });
+}
+
+/** Immediate maintenance diff; resource status forecasts are reported separately. */
+export function planLicenseMaintenanceChanges(
+  artifact: LicenseArtifact,
+  existing: StoredLicenseClassification[]
+) {
+  const before = new Map(existing.map((row) => [row.normalizedText, row]));
+  const rows = selectLicenseMaintenanceRows(artifact, existing);
+  return {
+    insertedKeys: rows
+      .filter((row) => !before.has(row.normalizedText))
+      .map((row) => row.normalizedText),
+    changedKeys: rows
+      .filter((row) => {
+        const old = before.get(row.normalizedText);
+        return (
+          old &&
+          (old.status !== row.status ||
+            old.classifiedBy !== row.classifiedBy ||
+            hashCanonicalJson(old.storedRationale ?? old.rationale) !==
+              hashCanonicalJson(row.rationale))
+        );
+      })
+      .map((row) => row.normalizedText),
+    deletedKeys: [] as string[],
+  };
+}
+
 /** Mirrors the apply query's status/rationale/producer distinct-value predicate. */
 export function planLicenseDatabaseChanges(
   artifact: LicenseArtifact,

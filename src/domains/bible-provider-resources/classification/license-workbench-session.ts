@@ -1,12 +1,18 @@
 import { config as loadDotenv } from 'dotenv';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import type { LicenseCommandOptions } from './license-command-options';
+import type { StoredLicenseClassification } from './license-database.types';
 import type { LicensePractice } from './license-practice';
 import type { LicenseReviewQuery } from './license-workbench-review';
 import type { LicenseInspection, LicenseReviewEdit } from './license-workflow.types';
 
+import { checkLicenseArtifactReview } from '../license-artifact';
+import { planLicenseMaintenanceChanges } from './license-database-projection';
 import { createLicensePractice } from './license-practice';
+import { licenseWorkbenchBrowserError } from './license-workbench-error';
+import { LicenseWorkbenchReports } from './license-workbench-reports';
 import {
   getLicenseWorkbenchReviewDetail,
   listLicenseWorkbenchReview,
@@ -49,23 +55,13 @@ interface RecordedOperation {
   fingerprint: string;
   snapshot: VisibleOperation;
 }
-
-function browserError(error: unknown) {
-  const message = error instanceof Error ? error.message : '';
-  if (message.includes('GEMINI_API_KEY'))
-    return 'A nonempty GEMINI_API_KEY is required before reading any source';
-  if (message.includes('Inspect inputs before')) return message;
-  if (message.includes('Stale license')) return 'Inputs changed; inspect again before continuing';
-  if (message.includes('not found'))
-    return 'Selected JSON source was not found; check its path and inspect again';
-  return 'Operation failed. Check selected inputs and server configuration, then try again.';
-}
-
 export class LicenseWorkbenchSession {
   private options: LicenseCommandOptions;
   private workflow?: LicenseWorkflow;
   private configurationRevision = 1;
   private inspected?: Pick<LicenseInspection, 'inspectedAt' | 'preflight'>;
+  private sourceHash?: string;
+  private policyBaseline?: StoredLicenseClassification[];
   private databaseTarget = 'Configured environment database; identity checked at Inspect';
   private readonly operations = new Map<string, RecordedOperation>();
   private activeOperationId?: string;
@@ -73,6 +69,7 @@ export class LicenseWorkbenchSession {
   private practice?: LicensePractice;
   private readonly practiceMode: boolean;
   private selectedPracticePath: string | null;
+  private readonly reports = new LicenseWorkbenchReports();
 
   constructor(options: LicenseCommandOptions, practiceMode = false) {
     this.options = { ...options };
@@ -96,7 +93,16 @@ export class LicenseWorkbenchSession {
 
   get visible() {
     const status = this.workflow?.status;
-    const { options, inspected } = this;
+    const { options } = this;
+    const inspected =
+      status && !['configuring', 'error', 'closed'].includes(status.state)
+        ? this.inspected
+        : undefined;
+    const preview = this.workflow?.previewed;
+    const impact = preview?.reports.model.impact;
+    const review = this.workflow?.analyzed
+      ? checkLicenseArtifactReview(this.workflow.analyzed.artifact)
+      : null;
     return {
       step: 'Choose inputs',
       practice: this.practiceMode,
@@ -125,6 +131,7 @@ export class LicenseWorkbenchSession {
       inspected: inspected
         ? {
             inspectedAt: inspected.inspectedAt,
+            sourceHash: this.sourceHash ?? null,
             preflight: {
               source: inspected.preflight.source,
               distinctKeys: inspected.preflight.distinctKeys,
@@ -144,22 +151,69 @@ export class LicenseWorkbenchSession {
             contentRevision: this.workflow.analyzed.contentRevision,
           }
         : null,
-      preview:
-        this.practiceMode && this.workflow?.previewed
-          ? {
-              contentRevision: this.workflow.previewed.contentRevision,
-              wholeFileHash: this.workflow.previewed.plan.wholeFileHash,
-              output: this.workflow.previewed.plan.targets[0]?.path,
-            }
-          : null,
+      preview: preview
+        ? {
+            configurationRevision: this.configurationRevision,
+            contentRevision: preview.contentRevision,
+            reviewContentHash: preview.plan.reviewContentHash,
+            wholeFileHash: preview.plan.wholeFileHash,
+            targets: preview.plan.targets.map((target) => ({
+              path: target.path,
+              role: target.role,
+              existed: target.previous !== null,
+              previousHash:
+                target.previous === null
+                  ? null
+                  : createHash('sha256').update(target.previous).digest('hex'),
+            })),
+            output: preview.plan.targets[0]?.path,
+            replace: preview.plan.replace,
+            requiresForceAgreement: preview.plan.requiresForceAgreement,
+            policy:
+              options.destination === 'json'
+                ? null
+                : preview.plan.replace
+                  ? {
+                      inserts: impact?.classificationChanges?.insertedKeys ?? [],
+                      updates: impact?.classificationChanges?.changedKeys ?? [],
+                      deletes: impact?.classificationChanges?.deletedKeys ?? [],
+                    }
+                  : this.workflow?.analyzed && this.policyBaseline
+                    ? (() => {
+                        const changes = planLicenseMaintenanceChanges(
+                          this.workflow.analyzed.artifact,
+                          this.policyBaseline
+                        );
+                        return {
+                          inserts: changes.insertedKeys,
+                          updates: changes.changedKeys,
+                          deletes: changes.deletedKeys,
+                        };
+                      })()
+                    : null,
+            forecast: impact
+              ? {
+                  context: impact.context,
+                  changedStatuses: impact.changes.length,
+                  gains: impact.ttsGains,
+                  losses: impact.ttsLosses,
+                  missingClassifications: impact.missingClassifications.length,
+                  preservationWarning: impact.preservationWarning,
+                }
+              : null,
+            review: review
+              ? { status: review.status, reasons: 'reasons' in review ? review.reasons : [] }
+              : null,
+            incomplete: this.practiceMode || review?.status !== 'ready',
+          }
+        : null,
       activeOperationId: this.activeOperationId ?? null,
       latestOperation: this.latestOperationId ? this.operation(this.latestOperationId) : null,
     };
   }
 
   operation(id: string) {
-    const operation = this.operations.get(id);
-    return operation ? { ...operation.snapshot } : null;
+    return structuredClone(this.operations.get(id)?.snapshot ?? null);
   }
 
   listReview(query: LicenseReviewQuery) {
@@ -235,6 +289,9 @@ export class LicenseWorkbenchSession {
       this.selectedPracticePath = body.input === 'Bundled example' ? null : body.input.trim();
       this.configurationRevision++;
       this.inspected = undefined;
+      this.sourceHash = undefined;
+      this.policyBaseline = undefined;
+      this.reports.clear();
       this.latestOperationId = undefined;
       return this.visible;
     }
@@ -261,8 +318,11 @@ export class LicenseWorkbenchSession {
       );
     }
     this.configurationRevision++;
+    this.reports.clear();
     this.options = options;
     this.inspected = undefined;
+    this.sourceHash = undefined;
+    this.policyBaseline = undefined;
     this.latestOperationId = undefined;
     this.databaseTarget = 'Configured environment database; identity checked at Inspect';
     return this.visible;
@@ -312,6 +372,13 @@ export class LicenseWorkbenchSession {
       (result) => {
         if (kind === 'inspect' && 'preflight' in result)
           this.inspected = { inspectedAt: result.inspectedAt, preflight: result.preflight };
+        if (kind === 'inspect' && 'inputBytes' in result)
+          this.sourceHash =
+            result.inputBytes === null
+              ? undefined
+              : createHash('sha256').update(result.inputBytes).digest('hex');
+        if (kind === 'inspect' && 'database' in result)
+          this.policyBaseline = result.database?.classifications;
         if (
           kind === 'inspect' &&
           (this.options.source === 'database' || this.options.destination !== 'json')
@@ -331,7 +398,7 @@ export class LicenseWorkbenchSession {
       },
       (error: unknown) => {
         operation.state = 'failed';
-        operation.error = browserError(error);
+        operation.error = licenseWorkbenchBrowserError(error);
         this.activeOperationId = undefined;
       }
     );
@@ -371,10 +438,58 @@ export class LicenseWorkbenchSession {
   }
 
   async previewPractice(configurationRevision: number, contentRevision: number) {
-    if (!this.practiceMode || !this.workflow) throw new Error('Practice preview is unavailable');
+    return this.preview(configurationRevision, contentRevision, true);
+  }
+
+  async preview(configurationRevision: number, contentRevision: number, practice = false) {
+    if (this.practiceMode !== practice || !this.workflow)
+      throw new Error('Preview is unavailable in this mode');
+    if (this.activeOperationId) throw new Error('An operation is running');
     if (configurationRevision !== this.configurationRevision)
       throw new Error('Stale configuration revision');
     return this.workflow.preview(this.workflow.status.configurationRevision, contentRevision);
+  }
+
+  attest(body: {
+    configurationRevision: number;
+    contentRevision: number;
+    reviewContentHash: string;
+    reviewedBy: string;
+    reviewReason: string;
+    responsibility: true;
+  }) {
+    if (this.practiceMode || !this.workflow) throw new Error('Attestation is unavailable');
+    if (this.activeOperationId) throw new Error('An operation is running');
+    if (body.configurationRevision !== this.configurationRevision)
+      throw new Error('Stale configuration revision');
+    return this.workflow.attest(
+      {
+        reviewedBy: body.reviewedBy,
+        reviewReason: body.reviewReason,
+        reviewedAt: new Date().toISOString(),
+      },
+      this.workflow.status.configurationRevision,
+      body.contentRevision,
+      body.reviewContentHash
+    );
+  }
+
+  async inspectReport(body: {
+    configurationRevision: number;
+    contentRevision: number;
+    format: 'html' | 'markdown';
+    path: string;
+  }) {
+    if (this.practiceMode || !this.workflow)
+      throw new Error('Practice cannot inspect report targets');
+    if (this.activeOperationId) throw new Error('An operation is running');
+    return this.reports.inspect(this.workflow, this.configurationRevision, body);
+  }
+
+  exportReport(body: { planId: string; operationId: string; agreeToOverwrite: boolean }) {
+    if (this.practiceMode || !this.workflow) throw new Error('Practice cannot export reports');
+    if (this.activeOperationId) throw new Error('An operation is running');
+    return this.reports.export(this.workflow, this.configurationRevision, body);
   }
 
   async savePractice(body: {
@@ -392,7 +507,7 @@ export class LicenseWorkbenchSession {
     });
   }
 
-  async close() {
-    await this.workflow?.close();
+  close() {
+    return this.workflow?.close();
   }
 }

@@ -13,21 +13,14 @@ import type {
 } from './license-database.types';
 
 import { licenseArtifactSchema, licenseClassificationSchema } from '../license-artifact.schemas';
-import { licenseDatabaseProjection } from './license-database-projection';
+import {
+  licenseDatabaseProjection,
+  licenseRationaleText,
+  selectLicenseMaintenanceRows,
+} from './license-database-projection';
 import { LicensePolicyDriftError } from './license-database.types';
 
 type LicenseDb = typeof import('@/db').db;
-
-function rationaleText(content: (typeof license_classifications.$inferSelect)['rationale']) {
-  return typeof content === 'string'
-    ? content
-    : content &&
-        !Array.isArray(content) &&
-        typeof content === 'object' &&
-        typeof content.text === 'string'
-      ? content.text
-      : JSON.stringify(content) || 'No recorded rationale';
-}
 
 export async function getClassifications(tx?: DbTransaction | LicenseDb) {
   const connection = tx ?? (await import('@/db')).db;
@@ -65,7 +58,7 @@ export async function loadClassificationSnapshot(
   const classifications: StoredLicenseClassification[] = rows.map((row) => {
     const content = row.rationale;
     // Existing card rows may contain only a rationale; model/human evidence is optional.
-    const text = rationaleText(content);
+    const text = licenseRationaleText(content);
     const metadata =
       content && typeof content === 'object' && !Array.isArray(content) ? content : {};
     const evidence = licenseClassificationSchema.safeParse(metadata.evidence);
@@ -173,21 +166,11 @@ export async function applyClassifications(
       throw new Error(
         'The classification table is now nonempty; --force is required before replacement'
       );
-    const sources = new Map(
-      artifact.classifications.map((row) => [row.normalizedText, row.source])
-    );
     // A legacy table row may have no evidence to export. Maintenance must not invent
     // replacement provenance or churn its timestamps for an unchanged authoritative decision.
-    const rows = proposed.filter((row) => {
-      const old = existing.get(row.normalizedText);
-      return (
-        replace ||
-        sources.get(row.normalizedText) !== 'table' ||
-        !old ||
-        old.status !== row.status ||
-        rationaleText(old.rationale) !== row.rationale.text
-      );
-    });
+    const rows = replace
+      ? proposed
+      : selectLicenseMaintenanceRows(artifact, [...existing.values()]);
     if (replace) {
       const keys = proposed.map((row) => row.normalizedText);
       await tx

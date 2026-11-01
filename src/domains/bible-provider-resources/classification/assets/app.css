@@ -157,7 +157,9 @@ pre {
   overflow-wrap: anywhere;
 }
 #practice-location,
-#practice-preview-result {
+#practice-preview-result,
+#preview-result,
+#report-target {
   overflow-wrap: anywhere;
 }
 .review-filter {

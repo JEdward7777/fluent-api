@@ -174,6 +174,63 @@ function createLicenseWorkbenchApp(
       return c.text(error instanceof Error ? error.message : 'Preview failed', 409);
     }
   });
+  app.post('/api/preview', async (c) => {
+    const parsed = revisionSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid preview revision', 400);
+    try {
+      await session.preview(parsed.data.configurationRevision, parsed.data.contentRevision);
+      return c.json(session.visible);
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Preview failed', 409);
+    }
+  });
+  app.post('/api/attest', async (c) => {
+    const parsed = revisionSchema
+      .extend({
+        reviewContentHash: z.string().regex(/^[a-f0-9]{64}$/),
+        reviewedBy: z.string().trim().min(1).max(200),
+        reviewReason: z.string().trim().min(1).max(2000),
+        responsibility: z.literal(true),
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid attestation fields', 400);
+    try {
+      session.attest(parsed.data);
+      return c.json(session.visible);
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Attestation failed', 409);
+    }
+  });
+  app.post('/api/report/inspect', async (c) => {
+    const parsed = revisionSchema
+      .extend({
+        format: z.enum(['html', 'markdown']),
+        path: z.string().trim().min(1).max(4096),
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid report target', 400);
+    try {
+      return c.json(await session.inspectReport(parsed.data));
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Report inspection failed', 409);
+    }
+  });
+  app.post('/api/report/export', async (c) => {
+    const parsed = z
+      .object({
+        planId: z.string().uuid(),
+        operationId: z.string().uuid(),
+        agreeToOverwrite: z.boolean(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid report export', 400);
+    try {
+      return c.json(await session.exportReport(parsed.data));
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Report export failed', 409);
+    }
+  });
   app.post('/api/practice/save', async (c) => {
     const parsed = revisionSchema
       .extend({ operationId: z.string().uuid() })

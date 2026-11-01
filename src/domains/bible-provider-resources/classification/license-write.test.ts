@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { readFile, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +16,14 @@ afterEach(async () => {
 });
 
 describe('bounded file/database compensation', () => {
+  it('rejects invalid UTF-8 before an exact byte baseline can be recorded', async () => {
+    const f = await fixture();
+    await writeFile(f.output, Buffer.from([255]));
+    await expect(licenseFileIo.read(f.output)).rejects.toThrow('not valid UTF-8');
+    await writeFile(f.output, Buffer.from([254]));
+    await expect(licenseFileIo.read(f.output)).rejects.toThrow('not valid UTF-8');
+    expect(await readFile(f.output)).toEqual(Buffer.from([254]));
+  });
   it('rejects input and target drift before staging or database apply', async () => {
     const f = await fixture();
     await writeFile(f.input, 'external input');
