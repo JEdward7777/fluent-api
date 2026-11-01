@@ -7,8 +7,8 @@ import { makeCommandFixture } from './license-command.test-fixtures';
 import { LicenseWorkflow } from './license-workflow';
 
 const fixtures: Awaited<ReturnType<typeof makeCommandFixture>>[] = [];
-async function fixture() {
-  const value = await makeCommandFixture();
+async function fixture(attested = true) {
+  const value = await makeCommandFixture(attested);
   fixtures.push(value);
   return value;
 }
@@ -226,6 +226,7 @@ describe('license workflow inspection and analysis', () => {
     await expect(workflow.configure(f.options, 1)).rejects.toThrow('Cannot configure');
     const closing = workflow.close();
     expect(f.adapter.close).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(finishLoad).toBeTypeOf('function'));
     finishLoad!();
     await inspecting;
     await closing;
@@ -240,6 +241,166 @@ describe('license workflow inspection and analysis', () => {
     await expect(workflow.inspect(1)).rejects.toThrow('at least two');
     expect(f.dependencies.database).not.toHaveBeenCalled();
     expect(f.dependencies.transport).not.toHaveBeenCalled();
+    await workflow.close();
+  });
+
+  it('edits an exact row, invalidates preview, and requires the attested bytes to be previewed again', async () => {
+    const f = await fixture(false);
+    const workflow = new LicenseWorkflow(f.options, f.dependencies);
+    await workflow.inspect(1);
+    const initial = await workflow.startAnalysis(1);
+    const original = await workflow.preview(1, 1);
+    expect(original.reports.artifactBytes).toContain('"reviewState": "incomplete"');
+    expect(f.dependencies.transport).not.toHaveBeenCalled();
+    const key = initial.artifact.classifications[0].normalizedText;
+    const edited = workflow.editReview(
+      {
+        kind: 'disposition',
+        normalizedText: key,
+        status: 'allowed',
+        reason: 'Checked source terms.',
+      },
+      1,
+      1
+    );
+    expect(edited.warning).toContain('all-rights-reserved');
+    expect(edited.analysis!.contentRevision).toBe(2);
+    expect(workflow.previewed).toBeUndefined();
+    expect(() =>
+      workflow.attest(
+        { reviewedBy: 'Reviewer', reviewReason: 'Checked', reviewedAt: '2026-11-01T00:00:00.000Z' },
+        1,
+        2,
+        original.reports.reviewContentHash
+      )
+    ).toThrow('Preview');
+    await expect(workflow.preview(1, 1)).rejects.toThrow('Stale');
+    const changed = await workflow.preview(1, 2);
+    expect(changed.reports.reviewContentHash).not.toBe(original.reports.reviewContentHash);
+    const attested = workflow.attest(
+      {
+        reviewedBy: 'Reviewer',
+        reviewReason: 'Checked exact candidate',
+        reviewedAt: '2026-11-01T00:00:00.000Z',
+      },
+      1,
+      2,
+      changed.reports.reviewContentHash
+    );
+    expect(attested.contentRevision).toBe(3);
+    expect(workflow.previewed).toBeUndefined();
+    expect(attested.artifact.attestation?.reviewedBy).toBe('Reviewer');
+    const signed = await workflow.preview(1, 3);
+    expect(signed.reports.wholeFileHash).not.toBe(changed.reports.wholeFileHash);
+    expect(signed.reports.reviewContentHash).toBe(changed.reports.reviewContentHash);
+    await workflow.close();
+  });
+
+  it('rejects stale review commands, missing unknown notes, and catalogue drift before preview', async () => {
+    const f = await fixture(false);
+    const workflow = new LicenseWorkflow({ ...f.options, destination: 'database' }, f.dependencies);
+    await workflow.inspect(1);
+    await workflow.startAnalysis(1);
+    const unknown = workflow.analyzed!.artifact.classifications.find(
+      (row) => row.status === 'unknown'
+    )!;
+    expect(() =>
+      workflow.editReview(
+        { kind: 'unknown-note', normalizedText: unknown.normalizedText, note: '' },
+        1,
+        1
+      )
+    ).toThrow('nonempty');
+    const updated = workflow.editReview(
+      {
+        kind: 'unknown-note',
+        normalizedText: unknown.normalizedText,
+        note: 'Reviewed retained uncertainty.',
+      },
+      1,
+      1
+    );
+    expect(updated.analysis!.contentRevision).toBe(2);
+    expect(() =>
+      workflow.editReview(
+        { kind: 'unknown-note', normalizedText: unknown.normalizedText, note: 'Stale.' },
+        1,
+        1
+      )
+    ).toThrow('Stale');
+    f.snapshot.context.resources[0].name = 'Externally changed catalogue';
+    await expect(workflow.preview(1, 2)).rejects.toThrow('Inspect inputs again');
+    expect(workflow.status.state).toBe('configuring');
+    expect(workflow.analyzed).toBeUndefined();
+    await workflow.close();
+  });
+
+  it('blocks edits and reconfiguration during preview and waits for the read before closing', async () => {
+    const f = await fixture();
+    const workflow = new LicenseWorkflow({ ...f.options, destination: 'database' }, f.dependencies);
+    await workflow.inspect(1);
+    await workflow.startAnalysis(1);
+    let finishLoad: (() => void) | undefined;
+    f.adapter.load.mockImplementationOnce(
+      () =>
+        new Promise<typeof f.snapshot>((resolve) => {
+          finishLoad = () => resolve(structuredClone(f.snapshot));
+        })
+    );
+    const pending = workflow.preview(1, 1);
+    const retry = workflow.preview(1, 1);
+    expect(workflow.status.state).toBe('previewing');
+    expect(() =>
+      workflow.editReview(
+        {
+          kind: 'unknown-note',
+          normalizedText: f.artifact.classifications[2].normalizedText,
+          note: 'Checked',
+        },
+        1,
+        1
+      )
+    ).toThrow('Cannot edit');
+    await expect(workflow.configure(f.options, 1)).rejects.toThrow('Cannot configure');
+    const closing = workflow.close();
+    expect(f.adapter.close).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(finishLoad).toBeTypeOf('function'));
+    finishLoad!();
+    const [first, repeated] = await Promise.all([pending, retry]);
+    expect(repeated).toBe(first);
+    await closing;
+    expect(workflow.status.state).toBe('closed');
+    expect(f.adapter.close).toHaveBeenCalledOnce();
+  });
+
+  it('rechecks a completed preview before returning it again or accepting later attestation', async () => {
+    const f = await fixture(false);
+    const files = new Map([[f.input, f.sourceBytes]]);
+    const workflow = new LicenseWorkflow(f.options, {
+      ...f.dependencies,
+      fs: {
+        read: async (path) => files.get(path) ?? null,
+        write: vi.fn(),
+        rename: vi.fn(),
+        remove: vi.fn(),
+        mkdir: vi.fn(),
+      },
+    });
+    await workflow.inspect(1);
+    await workflow.startAnalysis(1);
+    const first = await workflow.preview(1, 1);
+    files.set(f.input, 'externally changed after preview');
+    await expect(workflow.preview(1, 1)).rejects.toThrow('Inspect inputs again');
+    expect(workflow.previewed).toBeUndefined();
+    expect(workflow.status.state).toBe('configuring');
+    expect(() =>
+      workflow.attest(
+        { reviewedBy: 'Reviewer', reviewReason: 'Checked', reviewedAt: '2026-11-01T00:00:00.000Z' },
+        1,
+        1,
+        first.reports.reviewContentHash
+      )
+    ).toThrow('Preview');
     await workflow.close();
   });
 });

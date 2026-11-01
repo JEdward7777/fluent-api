@@ -8,11 +8,11 @@ import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type { LicenseFileIo } from './license-write';
 
-import { attestLicenseArtifact, checkLicenseArtifactReview } from '../license-artifact';
+import { checkLicenseArtifactReview } from '../license-artifact';
 import { licenseInlineSummary } from '../license-report-model';
 import { renderLicenseReports } from '../license-reports';
 import { runLicenseReview } from '../license-review';
-import { freezeLicenseRevision, freezeReviewValue } from '../license-review-revision';
+import { freezeReviewValue } from '../license-review-revision';
 import { planLicenseDatabaseChanges } from './license-database-projection';
 import { LicenseBootstrapRequiredError, LicenseWorkflow } from './license-workflow';
 import { licenseFileIo, writeLicenseDestinations } from './license-write';
@@ -119,6 +119,26 @@ export async function runLicenseCommand(
         io,
         regenerateReports: emitReports,
         now: dependencies.now,
+        edit: (change) =>
+          workflow!.editReview(
+            change,
+            workflow!.status.configurationRevision,
+            workflow!.status.contentRevision
+          ).analysis!.artifact,
+        preview: async () =>
+          (
+            await workflow!.preview(
+              workflow!.status.configurationRevision,
+              workflow!.status.contentRevision
+            )
+          ).reports,
+        attest: (metadata, reviewHash) =>
+          workflow!.attest(
+            metadata,
+            workflow!.status.configurationRevision,
+            workflow!.status.contentRevision,
+            reviewHash
+          ).artifact,
       });
       artifact = reviewed.artifact;
       reports = reviewed.reports;
@@ -128,13 +148,21 @@ export async function runLicenseCommand(
     if (options.yes && options.reviewer?.trim() && options.reviewReason?.trim()) {
       // Unknowns require genuine row notes; unattended signing never invents them.
       if (!artifact.classifications.some((row) => row.status === 'unknown' && !row.rowNote))
-        artifact = freezeLicenseRevision(
-          attestLicenseArtifact(artifact, {
+        artifact = workflow.attest(
+          {
             reviewedBy: options.reviewer,
             reviewReason: options.reviewReason,
             reviewedAt: dependencies.now?.() ?? new Date().toISOString(),
-          })
-        );
+          },
+          workflow.status.configurationRevision,
+          workflow.status.contentRevision,
+          (
+            await workflow.preview(
+              workflow.status.configurationRevision,
+              workflow.status.contentRevision
+            )
+          ).reports.reviewContentHash
+        ).artifact;
     }
     reports = renderLicenseReports(artifact, config);
     await emitReports(reports);
