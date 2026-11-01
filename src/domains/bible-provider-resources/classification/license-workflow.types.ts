@@ -16,6 +16,7 @@ export type LicenseWorkflowState =
   | 'previewing'
   | 'previewed'
   | 'saving'
+  | 'exporting'
   | 'saved'
   | 'uncertain'
   | 'error'
@@ -58,6 +59,29 @@ export interface LicenseSaveRequest {
   configurationRevision: number;
   contentRevision: number;
   agreeToReplace: boolean;
+}
+
+export interface LicenseReadOperationRequest {
+  operationId: string;
+  configurationRevision: number;
+}
+
+export interface LicenseReportExportRequest {
+  operationId: string;
+  configurationRevision: number;
+  contentRevision: number;
+  format: 'html' | 'markdown';
+  path: string;
+  expectedPreviousBytes: string | null;
+  agreeToOverwrite: boolean;
+}
+
+export interface LicenseReportExportResult {
+  operationId: string;
+  configurationRevision: number;
+  contentRevision: number;
+  path: string;
+  format: LicenseReportExportRequest['format'];
 }
 
 export interface LicenseSaveResult {
