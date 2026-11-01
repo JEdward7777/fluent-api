@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LlmTransportError } from '@/lib/llm/structured-request';
 
-import { checkLicenseArtifactReview, serializeLicenseArtifact } from '../license-artifact';
+import {
+  checkLicenseArtifactReview,
+  overrideLicenseClassification,
+  serializeLicenseArtifact,
+} from '../license-artifact';
 import { runLicenseCommand } from './license-command';
 import { makeCommandFixture } from './license-command.test-fixtures';
 import { licenseFileIo } from './license-write';
@@ -406,6 +410,44 @@ describe('license command source/destination and responsibility boundary', () =>
       expect(report).toContain(output.reviewContentHash);
       expect(report).toContain('Explicit reviewer');
     }
+    expect(f.dependencies.transport).not.toHaveBeenCalled();
+  });
+  it('can attest after an interactive edit is reverted to the same bytes without republishing reports', async () => {
+    const f = await fixture(false);
+    const key = f.artifact.classifications[0].normalizedText;
+    f.artifact = overrideLicenseClassification(
+      f.artifact,
+      key,
+      'forbidden',
+      'Original human rationale.'
+    ).artifact;
+    f.sourceBytes = serializeLicenseArtifact(f.artifact).bytes;
+    await writeFile(f.input, f.sourceBytes);
+    f.io.ask
+      .mockResolvedValueOnce('R')
+      .mockResolvedValueOnce('1')
+      .mockResolvedValueOnce('forbidden')
+      .mockResolvedValueOnce('Different human rationale.')
+      .mockResolvedValueOnce('1')
+      .mockResolvedValueOnce('forbidden')
+      .mockResolvedValueOnce('Original human rationale.')
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('W')
+      .mockResolvedValueOnce('yes')
+      .mockResolvedValueOnce('Explicit reviewer')
+      .mockResolvedValueOnce('Checked reverted exact revision')
+      .mockResolvedValueOnce('yes');
+    expect(
+      await runLicenseCommand(
+        { ...f.options, yes: false },
+        { ...f.dependencies, interactive: true }
+      )
+    ).toBe(2);
+    expect(f.messages.at(-1)).toContain('Wrote decisions');
+    const output = await f.readOutput();
+    expect(checkLicenseArtifactReview(output).status).toBe('ready');
+    expect(output.attestation?.reviewedBy).toBe('Explicit reviewer');
+    expect(output.classifications[0].rationale).toBe('Original human rationale.');
     expect(f.dependencies.transport).not.toHaveBeenCalled();
   });
   it('rewrites an already attested cross-only source when explicitly signing a new review attribution, without formatting-only rewrites', async () => {

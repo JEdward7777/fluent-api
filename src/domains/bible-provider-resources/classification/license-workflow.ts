@@ -3,15 +3,24 @@ import { resolve } from 'node:path';
 import type { LlmTransport } from '@/lib/llm/structured-request';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
+import type { LicenseReportBundle } from '../license-reports';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter, LicenseDatabaseSnapshot } from './license-database.types';
 import type { LicensePreflight } from './license-preflight';
 import type { LicenseFileIo } from './license-write';
 
-import { checkLicenseArtifactReview } from '../license-artifact';
+import {
+  attestLicenseArtifact,
+  checkLicenseArtifactReview,
+  overrideLicenseClassification,
+  reviseLicenseArtifact,
+  serializeLicenseArtifact,
+} from '../license-artifact';
 import { createLicenseClassifier } from '../license-classifier';
+import { renderLicenseReports } from '../license-reports';
 import { freezeLicenseRevision, freezeReviewValue } from '../license-review-revision';
 import { analyzeDatabaseLicenses } from './license-analysis';
+import { LicenseInspectionStaleError, requireFreshLicenseSources } from './license-freshness';
 import { inspectLicensePreflight } from './license-preflight';
 import { licenseFileIo } from './license-write';
 
@@ -22,6 +31,8 @@ type LicenseWorkflowState =
   | 'inspected'
   | 'analyzing'
   | 'reviewing'
+  | 'previewing'
+  | 'previewed'
   | 'error'
   | 'closed';
 
@@ -41,6 +52,21 @@ interface LicenseAnalysis {
   originalSourceArtifact?: LicenseArtifact;
 }
 
+export type LicenseReviewEdit =
+  | {
+      kind: 'disposition';
+      normalizedText: string;
+      status: LicenseArtifact['classifications'][number]['status'];
+      reason: string;
+    }
+  | { kind: 'unknown-note'; normalizedText: string; note: string };
+
+interface LicensePreview {
+  configurationRevision: number;
+  contentRevision: number;
+  reports: LicenseReportBundle;
+}
+
 interface LicenseWorkflowDependencies {
   apiKey: string;
   fs?: LicenseFileIo;
@@ -51,30 +77,10 @@ interface LicenseWorkflowDependencies {
   legacySkipFreshness?: boolean;
 }
 
-class LicenseInspectionStaleError extends Error {
-  constructor() {
-    super('Inspected inputs changed. Inspect inputs again before starting analysis.');
-    this.name = 'LicenseInspectionStaleError';
-  }
-}
-
 function parseArtifact(bytes: string): LicenseArtifact {
   const checked = checkLicenseArtifactReview(JSON.parse(bytes));
   if (checked.status === 'invalid') throw new Error(checked.reason);
   return checked.artifact;
-}
-
-function comparableDatabase(snapshot: LicenseDatabaseSnapshot | undefined) {
-  if (!snapshot) return undefined;
-  const byBytes = <T>(rows: T[]) => rows.map((row) => JSON.stringify(row)).sort();
-  return {
-    tableExists: snapshot.tableExists,
-    classifications: byBytes(snapshot.classifications),
-    context: {
-      ...snapshot.context,
-      resources: byBytes(snapshot.context.resources),
-    },
-  };
 }
 
 export class LicenseBootstrapRequiredError extends Error {
@@ -86,13 +92,14 @@ export class LicenseBootstrapRequiredError extends Error {
   }
 }
 
-/** Invocation-owned operations. Browser freshness/preflight and publication gates are separate work. */
 export class LicenseWorkflow {
   private options: LicenseCommandOptions;
   private dependencies: LicenseWorkflowDependencies;
   private database?: LicenseDatabaseAdapter;
   private inspection?: LicenseInspection;
   private analysis?: LicenseAnalysis;
+  private previewResult?: LicensePreview;
+  private previewPromise?: Promise<LicensePreview>;
   private configurationRevision = 1;
   private contentRevision = 0;
   private state: LicenseWorkflowState = 'configuring';
@@ -122,13 +129,17 @@ export class LicenseWorkflow {
     return this.analysis;
   }
 
+  get previewed() {
+    return this.previewResult;
+  }
+
   get databaseAdapter() {
     return this.database;
   }
 
   async configure(options: LicenseCommandOptions, expectedRevision: number) {
     this.requireRevision(expectedRevision);
-    if (this.state === 'inspecting' || this.state === 'analyzing' || this.state === 'reconfiguring')
+    if (['inspecting', 'analyzing', 'previewing', 'reconfiguring'].includes(this.state))
       throw new Error(`Cannot configure while ${this.state}`);
     this.state = 'reconfiguring';
     this.beginBusy();
@@ -138,6 +149,7 @@ export class LicenseWorkflow {
       this.options = freezeReviewValue(options);
       this.inspection = undefined;
       this.analysis = undefined;
+      this.previewResult = undefined;
       this.configurationRevision++;
       this.contentRevision = 0;
       this.state = 'configuring';
@@ -282,23 +294,155 @@ export class LicenseWorkflow {
     }
   }
 
+  editReview(
+    edit: LicenseReviewEdit,
+    expectedConfigurationRevision: number,
+    expectedContentRevision: number
+  ) {
+    this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
+    if (!this.analysis || !['reviewing', 'previewed'].includes(this.state))
+      throw new Error(`Cannot edit review while ${this.state}`);
+    const before = this.analysis.artifact;
+    let revised: LicenseArtifact;
+    let warning: string | null = null;
+    if (edit.kind === 'disposition') {
+      const result = overrideLicenseClassification(
+        before,
+        edit.normalizedText,
+        edit.status,
+        edit.reason
+      );
+      revised = result.artifact;
+      warning = result.warning;
+    } else {
+      if (!edit.note.trim()) throw new Error('A retained unknown requires a nonempty human note');
+      const row = before.classifications.find(
+        (candidate) => candidate.normalizedText === edit.normalizedText
+      );
+      if (!row) throw new Error('No exact normalized classification exists');
+      if (row.status !== 'unknown')
+        throw new Error('Human row notes are for retained unknown classifications');
+      revised = reviseLicenseArtifact(before, (draft) => {
+        draft.classifications.find(
+          (candidate) => candidate.normalizedText === edit.normalizedText
+        )!.rowNote = edit.note;
+      });
+    }
+    const artifact = freezeLicenseRevision(revised);
+    if (serializeLicenseArtifact(artifact).bytes !== serializeLicenseArtifact(before).bytes) {
+      this.analysis = freezeReviewValue({
+        ...this.analysis,
+        contentRevision: ++this.contentRevision,
+        artifact,
+      });
+      this.previewResult = undefined;
+      this.state = 'reviewing';
+    }
+    return freezeReviewValue({ analysis: this.analysis, warning });
+  }
+
+  async preview(
+    expectedConfigurationRevision: number,
+    expectedContentRevision: number
+  ): Promise<LicensePreview> {
+    this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
+    if (this.state === 'previewing' && this.previewPromise) return this.previewPromise;
+    if (!this.analysis || !this.inspection || !['reviewing', 'previewed'].includes(this.state))
+      throw new Error(`Cannot preview while ${this.state}`);
+    this.state = 'previewing';
+    this.beginBusy();
+    this.previewPromise = this.performPreview(this.inspection, this.analysis);
+    return this.previewPromise;
+  }
+
+  private async performPreview(
+    inspection: LicenseInspection,
+    analysis: LicenseAnalysis
+  ): Promise<LicensePreview> {
+    try {
+      if (!this.dependencies.legacySkipFreshness)
+        await requireFreshLicenseSources(
+          inspection,
+          this.options,
+          this.dependencies.fs ?? licenseFileIo,
+          this.database
+        );
+      const snapshot = inspection.database;
+      const replace = this.options.source === 'json' && this.options.destination !== 'json';
+      const reports = renderLicenseReports(analysis.artifact, {
+        formats: this.options.reportFormats,
+        outputDir: this.options.reportDir,
+        interactive: false,
+        yes: false,
+        database: snapshot
+          ? {
+              ...snapshot.context,
+              ...(replace
+                ? { classificationTable: { existing: snapshot.classifications, replace: true } }
+                : {}),
+            }
+          : undefined,
+        preserveExistingNonUnknowns: this.options.preserveExistingNonUnknowns,
+      });
+      this.previewResult = freezeReviewValue({
+        configurationRevision: this.configurationRevision,
+        contentRevision: this.contentRevision,
+        reports,
+      });
+      this.state = 'previewed';
+      return this.previewResult;
+    } catch (error) {
+      this.previewResult = undefined;
+      if (error instanceof LicenseInspectionStaleError) {
+        this.inspection = undefined;
+        this.analysis = undefined;
+        this.state = 'configuring';
+      } else this.state = 'reviewing';
+      throw error;
+    } finally {
+      this.previewPromise = undefined;
+      this.endBusy();
+    }
+  }
+
+  attest(
+    metadata: { reviewedBy: string; reviewReason: string; reviewedAt: string },
+    expectedConfigurationRevision: number,
+    expectedContentRevision: number,
+    expectedReviewHash: string
+  ) {
+    this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
+    if (!this.analysis || this.state !== 'previewed' || !this.previewResult)
+      throw new Error('Preview this exact revision before attestation');
+    if (this.previewResult.reports.reviewContentHash !== expectedReviewHash)
+      throw new Error('Stale license review hash');
+    if (!metadata.reviewedBy.trim() || !metadata.reviewReason.trim())
+      throw new Error('Reviewer identity and review reason are required');
+    const artifact = freezeLicenseRevision(attestLicenseArtifact(this.analysis.artifact, metadata));
+    if (
+      serializeLicenseArtifact(artifact).bytes !==
+      serializeLicenseArtifact(this.analysis.artifact).bytes
+    )
+      this.analysis = freezeReviewValue({
+        ...this.analysis,
+        contentRevision: ++this.contentRevision,
+        artifact,
+      });
+    this.previewResult = undefined;
+    this.state = 'reviewing';
+    return this.analysis;
+  }
+
   private async requireFreshInspection(
     inspection: LicenseInspection,
     options: LicenseCommandOptions
   ) {
-    const fs = this.dependencies.fs ?? licenseFileIo;
-    const samePath = resolve(options.output) === resolve(options.input);
-    const inputBytes = options.source === 'json' ? await fs.read(options.input) : null;
-    const outputBytes =
-      samePath && options.source === 'json' ? inputBytes : await fs.read(options.output);
-    if (inputBytes !== inspection.inputBytes || outputBytes !== inspection.outputBytes)
-      throw new LicenseInspectionStaleError();
-    const database = this.database ? await this.database.load() : undefined;
-    if (
-      JSON.stringify(comparableDatabase(database)) !==
-      JSON.stringify(comparableDatabase(inspection.database))
-    )
-      throw new LicenseInspectionStaleError();
+    const { inputBytes, database } = await requireFreshLicenseSources(
+      inspection,
+      options,
+      this.dependencies.fs ?? licenseFileIo,
+      this.database
+    );
     const preflight = await inspectLicensePreflight({
       database: options.source === 'database' ? database : undefined,
       jsonClassificationKeys:
@@ -330,6 +474,15 @@ export class LicenseWorkflow {
     if (expectedRevision !== this.configurationRevision)
       throw new Error('Stale license workflow configuration revision');
     if (this.state === 'closed' || this.closing) throw new Error('License workflow is closed');
+  }
+
+  private requireContentRevision(
+    expectedConfigurationRevision: number,
+    expectedContentRevision: number
+  ) {
+    this.requireRevision(expectedConfigurationRevision);
+    if (expectedContentRevision !== this.contentRevision)
+      throw new Error('Stale license workflow content revision');
   }
 
   private beginBusy() {
