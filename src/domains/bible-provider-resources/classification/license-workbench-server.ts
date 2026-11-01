@@ -131,18 +131,35 @@ function createLicenseWorkbenchApp(
       contentRevision: z.number().int().positive(),
     })
     .strict();
-  app.post('/api/practice/edit', async (c) => {
+  app.post('/api/review/edit', async (c) => {
     const parsed = revisionSchema
       .extend({
-        normalizedText: z.string(),
-        status: z.enum(['allowed', 'forbidden', 'unknown']),
-        reason: z.string().trim().min(1),
+        id: z.string().regex(/^[a-f0-9]{64}$/),
+        acknowledgeWarning: z.boolean(),
+        edit: z.discriminatedUnion('kind', [
+          z
+            .object({
+              kind: z.literal('disposition'),
+              normalizedText: z.string(),
+              status: z.enum(['allowed', 'forbidden', 'unknown']),
+              reason: z.string().trim().min(1),
+              unknownNote: z.string().trim().min(1).optional(),
+            })
+            .strict(),
+          z
+            .object({
+              kind: z.literal('unknown-note'),
+              normalizedText: z.string(),
+              note: z.string().trim().min(1),
+            })
+            .strict(),
+        ]),
       })
       .safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.text('Invalid practice edit', 400);
+    if (!parsed.success) return c.text('Invalid review edit', 400);
     try {
-      session.editPractice(parsed.data);
-      return c.json(session.visible);
+      const result = session.editReview(parsed.data);
+      return c.json({ setup: session.visible, warning: result.warning });
     } catch (error) {
       return c.text(error instanceof Error ? error.message : 'Edit failed', 409);
     }

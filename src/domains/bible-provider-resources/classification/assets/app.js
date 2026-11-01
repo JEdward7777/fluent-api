@@ -1,4 +1,4 @@
-import { initReview, updateReview } from './review.js';
+import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
 
 const launchedToken = window.location.hash.slice(1);
 if (launchedToken) window.sessionStorage.setItem('license-workbench-token', launchedToken);
@@ -14,6 +14,19 @@ let setup;
 let dirty = false;
 let practiceBusy = false;
 
+function syncPracticeDraftControls() {
+  if (!setup?.practice || !setup.analysis) return;
+  const blocked = hasUnsavedReviewDraft();
+  const busy = practiceBusy || Boolean(setup.activeOperationId);
+  document.getElementById('practice-preview').disabled = blocked || busy || setup.state === 'saved';
+  document.getElementById('practice-save').disabled = blocked || busy || !setup.preview;
+  document.getElementById('practice-preview-result').textContent = blocked
+    ? 'Apply this row edit or use Back to results to discard it before previewing or saving.'
+    : setup.preview
+      ? `Scratch output: ${setup.preview.output}. SHA-256: ${setup.preview.wholeFileHash}. This remains incomplete and carries no practice attestation.`
+      : 'Preview the exact edited revision before saving.';
+}
+
 async function request(path, method = 'GET', body) {
   const response = await fetch(`/api/${path}`, {
     method,
@@ -26,7 +39,15 @@ async function request(path, method = 'GET', body) {
   if (!response.ok) throw new Error(await response.text());
   return response.json();
 }
-initReview(request);
+initReview(
+  request,
+  async (body) => {
+    const result = await request('review/edit', 'POST', body);
+    render(result.setup);
+    return result;
+  },
+  syncPracticeDraftControls
+);
 function render(next, populate = false) {
   setup = next;
   updateReview(next);
@@ -149,27 +170,7 @@ function render(next, populate = false) {
   else status.textContent = `Session ${next.state}. Apply settings, then Inspect inputs.`;
   const practiceReview = document.getElementById('practice-review');
   practiceReview.hidden = !next.practice || !next.analysis;
-  if (next.practice && next.analysis) {
-    const rowSelect = document.getElementById('practice-row');
-    const selected = rowSelect.value;
-    rowSelect.replaceChildren(
-      ...next.practiceRows.map(
-        (row) => new Option(`${row.status}: ${row.normalizedText}`, row.normalizedText)
-      )
-    );
-    if (next.practiceRows.some((row) => row.normalizedText === selected))
-      rowSelect.value = selected;
-    const row = next.practiceRows.find((item) => item.normalizedText === rowSelect.value);
-    if (row) document.getElementById('practice-status').value = row.status;
-    document.getElementById('practice-edit').disabled =
-      busy || practiceBusy || next.state === 'saved';
-    document.getElementById('practice-preview').disabled =
-      busy || practiceBusy || next.state === 'saved';
-    document.getElementById('practice-save').disabled = busy || practiceBusy || !next.preview;
-    document.getElementById('practice-preview-result').textContent = next.preview
-      ? `Scratch output: ${next.preview.output}. SHA-256: ${next.preview.wholeFileHash}. This remains incomplete and carries no practice attestation.`
-      : 'Preview the exact edited revision before saving.';
-  }
+  syncPracticeDraftControls();
 }
 async function refresh() {
   render(await request('setup'));
@@ -188,6 +189,12 @@ form.addEventListener('input', () => {
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
+    if (hasUnsavedReviewDraft()) {
+      status.textContent = 'Apply or discard the open row edit before changing settings.';
+      status.tabIndex = -1;
+      status.focus();
+      return;
+    }
     const values = form.elements;
     const discardReviewedState = Boolean(setup.analysis && values.discardReviewedState.checked);
     if (setup.analysis && !discardReviewedState) {
@@ -239,18 +246,17 @@ stop.addEventListener('click', async () => {
     status.textContent = error.message;
   }
 });
-document.getElementById('practice-row').addEventListener('change', () => {
-  const row = setup.practiceRows.find(
-    (item) => item.normalizedText === document.getElementById('practice-row').value
-  );
-  if (row) document.getElementById('practice-status').value = row.status;
-});
 async function practiceAction(path, body) {
   if (practiceBusy) return;
+  if (hasUnsavedReviewDraft()) {
+    status.textContent = 'Apply or discard the open row edit before previewing or saving.';
+    return;
+  }
   practiceBusy = true;
+  setReviewBusy(true);
   let failure;
   let latest;
-  for (const id of ['practice-edit', 'practice-preview', 'practice-save'])
+  for (const id of ['practice-preview', 'practice-save'])
     document.getElementById(id).disabled = true;
   try {
     render(await request(path, 'POST', body));
@@ -263,6 +269,7 @@ async function practiceAction(path, body) {
     }
   } finally {
     practiceBusy = false;
+    setReviewBusy(false);
     if (latest || setup) render(latest || setup);
     if (failure) {
       status.textContent = failure;
@@ -271,15 +278,6 @@ async function practiceAction(path, body) {
     }
   }
 }
-document.getElementById('practice-edit').addEventListener('click', () => {
-  void practiceAction('practice/edit', {
-    configurationRevision: setup.configurationRevision,
-    contentRevision: setup.contentRevision,
-    normalizedText: document.getElementById('practice-row').value,
-    status: document.getElementById('practice-status').value,
-    reason: document.getElementById('practice-reason').value,
-  });
-});
 document.getElementById('practice-preview').addEventListener('click', () => {
   void practiceAction('practice/preview', {
     configurationRevision: setup.configurationRevision,
