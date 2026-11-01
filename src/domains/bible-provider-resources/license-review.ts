@@ -1,3 +1,5 @@
+import type { LicenseReviewEdit } from './classification/license-workflow';
+import type { LicenseArtifact } from './license-artifact.schemas';
 import type { LicenseReportBundle, LicenseReportOptions } from './license-reports';
 import type { LicenseReviewIo } from './license-review.types';
 
@@ -23,6 +25,12 @@ interface ReviewOptions {
   io: LicenseReviewIo;
   regenerateReports?: (reports: LicenseReportBundle) => Promise<void>;
   now?: () => string;
+  edit?: (change: LicenseReviewEdit) => LicenseArtifact;
+  attest?: (
+    metadata: { reviewedBy: string; reviewReason: string; reviewedAt: string },
+    reviewHash: string
+  ) => LicenseArtifact;
+  preview?: () => Promise<LicenseReportBundle>;
 }
 const yes = (answer: string) => ['y', 'yes'].includes(answer.trim().toLowerCase());
 
@@ -43,7 +51,7 @@ export async function runLicenseReview(options: ReviewOptions) {
   let artifact = freezeLicenseRevision(options.artifact);
   let reports = renderLicenseReports(artifact, config);
   const regenerate = async () => {
-    reports = renderLicenseReports(artifact, config);
+    reports = options.preview ? await options.preview() : renderLicenseReports(artifact, config);
     await options.regenerateReports?.(reports);
     await io.write(licenseInlineSummary(reports.model));
     for (const report of reports.reports)
@@ -74,12 +82,13 @@ export async function runLicenseReview(options: ReviewOptions) {
         artifact,
         io,
         config.database,
-        config.preserveExistingNonUnknowns
+        config.preserveExistingNonUnknowns,
+        options.edit
       );
       if (serializeLicenseArtifact(edited).wholeFileHash !== reports.wholeFileHash) {
         artifact = freezeLicenseRevision(edited);
         await regenerate();
-      }
+      } else await options.preview?.();
       continue;
     }
     if (command !== 'W') {
@@ -111,13 +120,14 @@ export async function runLicenseReview(options: ReviewOptions) {
           await io.write('Identity and review reason are required; no attestation was added.');
           continue;
         }
-        artifact = freezeLicenseRevision(
-          attestLicenseArtifact(artifact, {
-            reviewedBy,
-            reviewReason,
-            reviewedAt: options.now?.() ?? new Date().toISOString(),
-          })
-        );
+        const metadata = {
+          reviewedBy,
+          reviewReason,
+          reviewedAt: options.now?.() ?? new Date().toISOString(),
+        };
+        artifact = options.attest
+          ? options.attest(metadata, artifact.reviewContentHash)
+          : freezeLicenseRevision(attestLicenseArtifact(artifact, metadata));
       } else {
         attestationDeclined = true;
         if (config.source === 'json' && config.destination !== 'json') {
