@@ -1,4 +1,9 @@
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+
 import type { DbTransaction } from '@/lib/types';
+
+import * as schema from '@/db/schema';
 
 import type { LicenseDatabaseAdapter } from './license-database.types';
 
@@ -12,6 +17,18 @@ export function getClassifications(tx?: DbTransaction) {
 
 export function createLicenseDatabaseAdapter(): LicenseDatabaseAdapter {
   return { load: repo.loadClassificationSnapshot, apply: repo.applyClassifications };
+}
+
+/** The local workbench owns this connection and closes it with the workflow. */
+export function createOwnedLicenseDatabaseAdapter(databaseUrl: string): LicenseDatabaseAdapter {
+  const client = postgres(databaseUrl, { max: 1, idle_timeout: 20 });
+  const database = drizzle(client, { schema });
+  return {
+    load: () => repo.loadClassificationSnapshot(database),
+    apply: (artifact, replace, beforeCommit, force, expectedPolicy) =>
+      repo.applyClassifications(artifact, replace, beforeCommit, force, expectedPolicy, database),
+    close: () => client.end({ timeout: 5 }),
+  };
 }
 
 export async function getSyncGuidance() {
