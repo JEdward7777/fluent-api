@@ -24,7 +24,8 @@ export interface LicenseDatabaseAdapter {
     artifact: LicenseArtifact,
     replace: boolean,
     beforeCommit?: () => Promise<void>,
-    force?: boolean
+    force?: boolean,
+    expectedPolicy?: StoredLicenseClassification[]
   ) => Promise<void>;
   close?: () => Promise<void>;
 }

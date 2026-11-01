@@ -2,8 +2,8 @@ import { and, eq, notInArray, or, sql } from 'drizzle-orm';
 
 import type { DbTransaction } from '@/lib/types';
 
-import { db } from '@/db';
 import { bible_provider_resources, bibles, license_classifications } from '@/db/schema';
+import { hashCanonicalJson } from '@/lib/llm/canonical-json';
 import { logger } from '@/lib/logger';
 
 import type { LicenseArtifact, LicenseClassification } from '../license-artifact.schemas';
@@ -14,6 +14,8 @@ import type {
 
 import { licenseArtifactSchema, licenseClassificationSchema } from '../license-artifact.schemas';
 import { licenseDatabaseProjection } from './license-database-projection';
+
+type LicenseDb = typeof import('@/db').db;
 
 function rationaleText(content: (typeof license_classifications.$inferSelect)['rationale']) {
   return typeof content === 'string'
@@ -26,17 +28,21 @@ function rationaleText(content: (typeof license_classifications.$inferSelect)['r
       : JSON.stringify(content) || 'No recorded rationale';
 }
 
-export async function getClassifications(tx: DbTransaction | typeof db = db) {
-  return tx.select().from(license_classifications);
+export async function getClassifications(tx?: DbTransaction | LicenseDb) {
+  const connection = tx ?? (await import('@/db')).db;
+  return connection.select().from(license_classifications);
 }
 
-export async function loadClassificationSnapshot(): Promise<LicenseDatabaseSnapshot> {
-  const [exists] = await db
+export async function loadClassificationSnapshot(
+  database?: LicenseDb
+): Promise<LicenseDatabaseSnapshot> {
+  const connection = database ?? (await import('@/db')).db;
+  const [exists] = await connection
     .select({ exists: sql<boolean>`to_regclass('license_classifications') IS NOT NULL` })
     .from(sql`(SELECT 1) AS existence_probe`);
   const [rows, resources] = await Promise.all([
-    exists.exists ? getClassifications() : Promise.resolve([]),
-    db
+    exists.exists ? getClassifications(connection) : Promise.resolve([]),
+    connection
       .select({
         provider: bible_provider_resources.provider,
         externalId: bible_provider_resources.externalId,
@@ -129,17 +135,42 @@ export async function applyClassifications(
   artifact: LicenseArtifact,
   replace: boolean,
   beforeCommit?: () => Promise<void>,
-  force = false
+  force = false,
+  expectedPolicy?: StoredLicenseClassification[],
+  database?: LicenseDb
 ) {
+  const connection = database ?? (await import('@/db')).db;
   const proposed = licenseDatabaseProjection(artifact);
-  await db.transaction(async (tx) => {
+  await connection.transaction(async (tx) => {
     // Serialize initialization/replacement with ordinary table writes, including the
     // empty-table case where no row exists to lock. This enforces --force at apply.
-    if (replace)
+    if (replace || expectedPolicy)
       await tx.execute(sql`LOCK TABLE license_classifications IN SHARE ROW EXCLUSIVE MODE`);
     const existing = new Map(
       (await getClassifications(tx)).map((row) => [row.normalizedText, row])
     );
+    if (expectedPolicy) {
+      const expected = new Map(expectedPolicy.map((row) => [row.normalizedText, row]));
+      const matches =
+        existing.size === expected.size &&
+        [...existing].every(([key, row]) => {
+          const prior = expected.get(key);
+          return (
+            prior &&
+            row.status === prior.status &&
+            row.classifiedBy === prior.classifiedBy &&
+            row.reviewedAt?.toISOString() === (prior.reviewedAt ?? undefined) &&
+            hashCanonicalJson(row.rationale) ===
+              hashCanonicalJson(
+                prior.storedRationale === undefined ? prior.rationale : prior.storedRationale
+              )
+          );
+        });
+      if (!matches)
+        throw new Error(
+          'License classification policy changed since preview; inspect and preview again'
+        );
+    }
     if (replace && existing.size && !force)
       throw new Error(
         'The classification table is now nonempty; --force is required before replacement'
