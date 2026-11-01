@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LlmTransportError } from '@/lib/llm/structured-request';
 
@@ -155,6 +155,26 @@ describe('license command source/destination and responsibility boundary', () =>
     ).toBe(3);
     expect(f.adapter.apply).not.toHaveBeenCalled();
   });
+  it.each(['database', 'both'] as const)(
+    'returns bootstrap guidance before reading an inaccessible output path for %s',
+    async (destination) => {
+      const f = await fixture();
+      const read = vi.fn(async () => {
+        throw new Error('EISDIR: output is a directory');
+      });
+      const exit = await runLicenseCommand(
+        { ...f.options, source: 'database', destination, output: f.dir },
+        { ...f.dependencies, fs: { ...licenseFileIo, read } }
+      );
+      expect(exit).toBe(3);
+      expect(f.messages.join('\n')).toContain(
+        'empty classification table bootstraps only from attested JSON'
+      );
+      expect(read).not.toHaveBeenCalled();
+      expect(f.dependencies.transport).not.toHaveBeenCalled();
+      expect(f.adapter.close).toHaveBeenCalledOnce();
+    }
+  );
   it('treats corrupt/evidence-invalid artifacts as operational failures with no writes', async () => {
     const f = await fixture();
     await writeFile(f.input, '{"broken":true}');
