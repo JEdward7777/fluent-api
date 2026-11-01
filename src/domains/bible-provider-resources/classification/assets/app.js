@@ -10,6 +10,7 @@ const stop = document.getElementById('stop');
 const inspection = document.getElementById('inspection');
 let setup;
 let dirty = false;
+let practiceBusy = false;
 
 async function request(path, method = 'GET', body) {
   const response = await fetch(`/api/${path}`, {
@@ -43,6 +44,27 @@ function render(next, populate = false) {
     dirty = false;
   }
   form.hidden = false;
+  document.getElementById('practice-banner').hidden = !next.practice;
+  document.getElementById('cli-details').hidden = next.practice;
+  document.getElementById('operations-heading').textContent = next.practice
+    ? 'Workflow modes'
+    : 'What the selections mean';
+  document.getElementById('alternatives-note').textContent = next.practice
+    ? 'Practice uses saved JSON → scratch JSON. Database targets require a separate normal workbench launch.'
+    : 'Both writes file and database targets. Ordinary sync propagates policy later. A nonempty table needs force and reviewed attestation before replacement.';
+  document.getElementById('inspect-help').textContent = next.practice
+    ? 'Inspect reads the selected saved JSON or bundled example and copies it into a new private scratch directory. No model or database is used.'
+    : 'Inspect reads selected files, database and request cache as needed.';
+  document.getElementById('analysis-help').textContent = next.practice
+    ? 'Practice analysis uses saved JSON evidence without model requests.'
+    : 'Analysis may call Gemini and write cache; it does not publish policy or artifacts.';
+  if (next.practice) {
+    for (const key of ['output', 'cacheDir', 'reportDir', 'reportFormats'])
+      form.elements[key].value = next[key] ?? '';
+    document.getElementById('practice-location').textContent = next.scratch
+      ? `Scratch: ${next.scratch}. Original SHA-256: ${next.originalHash}. Restart with --practice for a fresh session; discard this directory when finished. Practice output is never imported into a real session automatically.`
+      : 'Scratch is allocated after Inspect. Restart with --practice for a fresh session; discard the scratch directory when finished. Practice output is never imported into a real session automatically.';
+  }
   document.getElementById('discard-label').hidden = !next.analysis;
   document.getElementById('database-target').textContent = next.databaseTarget;
   const step = ['inspected', 'analyzing'].includes(next.state)
@@ -74,8 +96,27 @@ function render(next, populate = false) {
     ...(next.force ? ['--force'] : []),
     ...(next.preserveExistingNonUnknowns ? ['--preserve-existing-non-unknowns'] : []),
   ].join(' ');
-  const busy = ['inspecting', 'analyzing', 'saving', 'reconfiguring'].includes(next.state);
+  const busy =
+    Boolean(next.activeOperationId) ||
+    ['inspecting', 'analyzing', 'saving', 'reconfiguring'].includes(next.state);
   for (const field of form.elements) field.disabled = busy;
+  if (next.practice) {
+    for (const key of [
+      'source',
+      'destination',
+      'output',
+      'model',
+      'samples',
+      'force',
+      'noCache',
+      'cacheDir',
+      'reportFormats',
+      'reportDir',
+      'preserve',
+    ])
+      form.elements[key].disabled = true;
+    form.elements.input.placeholder = 'Bundled example or an absolute saved JSON path';
+  }
   inspect.disabled =
     busy ||
     dirty ||
@@ -89,8 +130,12 @@ function render(next, populate = false) {
     const preflight = next.inspected.preflight;
     inspection.textContent = `Inspected ${next.inspected.inspectedAt}. ${preflight.distinctKeys} distinct keys; ${preflight.tableHits} table hits; ${preflight.ruleHits} rule hits; ${preflight.modelKeys} model keys. ${preflight.validCacheHits} valid cache hits; ${preflight.expectedUncachedRequests} expected requests, up to ${preflight.maximumAttempts} attempts. Cost unavailable: ${preflight.cost.reason}`;
   }
-  if (next.analysis)
-    status.textContent = `Analysis ready: ${next.analysis.rows} rows. Review controls follow in the next workbench step.`;
+  if (next.practice && next.state === 'saved')
+    status.textContent = `Incomplete practice JSON saved to ${next.preview?.output}. Discard the scratch directory when finished.`;
+  else if (next.analysis)
+    status.textContent = next.practice
+      ? `Practice analysis ready: ${next.analysis.rows} rows. Review and save only to scratch.`
+      : `Analysis ready: ${next.analysis.rows} rows. Review controls follow in the next workbench step.`;
   else if (next.state === 'inspected')
     status.textContent = 'Inputs inspected. Review the request estimate, then start analysis.';
   else if (next.latestOperation?.state === 'failed')
@@ -98,13 +143,36 @@ function render(next, populate = false) {
   else if (busy)
     status.textContent = `${next.state}… You can reload this page without restarting the operation.`;
   else status.textContent = `Session ${next.state}. Apply settings, then Inspect inputs.`;
+  const practiceReview = document.getElementById('practice-review');
+  practiceReview.hidden = !next.practice || !next.analysis;
+  if (next.practice && next.analysis) {
+    const rowSelect = document.getElementById('practice-row');
+    const selected = rowSelect.value;
+    rowSelect.replaceChildren(
+      ...next.practiceRows.map(
+        (row) => new Option(`${row.status}: ${row.normalizedText}`, row.normalizedText)
+      )
+    );
+    if (next.practiceRows.some((row) => row.normalizedText === selected))
+      rowSelect.value = selected;
+    const row = next.practiceRows.find((item) => item.normalizedText === rowSelect.value);
+    if (row) document.getElementById('practice-status').value = row.status;
+    document.getElementById('practice-edit').disabled =
+      busy || practiceBusy || next.state === 'saved';
+    document.getElementById('practice-preview').disabled =
+      busy || practiceBusy || next.state === 'saved';
+    document.getElementById('practice-save').disabled = busy || practiceBusy || !next.preview;
+    document.getElementById('practice-preview-result').textContent = next.preview
+      ? `Scratch output: ${next.preview.output}. SHA-256: ${next.preview.wholeFileHash}. This remains incomplete and carries no practice attestation.`
+      : 'Preview the exact edited revision before saving.';
+  }
 }
 async function refresh() {
   render(await request('setup'));
   if (setup.activeOperationId) {
     const operation = await request(`operations/${encodeURIComponent(setup.activeOperationId)}`);
-    if (operation.state === 'failed') status.textContent = operation.error;
     if (operation.state === 'running') window.setTimeout(refresh, 800);
+    else render(await request('setup'));
   }
 }
 form.addEventListener('input', () => {
@@ -166,6 +234,60 @@ stop.addEventListener('click', async () => {
   } catch (error) {
     status.textContent = error.message;
   }
+});
+document.getElementById('practice-row').addEventListener('change', () => {
+  const row = setup.practiceRows.find(
+    (item) => item.normalizedText === document.getElementById('practice-row').value
+  );
+  if (row) document.getElementById('practice-status').value = row.status;
+});
+async function practiceAction(path, body) {
+  if (practiceBusy) return;
+  practiceBusy = true;
+  let failure;
+  let latest;
+  for (const id of ['practice-edit', 'practice-preview', 'practice-save'])
+    document.getElementById(id).disabled = true;
+  try {
+    render(await request(path, 'POST', body));
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error);
+    try {
+      latest = await request('setup');
+    } catch {
+      // Preserve the action error when the local session cannot be refreshed.
+    }
+  } finally {
+    practiceBusy = false;
+    if (latest || setup) render(latest || setup);
+    if (failure) {
+      status.textContent = failure;
+      status.tabIndex = -1;
+      status.focus();
+    }
+  }
+}
+document.getElementById('practice-edit').addEventListener('click', () => {
+  void practiceAction('practice/edit', {
+    configurationRevision: setup.configurationRevision,
+    contentRevision: setup.contentRevision,
+    normalizedText: document.getElementById('practice-row').value,
+    status: document.getElementById('practice-status').value,
+    reason: document.getElementById('practice-reason').value,
+  });
+});
+document.getElementById('practice-preview').addEventListener('click', () => {
+  void practiceAction('practice/preview', {
+    configurationRevision: setup.configurationRevision,
+    contentRevision: setup.contentRevision,
+  });
+});
+document.getElementById('practice-save').addEventListener('click', () => {
+  void practiceAction('practice/save', {
+    operationId: crypto.randomUUID(),
+    configurationRevision: setup.configurationRevision,
+    contentRevision: setup.contentRevision,
+  });
 });
 if (!token)
   status.textContent =

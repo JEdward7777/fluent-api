@@ -2,6 +2,7 @@ import type { LlmTransport } from '@/lib/llm/structured-request';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseDatabaseAdapter, LicenseDatabaseSnapshot } from './license-database.types';
+import type { LicensePracticeCapability } from './license-practice';
 import type { LicensePreflight } from './license-preflight';
 import type { LicenseSavePlan } from './license-save-plan';
 import type { LicenseFileIo } from './license-write';
@@ -99,6 +100,8 @@ export interface LicenseSaveOperation {
 
 export interface LicenseWorkflowDependencies {
   apiKey: string;
+  /** Explicit offline capability. Paths are allocated by the practice factory. */
+  practice?: LicensePracticeCapability;
   fs?: LicenseFileIo;
   database?: () => Promise<LicenseDatabaseAdapter>;
   transport?: LlmTransport;
