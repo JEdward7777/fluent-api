@@ -35,7 +35,33 @@ describe('license workbench launch', () => {
     expect(() => parseLicenseWorkbenchLaunch(['--ui=web', '--yes'], false)).toThrow('use --ui=cli');
   });
 
-  it('rejects practice until its offline capability exists', () => {
-    expect(() => parseLicenseWorkbenchLaunch(['--practice'], true)).toThrow('being prepared');
+  it('selects explicit browser practice and rejects automation, real targets and reviewer flags', () => {
+    expect(parseLicenseWorkbenchLaunch(['--practice'], true)).toMatchObject({
+      kind: 'web',
+      practice: true,
+      options: { input: '' },
+    });
+    expect(
+      parseLicenseWorkbenchLaunch(['--practice', '--ui=web', '--input=/tmp/saved.json'], false)
+    ).toMatchObject({ kind: 'web', practice: true, options: { input: '/tmp/saved.json' } });
+    expect(() => parseLicenseWorkbenchLaunch(['--practice'], false)).toThrow(
+      'requires explicit --ui=web'
+    );
+    for (const flag of [
+      '--ui=cli',
+      '--yes',
+      '--plan-only',
+      '--source=json',
+      '--destination=json',
+      '--output=/tmp/real.json',
+      '--cache-dir=/tmp/cache',
+      '--report-dir=/tmp/reports',
+      '--reviewer=Alice',
+      '--review-reason=done',
+      '--force',
+    ])
+      expect(() => parseLicenseWorkbenchLaunch(['--practice', '--ui=web', flag], false)).toThrow(
+        'Practice accepts only'
+      );
   });
 });
