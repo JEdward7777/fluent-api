@@ -8,6 +8,9 @@
 * {
   box-sizing: border-box;
 }
+[hidden] {
+  display: none !important;
+}
 body {
   margin: 0;
 }
@@ -101,4 +104,54 @@ button:disabled {
   section {
     padding: 1rem;
   }
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.8rem;
+  margin: 1rem 0;
+}
+label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+input,
+select {
+  width: 100%;
+  font: inherit;
+  padding: 0.55rem;
+  border: 1px solid #869ba8;
+  border-radius: 0.3rem;
+}
+input[type='checkbox'] {
+  width: auto;
+  margin-right: 0.5rem;
+}
+#discard-label,
+details label:has(input[type='checkbox']) {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+button:not(:disabled) {
+  background: #164f6e;
+  color: white;
+  cursor: pointer;
+}
+#inspection {
+  border: 1px solid #b8d4c0;
+  background: #f0f8f2;
+  padding: 0.8rem;
+  margin-top: 1rem;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

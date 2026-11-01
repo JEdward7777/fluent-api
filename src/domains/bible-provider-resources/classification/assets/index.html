@@ -12,7 +12,7 @@
       <header>
         <p class="eyebrow">Local developer tool</p>
         <h1>License workbench</h1>
-        <p>Review license evidence and prepare classification decisions in five visible steps.</p>
+        <p>Choose inputs, inspect them, then explicitly start analysis.</p>
       </header>
       <nav aria-label="Workflow steps">
         <ol>
@@ -25,49 +25,85 @@
       </nav>
       <section aria-labelledby="setup-heading">
         <h2 id="setup-heading">Choose inputs</h2>
-        <p>Opening this page reads no inputs. Inspect and Analyze each need an explicit action.</p>
+        <p>Editing this form reads no input. Apply settings before Inspect inputs.</p>
         <p id="status" role="status">Connecting to the local session…</p>
-        <div id="settings" hidden>
-          <dl>
-            <div>
-              <dt>Source</dt>
-              <dd id="source"></dd>
+        <form id="setup" hidden>
+          <div class="fields">
+            <label
+              >Source
+              <select name="source" required>
+                <option value="">Choose source</option>
+                <option value="json">Saved JSON</option>
+                <option value="database">Configured database</option>
+              </select></label
+            >
+            <label
+              >Destination
+              <select name="destination" required>
+                <option value="">Choose destination</option>
+                <option value="json">JSON file</option>
+                <option value="database">Configured database</option>
+                <option value="both">JSON and database</option>
+              </select></label
+            >
+            <label>Input JSON path <input name="input" required /></label>
+            <label>Output JSON path <input name="output" required /></label>
+            <label>Model <input name="model" required pattern="google:[^ :]+" /></label>
+            <label>Samples <input name="samples" type="number" min="2" step="1" required /></label>
+          </div>
+          <p id="database-target" class="notice"></p>
+          <details>
+            <summary>Advanced settings</summary>
+            <div class="fields">
+              <label>Cache directory <input name="cacheDir" placeholder="Default cache" /></label>
+              <label
+                >Report formats
+                <select name="reportFormats">
+                  <option value="none">None</option>
+                  <option value="markdown">Markdown</option>
+                  <option value="html">HTML</option>
+                  <option value="markdown,html">Markdown and HTML</option>
+                </select></label
+              >
+              <label>Report directory <input name="reportDir" placeholder="Default" /></label>
+              <label><input type="checkbox" name="noCache" /> Ignore cached requests</label>
+              <label><input type="checkbox" name="force" /> Allow table replacement</label>
+              <label><input type="checkbox" name="preserve" /> Preserve status</label>
             </div>
-            <div>
-              <dt>Destination</dt>
-              <dd id="destination"></dd>
-            </div>
-            <div>
-              <dt>Input path</dt>
-              <dd id="input"></dd>
-            </div>
-            <div>
-              <dt>Output path</dt>
-              <dd id="output"></dd>
-            </div>
-            <div>
-              <dt>Model</dt>
-              <dd id="model"></dd>
-            </div>
-            <div>
-              <dt>Samples per missing key</dt>
-              <dd id="sampleCount"></dd>
-            </div>
-          </dl>
+          </details>
+          <p>Paths are local to the server process. A JSON source is read at Inspect.</p>
+          <p>Existing output is checked before Save.</p>
+          <label id="discard-label" hidden
+            ><input type="checkbox" name="discardReviewedState" /> Discard unsaved review</label
+          >
+          <button type="submit">Apply settings</button>
+        </form>
+        <details>
+          <summary>Equivalent CLI command</summary>
+          <p>Use these settings in terminal review. Credentials stay in the server environment.</p>
+          <p>For a database source, CLI plan-only may call Gemini and write cache or reports.</p>
+          <p>It may write JSON too, while leaving policy untouched.</p>
+          <pre id="cli-command"></pre>
+        </details>
+        <div class="actions">
+          <button id="inspect" type="button" disabled>Inspect inputs</button
+          ><button id="analyze" type="button" disabled>Start analysis</button
+          ><button id="stop" type="button" hidden>Stop after current key</button>
         </div>
-        <p class="notice">Inspect inputs is unavailable. Classification cannot start yet.</p>
-        <button type="button" disabled aria-describedby="inspect-help">Inspect inputs</button>
-        <p id="inspect-help">Inspect reads inputs. Analyze may call Gemini or write cache.</p>
+        <p id="inspect-help">Inspect reads selected files, database and request cache as needed.</p>
+        <p>Analysis may call Gemini and write cache; it does not publish policy or artifacts.</p>
+        <div id="inspection" hidden></div>
       </section>
       <section aria-labelledby="operations-heading">
         <h2 id="operations-heading">What the selections mean</h2>
         <ul>
           <li><strong>JSON → JSON:</strong> review saved evidence without new inference.</li>
           <li><strong>Database → JSON:</strong> analyze notices and prepare a candidate file.</li>
-          <li><strong>JSON → database:</strong> replace policy. Nonempty tables require force.</li>
+          <li><strong>JSON → database:</strong> import reviewed policy.</li>
           <li><strong>Database → database:</strong> maintain existing authoritative decisions.</li>
         </ul>
         <p>Both writes file and database targets. Ordinary sync propagates policy later.</p>
+        <p>A nonempty table needs force and reviewed attestation before replacement.</p>
       </section>
     </main>
   </body>
