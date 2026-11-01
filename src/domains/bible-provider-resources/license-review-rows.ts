@@ -15,7 +15,17 @@ export async function reviewLicenseRows(
   value: LicenseArtifact,
   io: LicenseReviewIo,
   database?: LicenseDatabaseContext,
-  preserveExistingNonUnknowns = false
+  preserveExistingNonUnknowns = false,
+  edit?: (
+    change:
+      | {
+          kind: 'disposition';
+          normalizedText: string;
+          status: LicenseArtifact['classifications'][number]['status'];
+          reason: string;
+        }
+      | { kind: 'unknown-note'; normalizedText: string; note: string }
+  ) => LicenseArtifact
 ) {
   let artifact = value;
   let query = '';
@@ -112,13 +122,15 @@ export async function reviewLicenseRows(
           'Human note required to complete JSON while retaining unknown (Enter leaves unreviewed): '
         );
         if (note.trim())
-          artifact = freezeLicenseRevision(
-            reviseLicenseArtifact(artifact, (draft) => {
-              draft.classifications.find(
-                (entry) => entry.normalizedText === row.normalizedText
-              )!.rowNote = note;
-            })
-          );
+          artifact = edit
+            ? edit({ kind: 'unknown-note', normalizedText: row.normalizedText, note })
+            : freezeLicenseRevision(
+                reviseLicenseArtifact(artifact, (draft) => {
+                  draft.classifications.find(
+                    (entry) => entry.normalizedText === row.normalizedText
+                  )!.rowNote = note;
+                })
+              );
         else await io.write('Unknown remains unreviewed; JSON cannot be marked complete.');
       }
       continue;
@@ -138,8 +150,16 @@ export async function reviewLicenseRows(
       await io.write('No reason supplied; the row was not changed.');
       continue;
     }
-    artifact = freezeLicenseRevision(
-      overrideLicenseClassification(artifact, row.normalizedText, selectedStatus, reason).artifact
-    );
+    artifact = edit
+      ? edit({
+          kind: 'disposition',
+          normalizedText: row.normalizedText,
+          status: selectedStatus,
+          reason,
+        })
+      : freezeLicenseRevision(
+          overrideLicenseClassification(artifact, row.normalizedText, selectedStatus, reason)
+            .artifact
+        );
   }
 }
