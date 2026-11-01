@@ -1,7 +1,8 @@
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { get } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createLicenseArtifact, serializeLicenseArtifact } from '../license-artifact';
 import { parseLicenseCommandOptions } from './license-command-options';
 import { makeCommandFixture } from './license-command.test-fixtures';
 import { startLicenseWorkbenchServer } from './license-workbench-server';
@@ -128,6 +129,13 @@ describe('local license workbench server', () => {
 
   it('applies revisioned setup and runs JSON inspection then analysis without publishing files', async () => {
     const fixture = await makeCommandFixture();
+    const extended = structuredClone(fixture.artifact);
+    Object.assign(extended.classifications[0], {
+      id: 'extension-row-id',
+      configurationRevision: 999,
+      contentRevision: 999,
+    });
+    await writeFile(fixture.input, serializeLicenseArtifact(createLicenseArtifact(extended)).bytes);
     const previousKey = process.env.GEMINI_API_KEY;
     process.env.GEMINI_API_KEY = 'offline-test-key';
     const session = await startLicenseWorkbenchServer(fixture.options, 0);
@@ -145,7 +153,8 @@ describe('local license workbench server', () => {
         headers,
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-      return { status: response.status, body: await response.json() };
+      const text = await response.text();
+      return { status: response.status, body: response.ok ? JSON.parse(text) : text };
     };
     try {
       const first = (await api('setup')).body;
@@ -210,6 +219,81 @@ describe('local license workbench server', () => {
       expect(state.analysis.rows).toBe(fixture.artifact.classifications.length);
       expect(JSON.stringify(state)).not.toContain(fixture.sourceBytes);
       expect(await fixture.readOutput().catch(() => null)).toBeNull();
+      const list = (await api('review?status=all&page=1')).body;
+      const reserved = fixture.artifact.classifications.find(
+        (candidate) => candidate.rule?.id === 'all-rights-reserved'
+      )!;
+      const rowId = list.rows.find(
+        (candidate: { normalizedText: string }) =>
+          candidate.normalizedText === reserved.normalizedText
+      ).id;
+      const row = (await api(`review/${rowId}`)).body;
+      expect(row.id).toBe(rowId);
+      expect(row.configurationRevision).toBe(state.configurationRevision);
+      expect(row.contentRevision).toBe(state.contentRevision);
+      expect(row.id).not.toBe('extension-row-id');
+      const edit = {
+        id: row.id,
+        configurationRevision: state.configurationRevision,
+        contentRevision: state.contentRevision,
+        acknowledgeWarning: false,
+        edit: {
+          kind: 'disposition',
+          normalizedText: row.normalizedText,
+          status: 'allowed',
+          reason: 'The reviewer accepts this exception.',
+        },
+      };
+      expect((await api('review/edit', 'POST', edit)).status).toBe(409);
+      expect((await api('setup')).body.contentRevision).toBe(state.contentRevision);
+      expect((await api(`review/${row.id}`)).body.automaticDecision).toBeUndefined();
+      const acknowledged = { ...edit, acknowledgeWarning: true };
+      expect(
+        (await api('review/edit', 'POST', acknowledged)).body.setup.contentRevision
+      ).toBeGreaterThan(state.contentRevision);
+      expect((await api('review/edit', 'POST', acknowledged)).status).toBe(409);
+      expect(
+        (
+          await api('review/edit', 'POST', {
+            ...acknowledged,
+            contentRevision: state.contentRevision + 1,
+            id: '0'.repeat(64),
+          })
+        ).status
+      ).toBe(409);
+      expect((await api(`review/${row.id}`)).body).toMatchObject({
+        source: 'manual',
+        status: 'allowed',
+        rule: row.rule,
+        automaticDecision: { source: 'rule', status: 'forbidden' },
+      });
+      const nextRevision = (await api('setup')).body.contentRevision;
+      const separateNote = {
+        ...acknowledged,
+        contentRevision: nextRevision,
+        edit: {
+          ...edit.edit,
+          status: 'unknown',
+          reason: 'Distinct decision rationale.',
+          unknownNote: 'Distinct retained unknown note.',
+        },
+      };
+      expect((await api('review/edit', 'POST', separateNote)).status).toBe(200);
+      expect((await api(`review/${row.id}`)).body).toMatchObject({
+        status: 'unknown',
+        rationale: 'Distinct decision rationale.',
+        rowNote: 'Distinct retained unknown note.',
+        automaticDecision: { source: 'rule', status: 'forbidden' },
+      });
+      expect(
+        (
+          await api('review/edit', 'POST', {
+            ...separateNote,
+            contentRevision: nextRevision + 1,
+            edit: { ...separateNote.edit, status: 'allowed' },
+          })
+        ).status
+      ).toBe(409);
       const invalid = {
         ...changed,
         configurationRevision: 2,

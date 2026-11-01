@@ -152,23 +152,10 @@
           <div id="review-detail" hidden></div>
         </section>
         <div id="practice-review" hidden>
-          <h2>Practice review</h2>
-          <label
-            >Classification
-            <select id="practice-row"></select
-          ></label>
-          <label
-            >Decision
-            <select id="practice-status">
-              <option value="allowed">Allowed</option>
-              <option value="forbidden">Forbidden</option>
-              <option value="unknown">Unknown</option>
-            </select></label
-          >
-          <label>Reason for this edit <input id="practice-reason" /></label>
+          <h2>Practice output</h2>
+          <p>Edit a classification above, then preview the scratch output.</p>
           <div class="actions">
-            <button id="practice-edit" type="button">Apply review edit</button
-            ><button id="practice-preview" type="button">Preview scratch output</button
+            <button id="practice-preview" type="button">Preview scratch output</button
             ><button id="practice-save" type="button" disabled>Save incomplete scratch JSON</button>
           </div>
           <p id="practice-preview-result"></p>

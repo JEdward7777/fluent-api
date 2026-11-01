@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicensePractice } from './license-practice';
 import type { LicenseReviewQuery } from './license-workbench-review';
-import type { LicenseInspection } from './license-workflow.types';
+import type { LicenseInspection, LicenseReviewEdit } from './license-workflow.types';
 
 import { createLicensePractice } from './license-practice';
 import {
@@ -144,12 +144,6 @@ export class LicenseWorkbenchSession {
             contentRevision: this.workflow.analyzed.contentRevision,
           }
         : null,
-      practiceRows: this.practiceMode
-        ? (this.workflow?.analyzed?.artifact.classifications.map((row) => ({
-            normalizedText: row.normalizedText,
-            status: row.status,
-          })) ?? [])
-        : [],
       preview:
         this.practiceMode && this.workflow?.previewed
           ? {
@@ -194,9 +188,9 @@ export class LicenseWorkbenchSession {
     );
     if (!detail) throw new Error('Review row was not found');
     return {
+      ...detail,
       configurationRevision: this.configurationRevision,
       contentRevision: analysis.contentRevision,
-      ...detail,
     };
   }
 
@@ -349,23 +343,28 @@ export class LicenseWorkbenchSession {
     return this.workflow.requestStopAnalysis();
   }
 
-  editPractice(body: {
+  editReview(body: {
     configurationRevision: number;
     contentRevision: number;
-    normalizedText: string;
-    status: 'allowed' | 'forbidden' | 'unknown';
-    reason: string;
+    id: string;
+    edit: LicenseReviewEdit;
+    acknowledgeWarning: boolean;
   }) {
-    if (!this.practiceMode || !this.workflow) throw new Error('Practice review is unavailable');
+    if (this.activeOperationId) throw new Error('An operation is running; wait before editing');
+    if (!this.workflow) throw new Error('Start analysis before editing evidence');
     if (body.configurationRevision !== this.configurationRevision)
       throw new Error('Stale configuration revision');
+    const detail = this.reviewDetail(body.id);
+    if (detail.normalizedText !== body.edit.normalizedText)
+      throw new Error('Row ID does not match the exact normalized key');
+    if (
+      body.edit.kind === 'disposition' &&
+      detail.overrideWarnings[body.edit.status] &&
+      !body.acknowledgeWarning
+    )
+      throw new Error('Acknowledge the automatic-decision warning before applying this override');
     return this.workflow.editReview(
-      {
-        kind: 'disposition',
-        normalizedText: body.normalizedText,
-        status: body.status,
-        reason: body.reason,
-      },
+      body.edit,
       this.workflow.status.configurationRevision,
       body.contentRevision
     );

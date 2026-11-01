@@ -12,7 +12,8 @@ export function applyLicenseReviewEdit(before: LicenseArtifact, edit: LicenseRev
       before,
       edit.normalizedText,
       edit.status,
-      edit.reason
+      edit.reason,
+      edit.unknownNote
     );
     revised = result.artifact;
     warning = result.warning;

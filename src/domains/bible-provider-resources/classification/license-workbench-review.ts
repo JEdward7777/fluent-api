@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseDatabaseContext } from '../license-impact';
 
+import { licenseOverrideWarning } from '../license-artifact';
 import { computeLicenseImpact } from '../license-impact';
 import { normalizeLicenseNotice } from '../license-normalizer';
 
@@ -110,8 +111,16 @@ export function getLicenseWorkbenchReviewDetail(
   const affected = impact.rows.filter((bible) => bible.normalizedText === row.normalizedText);
   const variants = savedVariants(artifact, row.normalizedText);
   return {
-    id,
-    ...row,
+    normalizedText: row.normalizedText,
+    exampleNotice: row.exampleNotice,
+    status: row.status,
+    source: row.source,
+    rationale: row.rationale,
+    rule: row.rule,
+    samples: row.samples,
+    evidenceContract: row.evidenceContract,
+    automaticDecision: row.automaticDecision,
+    rowNote: row.rowNote,
     context: impact.context,
     variants,
     bibles: affected.map((bible) => ({
@@ -127,5 +136,11 @@ export function getLicenseWorkbenchReviewDetail(
     modelEvidenceLabel: row.samples.length
       ? 'Historical saved model evidence; these are not current requests.'
       : 'No model request was recorded for this classification.',
+    overrideWarnings: {
+      allowed: licenseOverrideWarning(row, 'allowed'),
+      forbidden: licenseOverrideWarning(row, 'forbidden'),
+      unknown: licenseOverrideWarning(row, 'unknown'),
+    },
+    id,
   };
 }

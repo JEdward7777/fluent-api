@@ -231,6 +231,33 @@ describe('versioned license artifact lifecycle', () => {
     expect(next.classifications[1].rowNote).toBeUndefined();
     expect(next.classifications[1].samples).toEqual(original.classifications[1].samples);
   });
+  it('keeps an explicit unknown row note separate from its rationale in one review edit', () => {
+    const original = makeLicenseArtifact();
+    const key = original.classifications[1].normalizedText;
+    const reviewed = overrideLicenseClassification(
+      original,
+      key,
+      'unknown',
+      'Reason for the decision.',
+      'Separate human row note.'
+    ).artifact;
+    expect(reviewed.classifications[1]).toMatchObject({
+      status: 'unknown',
+      rationale: 'Reason for the decision.',
+      rowNote: 'Separate human row note.',
+      automaticDecision: { source: 'gemini', status: 'allowed' },
+    });
+    expect(reviewed.classifications[1].samples).toEqual(original.classifications[1].samples);
+    expect(reviewed.attestation).toBeUndefined();
+    expect(
+      overrideLicenseClassification(original, key, 'unknown', 'Fallback reason.').artifact
+        .classifications[1].rowNote
+    ).toBe('Fallback reason.');
+    expect(() => overrideLicenseClassification(original, key, 'unknown', 'Reason.', ' ')).toThrow();
+    expect(() =>
+      overrideLicenseClassification(original, key, 'allowed', 'Reason.', 'Unexpected note.')
+    ).toThrow();
+  });
   it('clears stale human notes and model evidence when refreshing a changed database decision', () => {
     const reviewed = attestLicenseArtifact(makeLicenseArtifact(), REVIEWER);
     const refreshed = reviseLicenseArtifact(reviewed, (draft) => {
