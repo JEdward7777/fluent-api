@@ -49,6 +49,7 @@ export async function runLicenseCommand(
       database: dependencies.database,
       transport: dependencies.transport,
       now: dependencies.now,
+      legacySkipFreshness: true,
     });
     const inspection = await workflow.inspect(workflow.status.configurationRevision);
     database = workflow.databaseAdapter;
