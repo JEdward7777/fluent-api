@@ -166,6 +166,7 @@ describe('local license workbench server', () => {
         cacheDir: null,
       };
       delete changed.step;
+      delete changed.launchId;
       delete changed.state;
       delete changed.contentRevision;
       delete changed.readyForInspect;
@@ -180,6 +181,7 @@ describe('local license workbench server', () => {
       delete changed.selectedSource;
       delete changed.practiceRows;
       delete changed.preview;
+      delete changed.saveOutcome;
       const applied = await api('setup', 'POST', changed);
       expect(applied.status).toBe(200);
       expect(applied.body.configurationRevision).toBe(2);

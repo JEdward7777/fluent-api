@@ -3,7 +3,12 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { makeCommandFixture } from './license-command.test-fixtures';
-import { LicenseFileDriftError, licenseFileIo, writeLicenseDestinations } from './license-write';
+import {
+  LicenseFileDriftError,
+  licenseFileIo,
+  LicenseWriteUncertainError,
+  writeLicenseDestinations,
+} from './license-write';
 
 const fixtures: Awaited<ReturnType<typeof makeCommandFixture>>[] = [];
 async function fixture() {
@@ -145,6 +150,7 @@ describe('bounded file/database compensation', () => {
       throw new Error('commit unknown');
     });
     let errorMessage = '';
+    let recovery: LicenseWriteUncertainError['recovery'] | undefined;
     try {
       await writeLicenseDestinations({
         artifact: f.artifact,
@@ -155,11 +161,19 @@ describe('bounded file/database compensation', () => {
       });
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : String(error);
+      if (error instanceof LicenseWriteUncertainError) recovery = error.recovery;
     }
     expect(errorMessage).toContain('DIVERGENCE');
     expect(await readFile(f.output, 'utf8')).toBe('external edit');
     const recoveryPaths = [...errorMessage.matchAll(/\S+\.recovery/g)].map((match) => match[0]);
     expect(recoveryPaths).toHaveLength(2);
+    expect(recovery).toEqual({
+      diverged: true,
+      affectedPaths: [f.output],
+      recoveryFiles: recoveryPaths,
+      retainedTemporary: [],
+      recoveryFailures: [],
+    });
     expect(await Promise.all(recoveryPaths.map((path) => readFile(path, 'utf8')))).toEqual([
       previous,
       f.sourceBytes,

@@ -192,6 +192,16 @@
             >
             <button id="report-write" type="button" disabled>Export inspected report</button>
           </div>
+          <div id="normal-save" hidden>
+            <h3>Save this preview</h3>
+            <p>Save publishes reviewed JSON and policy changes. Save cannot be canceled.</p>
+            <label id="save-replacement" hidden>
+              <input id="save-replacement-agreement" type="checkbox" />
+              <span>I agree to replace policy.</span>
+            </label>
+            <button id="normal-save-button" type="button" disabled>Save reviewed changes</button>
+            <p id="save-result" role="status"></p>
+          </div>
         </section>
       </section>
       <section aria-labelledby="operations-heading">

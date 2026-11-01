@@ -12,7 +12,8 @@ import { z } from 'zod';
 
 import type { LicenseCommandOptions } from './license-command-options';
 
-import { LicenseWorkbenchSession, operationSchema, setupSchema } from './license-workbench-session';
+import { operationSchema, setupSchema } from './license-workbench-schema';
+import { LicenseWorkbenchSession } from './license-workbench-session';
 
 const assetDirectory = join(dirname(fileURLToPath(import.meta.url)), 'assets');
 const assets = new Map([
@@ -20,6 +21,8 @@ const assets = new Map([
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/review.js', ['review.js', 'text/javascript; charset=utf-8']],
+  ['/save.js', ['save.js', 'text/javascript; charset=utf-8']],
+  ['/preview-text.js', ['preview-text.js', 'text/javascript; charset=utf-8']],
 ] as const);
 
 function sameToken(actual: string | undefined, expected: string) {
@@ -237,8 +240,19 @@ function createLicenseWorkbenchApp(
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.text('Invalid practice save', 400);
     try {
-      await session.savePractice(parsed.data);
-      return c.json(session.visible);
+      return c.json(await session.savePractice(parsed.data), 202);
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Save failed', 409);
+    }
+  });
+  app.post('/api/save', async (c) => {
+    const parsed = revisionSchema
+      .extend({ operationId: z.string().uuid(), agreeToReplace: z.boolean() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid Save fields', 400);
+    try {
+      if (session.visible.practice) return c.text('Practice cannot use normal Save', 409);
+      return c.json(session.save(parsed.data), 202);
     } catch (error) {
       return c.text(error instanceof Error ? error.message : 'Save failed', 409);
     }
@@ -246,7 +260,9 @@ function createLicenseWorkbenchApp(
   app.get('/api/ping', (c) => c.json({ ok: true }));
   app.post('/api/ping', (c) => c.json({ ok: true }));
   app.get('*', async (c) => {
-    const asset = assets.get(c.req.path as '/' | '/app.css' | '/app.js' | '/review.js');
+    const asset = assets.get(
+      c.req.path as '/' | '/app.css' | '/app.js' | '/review.js' | '/save.js' | '/preview-text.js'
+    );
     if (!asset) return c.text('Not found', 404);
     const [name, contentType] = asset;
     c.header('Content-Type', contentType);
