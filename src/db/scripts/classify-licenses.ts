@@ -5,12 +5,11 @@ import { promisify } from 'node:util';
 
 import { runLicenseCommand } from '@/domains/bible-provider-resources/classification/license-command';
 import {
-  LICENSE_COMMAND_HELP,
-  parseLicenseCommandOptions,
-} from '@/domains/bible-provider-resources/classification/license-command-options';
+  LICENSE_WORKBENCH_HELP,
+  parseLicenseWorkbenchLaunch,
+} from '@/domains/bible-provider-resources/classification/license-workbench-launch';
+import { startLicenseWorkbenchServer } from '@/domains/bible-provider-resources/classification/license-workbench-server';
 
-// Load credentials without importing the application's DB/auth environment schema.
-config({ quiet: true });
 const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 let terminal: ReturnType<typeof createInterface> | undefined;
 const io = {
@@ -23,9 +22,40 @@ const io = {
   },
 };
 try {
-  const parsed = parseLicenseCommandOptions(process.argv.slice(2), interactive);
-  if (parsed.help) io.write(LICENSE_COMMAND_HELP);
-  else {
+  const parsed = parseLicenseWorkbenchLaunch(process.argv.slice(2), interactive);
+  if (parsed.kind === 'help') io.write(LICENSE_WORKBENCH_HELP);
+  else if (parsed.kind === 'web') {
+    const workbench = await startLicenseWorkbenchServer(parsed.options, parsed.port);
+    io.write(`Open ${workbench.url}`);
+    io.write(
+      'Loopback only. Ctrl+C stops the local workbench. Container access: forward this port to local 127.0.0.1 with an IDE Ports panel or SSH local tunnel; do not use a public forwarding domain.'
+    );
+    if (interactive) {
+      const command =
+        process.platform === 'darwin'
+          ? 'open'
+          : process.platform === 'win32'
+            ? 'explorer'
+            : 'xdg-open';
+      try {
+        await promisify(execFile)(command, [workbench.url]);
+      } catch {
+        io.write('Automatic browser opening was unavailable; open the printed local URL yourself.');
+      }
+    }
+    process.once('SIGINT', () => {
+      void workbench.close().then(() => {
+        process.exitCode = 0;
+      });
+    });
+    process.once('SIGTERM', () => {
+      void workbench.close().then(() => {
+        process.exitCode = 0;
+      });
+    });
+  } else {
+    // CLI alone loads credentials. Help and the browser setup shell do not read .env.
+    config({ quiet: true });
     if (!process.env.GEMINI_API_KEY?.trim())
       throw new Error('A nonempty GEMINI_API_KEY is required');
     const options = parsed.options;
@@ -65,7 +95,7 @@ try {
     process.exit(exit);
   }
 } catch (error) {
-  io.write(`${error instanceof Error ? error.message : String(error)}\n${LICENSE_COMMAND_HELP}`);
+  io.write(`${error instanceof Error ? error.message : String(error)}\n${LICENSE_WORKBENCH_HELP}`);
   terminal?.close();
   process.exitCode = 1;
 }
