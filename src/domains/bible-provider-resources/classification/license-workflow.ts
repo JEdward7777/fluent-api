@@ -76,6 +76,9 @@ export class LicenseWorkflow {
   get analyzed() {
     return this.analysis;
   }
+  get reviewDatabaseContext() {
+    return this.inspection?.database?.context;
+  }
   get previewed() {
     return this.previewResult;
   }

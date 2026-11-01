@@ -101,6 +101,56 @@
         <p id="inspect-help">Inspect reads selected files, database and request cache as needed.</p>
         <p id="analysis-help">Analysis may call Gemini and write cache.</p>
         <div id="inspection" hidden></div>
+        <section id="review" hidden aria-labelledby="review-heading">
+          <h2 id="review-heading">Review classification evidence</h2>
+          <p>Search saved evidence and open a notice to see its details.</p>
+          <p>Reading evidence makes no model request or decision change.</p>
+          <div id="review-results">
+            <form id="review-filter" class="review-filter">
+              <label>Search notice, Bible or identity <input name="search" type="search" /></label>
+              <label
+                >Decision
+                <select name="status">
+                  <option value="all">All</option>
+                  <option value="allowed">Allowed</option>
+                  <option value="forbidden">Forbidden</option>
+                  <option value="unknown">Unknown</option>
+                </select></label
+              >
+              <label
+                >Source
+                <select name="source">
+                  <option value="all">All</option>
+                  <option value="table">Table</option>
+                  <option value="rule">Rule</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="manual">Manual</option>
+                </select></label
+              >
+              <button type="submit">Search</button>
+            </form>
+            <p id="review-summary" role="status">Loading review results…</p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Original notice preview</th>
+                    <th>Affected Bibles</th>
+                    <th>Source</th>
+                    <th>Decision</th>
+                    <th>Saved model votes</th>
+                  </tr>
+                </thead>
+                <tbody id="review-rows"></tbody>
+              </table>
+            </div>
+            <div id="review-pager" class="actions">
+              <button type="button" name="previous">Previous page</button
+              ><button type="button" name="next">Next page</button>
+            </div>
+          </div>
+          <div id="review-detail" hidden></div>
+        </section>
         <div id="practice-review" hidden>
           <h2>Practice review</h2>
           <label
