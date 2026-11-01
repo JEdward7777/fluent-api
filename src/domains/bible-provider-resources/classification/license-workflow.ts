@@ -1,12 +1,12 @@
-import { resolve } from 'node:path';
-
-import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type {
   LicenseAnalysis,
   LicenseInspection,
   LicensePreview,
+  LicenseReadOperationRequest,
+  LicenseReportExportRequest,
+  LicenseReportExportResult,
   LicenseReviewEdit,
   LicenseSaveOperation,
   LicenseSaveRequest,
@@ -18,22 +18,19 @@ import type {
 import {
   attestLicenseArtifact,
   checkLicenseArtifactReview,
-  overrideLicenseClassification,
-  reviseLicenseArtifact,
   serializeLicenseArtifact,
 } from '../license-artifact';
-import { createLicenseClassifier } from '../license-classifier';
 import { freezeLicenseRevision, freezeReviewValue } from '../license-review-revision';
-import { analyzeDatabaseLicenses } from './license-analysis';
+import { LicenseAnalysisStoppedError } from './license-analysis';
 import { LicensePolicyDriftError } from './license-database.types';
 import { LicenseInspectionStaleError, requireFreshLicenseSources } from './license-freshness';
-import { inspectLicensePreflight } from './license-preflight';
 import { buildLicenseSavePlan } from './license-save-plan';
-import {
-  LicenseBootstrapRequiredError,
-  parseLicenseArtifactBytes,
-  requireFreshLicenseInspection,
-} from './license-workflow-freshness';
+import { analyzeInspectedLicenses } from './license-workflow-analyze';
+import { LicenseBootstrapRequiredError } from './license-workflow-freshness';
+import { inspectLicenseWorkflowInputs } from './license-workflow-inspect';
+import { LicenseOperationRegistry } from './license-workflow-operations';
+import { exportPreviewedLicenseReport } from './license-workflow-report-export';
+import { applyLicenseReviewEdit } from './license-workflow-review';
 import {
   licenseSaveFingerprint,
   LicenseSavePreflightError,
@@ -61,6 +58,8 @@ export class LicenseWorkflow {
   private finishBusy?: () => void;
   private closePromise?: Promise<void>;
   private readonly saveOperations = new Map<string, LicenseSaveOperation>();
+  private readonly operations = new LicenseOperationRegistry();
+  private stopAnalysisRequested = false;
 
   constructor(options: LicenseCommandOptions, dependencies: LicenseWorkflowDependencies) {
     this.options = freezeReviewValue(options);
@@ -74,25 +73,41 @@ export class LicenseWorkflow {
       contentRevision: this.contentRevision,
     });
   }
-
   get analyzed() {
     return this.analysis;
   }
-
   get previewed() {
     return this.previewResult;
   }
-
   get databaseAdapter() {
     return this.database;
   }
+  operation(operationId: string) {
+    return this.operations.get(operationId);
+  }
 
-  async configure(options: LicenseCommandOptions, expectedRevision: number) {
+  requestStopAnalysis() {
+    if (this.state !== 'analyzing') throw new Error('No analysis is running');
+    this.stopAnalysisRequested = true;
+    return this.status;
+  }
+
+  async configure(
+    options: LicenseCommandOptions,
+    expectedRevision: number,
+    discardReviewedState = false
+  ) {
     this.requireRevision(expectedRevision);
-    if (['inspecting', 'analyzing', 'previewing', 'reconfiguring', 'saving'].includes(this.state))
+    if (
+      ['inspecting', 'analyzing', 'previewing', 'reconfiguring', 'saving', 'exporting'].includes(
+        this.state
+      )
+    )
       throw new Error(`Cannot configure while ${this.state}`);
     if (this.state === 'uncertain')
       throw new Error('Save outcome uncertain; inspect actual targets in a new process');
+    if (this.analysis && this.state !== 'saved' && !discardReviewedState)
+      throw new Error('Explicit discard is required before changing reviewed unsaved state');
     this.state = 'reconfiguring';
     this.beginBusy();
     try {
@@ -114,72 +129,32 @@ export class LicenseWorkflow {
     }
   }
 
-  async inspect(expectedRevision: number): Promise<LicenseInspection> {
+  inspect(request: number | LicenseReadOperationRequest): Promise<LicenseInspection> {
+    if (typeof request === 'number') return this.inspectOnce(request);
+    const frozen = freezeReviewValue(request);
+    return this.operations.run(frozen.operationId, 'inspect', [frozen.configurationRevision], () =>
+      this.inspectOnce(frozen.configurationRevision)
+    );
+  }
+
+  private async inspectOnce(expectedRevision: number): Promise<LicenseInspection> {
     this.requireRevision(expectedRevision);
     if (this.state !== 'configuring' && this.state !== 'error')
       throw new Error(`Cannot inspect while ${this.state}`);
-    if (!this.dependencies.apiKey.trim())
-      throw new Error('A nonempty GEMINI_API_KEY is required before reading any source');
-    const options = this.options;
-    if (!options.source || !options.destination)
-      throw new Error('Select both source and destination before analysis');
-    if (!/^google:[^\s:]+$/.test(options.model))
-      throw new Error(`Unsupported model reference: ${options.model}. Use google:<model-id>`);
-    if (!Number.isInteger(options.sampleCount) || options.sampleCount < 2)
-      throw new Error('Sample count must be an integer of at least two');
     this.state = 'inspecting';
     this.beginBusy();
     try {
-      const fs = this.dependencies.fs ?? licenseFileIo;
-      const needsDatabase = options.source === 'database' || options.destination !== 'json';
-      if (needsDatabase && !this.database) {
-        if (this.dependencies.database) this.database = await this.dependencies.database();
-        else {
-          const { createOwnedLicenseDatabaseAdapter } =
-            await import('./license-classifications.service');
-          const { default: environment } = await import('@/env');
-          this.database = createOwnedLicenseDatabaseAdapter(environment.DATABASE_URL);
-        }
-      }
-      const loaded = await this.database?.load();
-      const snapshot = loaded ? freezeReviewValue(loaded) : undefined;
-      if (options.destination !== 'json' && !snapshot?.tableExists)
-        throw new Error(
-          'The license_classifications table must exist before a database destination can be used'
-        );
-      if (
-        options.source === 'database' &&
-        options.destination !== 'json' &&
-        !snapshot?.classifications.length
-      )
-        throw new LicenseBootstrapRequiredError();
-      const inputBytes = options.source === 'json' ? await fs.read(options.input) : null;
-      if (options.source === 'json' && inputBytes === null)
-        throw new Error(`JSON source not found: ${options.input}`);
-      const samePath = resolve(options.output) === resolve(options.input);
-      const outputBytes =
-        samePath && options.source === 'json' ? inputBytes : await fs.read(options.output);
-      const preflight = await inspectLicensePreflight({
-        database: options.source === 'database' ? snapshot : undefined,
-        jsonClassificationKeys:
-          options.source === 'json'
-            ? parseLicenseArtifactBytes(inputBytes!).classifications.map(
-                (row) => row.normalizedText
-              )
-            : undefined,
-        model: options.model,
-        sampleCount: options.sampleCount,
-        cacheDir: options.cacheDir,
-        noCache: options.noCache,
-      });
-      this.inspection = freezeReviewValue({
+      const result = await inspectLicenseWorkflowInputs({
+        options: this.options,
+        dependencies: this.dependencies,
+        database: this.database,
+        onDatabase: (database) => {
+          this.database = database;
+        },
         configurationRevision: this.configurationRevision,
-        inspectedAt: this.dependencies.now?.() ?? new Date().toISOString(),
-        inputBytes,
-        outputBytes,
-        preflight,
-        ...(snapshot ? { database: snapshot } : {}),
       });
+      this.database = result.database;
+      this.inspection = result.inspection;
       this.state = 'inspected';
       return this.inspection;
     } catch (error) {
@@ -191,7 +166,15 @@ export class LicenseWorkflow {
     }
   }
 
-  async startAnalysis(expectedRevision: number): Promise<LicenseAnalysis> {
+  startAnalysis(request: number | LicenseReadOperationRequest): Promise<LicenseAnalysis> {
+    if (typeof request === 'number') return this.analyzeOnce(request);
+    const frozen = freezeReviewValue(request);
+    return this.operations.run(frozen.operationId, 'analysis', [frozen.configurationRevision], () =>
+      this.analyzeOnce(frozen.configurationRevision)
+    );
+  }
+
+  private async analyzeOnce(expectedRevision: number): Promise<LicenseAnalysis> {
     this.requireRevision(expectedRevision);
     if (this.state !== 'inspected' || !this.inspection)
       throw new Error('Inspect inputs before starting analysis');
@@ -204,40 +187,16 @@ export class LicenseWorkflow {
     )
       throw new LicenseBootstrapRequiredError();
     this.state = 'analyzing';
+    this.stopAnalysisRequested = false;
     this.beginBusy();
     try {
-      if (!this.dependencies.legacySkipFreshness)
-        await requireFreshLicenseInspection(
-          inspection,
-          options,
-          this.dependencies.fs ?? licenseFileIo,
-          this.database
-        );
-      const base =
-        options.source === 'database' && inspection.outputBytes !== null
-          ? parseLicenseArtifactBytes(inspection.outputBytes)
-          : undefined;
-      const artifact =
-        options.source === 'json'
-          ? parseLicenseArtifactBytes(inspection.inputBytes!)
-          : await analyzeDatabaseLicenses({
-              catalog: inspection.database!.context.resources.map(
-                ({ ttsLicenseStatus: _status, ...row }) => row
-              ),
-              classifications: inspection.database!.classifications,
-              base,
-              classify: createLicenseClassifier({
-                apiKey: this.dependencies.apiKey,
-                model: options.model,
-                sampleCount: options.sampleCount,
-                cacheDir: options.cacheDir,
-                noCache: options.noCache,
-                transport: this.dependencies.transport,
-              }),
-              model: options.model,
-              sampleCount: options.sampleCount,
-            });
-      const frozen = freezeLicenseRevision(artifact);
+      const frozen = await analyzeInspectedLicenses({
+        inspection,
+        options,
+        dependencies: this.dependencies,
+        database: this.database,
+        shouldStop: () => this.stopAnalysisRequested || this.closing,
+      });
       this.analysis = freezeReviewValue({
         configurationRevision: this.configurationRevision,
         contentRevision: ++this.contentRevision,
@@ -247,7 +206,9 @@ export class LicenseWorkflow {
       this.state = 'reviewing';
       return this.analysis;
     } catch (error) {
-      if (error instanceof LicenseInspectionStaleError) {
+      if (error instanceof LicenseAnalysisStoppedError) {
+        this.state = 'inspected';
+      } else if (error instanceof LicenseInspectionStaleError) {
         this.inspection = undefined;
         this.state = 'configuring';
       } else this.state = 'error';
@@ -266,32 +227,7 @@ export class LicenseWorkflow {
     if (!this.analysis || !['reviewing', 'previewed'].includes(this.state))
       throw new Error(`Cannot edit review while ${this.state}`);
     const before = this.analysis.artifact;
-    let revised: LicenseArtifact;
-    let warning: string | null = null;
-    if (edit.kind === 'disposition') {
-      const result = overrideLicenseClassification(
-        before,
-        edit.normalizedText,
-        edit.status,
-        edit.reason
-      );
-      revised = result.artifact;
-      warning = result.warning;
-    } else {
-      if (!edit.note.trim()) throw new Error('A retained unknown requires a nonempty human note');
-      const row = before.classifications.find(
-        (candidate) => candidate.normalizedText === edit.normalizedText
-      );
-      if (!row) throw new Error('No exact normalized classification exists');
-      if (row.status !== 'unknown')
-        throw new Error('Human row notes are for retained unknown classifications');
-      revised = reviseLicenseArtifact(before, (draft) => {
-        draft.classifications.find(
-          (candidate) => candidate.normalizedText === edit.normalizedText
-        )!.rowNote = edit.note;
-      });
-    }
-    const artifact = freezeLicenseRevision(revised);
+    const { artifact, warning } = applyLicenseReviewEdit(before, edit);
     if (serializeLicenseArtifact(artifact).bytes !== serializeLicenseArtifact(before).bytes) {
       this.analysis = freezeReviewValue({
         ...this.analysis,
@@ -370,6 +306,8 @@ export class LicenseWorkflow {
         throw new Error('Save operation ID was reused with different arguments');
       return prior.promise;
     }
+    if (this.operations.get(frozenRequest.operationId))
+      throw new Error('License operation ID was reused with different arguments');
     this.requireContentRevision(frozenRequest.configurationRevision, frozenRequest.contentRevision);
     if (this.state !== 'previewed' || !this.previewResult || !this.analysis || !this.inspection)
       throw new Error('Preview this exact revision before saving');
@@ -392,6 +330,16 @@ export class LicenseWorkflow {
     this.beginBusy();
     const promise = this.performSave(frozenRequest, preview, this.inspection, this.analysis);
     this.saveOperations.set(frozenRequest.operationId, { fingerprint, promise });
+    this.operations.track(
+      frozenRequest.operationId,
+      'save',
+      [
+        frozenRequest.configurationRevision,
+        frozenRequest.contentRevision,
+        frozenRequest.agreeToReplace,
+      ],
+      promise
+    );
     return promise;
   }
 
@@ -431,6 +379,56 @@ export class LicenseWorkflow {
     }
   }
 
+  exportReport(request: LicenseReportExportRequest): Promise<LicenseReportExportResult> {
+    const frozen = freezeReviewValue(request);
+    return this.operations.run(
+      frozen.operationId,
+      'export-report',
+      [
+        frozen.configurationRevision,
+        frozen.contentRevision,
+        frozen.format,
+        frozen.path,
+        frozen.expectedPreviousBytes,
+        frozen.agreeToOverwrite,
+      ],
+      () => this.exportReportOnce(frozen)
+    );
+  }
+
+  private async exportReportOnce(
+    request: LicenseReportExportRequest
+  ): Promise<LicenseReportExportResult> {
+    this.requireContentRevision(request.configurationRevision, request.contentRevision);
+    if (this.state !== 'previewed' || !this.previewResult || !this.inspection)
+      throw new Error('Preview this exact revision before exporting a report');
+    const preview = this.previewResult;
+    this.state = 'exporting';
+    this.beginBusy();
+    try {
+      const result = await exportPreviewedLicenseReport({
+        request,
+        preview,
+        inspection: this.inspection,
+        options: this.options,
+        database: this.database,
+        fs: this.dependencies.fs,
+      });
+      this.state = 'previewed';
+      return result;
+    } catch (error) {
+      if (error instanceof LicenseInspectionStaleError) {
+        this.inspection = undefined;
+        this.analysis = undefined;
+        this.previewResult = undefined;
+        this.state = 'configuring';
+      } else this.state = 'previewed';
+      throw error;
+    } finally {
+      this.endBusy();
+    }
+  }
+
   attest(
     metadata: { reviewedBy: string; reviewReason: string; reviewedAt: string },
     expectedConfigurationRevision: number,
@@ -462,6 +460,7 @@ export class LicenseWorkflow {
   close() {
     if (this.closePromise) return this.closePromise;
     this.closing = true;
+    this.stopAnalysisRequested = true;
     this.closePromise = (async () => {
       await this.busyDone;
       this.state = 'closed';
