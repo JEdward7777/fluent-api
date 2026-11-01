@@ -195,7 +195,7 @@ describe('license workflow inspection and analysis', () => {
     await expect(workflow.inspect(1)).rejects.toThrow('Cannot inspect');
     await workflow.startAnalysis(1);
     await expect(workflow.startAnalysis(1)).rejects.toThrow('Inspect');
-    expect((await workflow.configure(f.options, 1)).configurationRevision).toBe(2);
+    expect((await workflow.configure(f.options, 1, true)).configurationRevision).toBe(2);
     expect(workflow.analyzed).toBeUndefined();
     await expect(workflow.inspect(1)).rejects.toThrow('Stale');
     await workflow.close();

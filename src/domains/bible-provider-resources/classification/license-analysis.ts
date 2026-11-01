@@ -21,6 +21,8 @@ export async function analyzeDatabaseLicenses(input: {
   classify: ReturnType<typeof createLicenseClassifier>;
   model: string;
   sampleCount: number;
+  /** Checked between distinct keys, after all samples for the current key settle. */
+  shouldStop?: () => boolean;
 }) {
   const known = new Map(input.classifications.map((row) => [row.normalizedText, row]));
   const examples = new Map<string, string>();
@@ -38,6 +40,7 @@ export async function analyzeDatabaseLicenses(input: {
   for (const [normalizedText, exampleNotice] of [...examples].sort(([a], [b]) =>
     a < b ? -1 : a > b ? 1 : 0
   )) {
+    if (input.shouldStop?.()) throw new LicenseAnalysisStoppedError();
     const basePrior = input.base?.classifications.find(
       (row) => row.normalizedText === normalizedText
     );
@@ -124,4 +127,11 @@ export async function analyzeDatabaseLicenses(input: {
     return checked.artifact;
   }
   return artifact;
+}
+
+export class LicenseAnalysisStoppedError extends Error {
+  constructor() {
+    super('Analysis stopped between distinct license keys; no result was published');
+    this.name = 'LicenseAnalysisStoppedError';
+  }
 }
