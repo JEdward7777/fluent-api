@@ -13,6 +13,7 @@ function bibleRow(overrides: Partial<SeedBibleRow> = {}): SeedBibleRow {
   const id = nextId++;
   return {
     id,
+    provider: 'dbl',
     abbreviation: `B${id}`,
     name: `Bible ${id}`,
     externalId: null,
@@ -25,7 +26,8 @@ function bibleRow(overrides: Partial<SeedBibleRow> = {}): SeedBibleRow {
 /** In-memory lookups over a fixed table — same semantics as the db queries. */
 function lookupsOver(rows: SeedBibleRow[]): BibleLookups {
   return {
-    byExternalId: async (externalId) => rows.find((r) => r.externalId === externalId),
+    byExternalId: async (externalId) =>
+      rows.find((r) => r.provider === 'dbl' && r.externalId === externalId),
     byAbbreviation: async (abbreviation) => rows.find((r) => r.abbreviation === abbreviation),
     byName: async (name) => rows.find((r) => r.name === name),
   };
@@ -74,12 +76,30 @@ describe('resolveBibleByIdentity', () => {
     ).resolves.toEqual({ existing: suffixed });
   });
 
+  it('does not claim an Aquifer bare abbreviation with a matching external ID', async () => {
+    const foreign = bibleRow({ provider: 'aquifer', abbreviation: 'BSB', externalId: EXT });
+
+    await expect(resolveBibleByIdentity(identity, lookupsOver([foreign]))).resolves.toEqual({
+      abbreviation: SUFFIXED,
+      name: 'Berean Standard Bible',
+    });
+  });
+
+  it('does not claim a YouVersion suffixed abbreviation with no external ID', async () => {
+    const bare = bibleRow({ provider: 'aquifer', abbreviation: 'BSB' });
+    const suffixed = bibleRow({ provider: 'youversion', abbreviation: SUFFIXED });
+
+    await expect(resolveBibleByIdentity(identity, lookupsOver([bare, suffixed]))).rejects.toThrow(
+      /different provider or upstream identity \(youversion\/null\)/
+    );
+  });
+
   it('throws when the suffixed abbreviation is a second foreign identity', async () => {
     const foreign = bibleRow({ abbreviation: 'BSB', externalId: 'other-01' });
     const second = bibleRow({ abbreviation: SUFFIXED, externalId: 'other-02' });
 
     await expect(resolveBibleByIdentity(identity, lookupsOver([foreign, second]))).rejects.toThrow(
-      /different upstream identity \(other-02\)/
+      /different provider or upstream identity \(dbl\/other-02\)/
     );
   });
 
@@ -125,6 +145,14 @@ describe('resolveBibleByIdentity', () => {
         abbreviation: 'LOC',
         name: 'Local Bible',
       });
+    });
+
+    it('refuses to adopt a non-DBL bare abbreviation', async () => {
+      const row = bibleRow({ provider: 'aquifer', abbreviation: 'LOC' });
+
+      await expect(resolveBibleByIdentity(local, lookupsOver([row]))).rejects.toThrow(
+        /belongs to aquifer/
+      );
     });
   });
 });
