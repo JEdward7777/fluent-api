@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
 
 import { db } from '@/db';
@@ -79,6 +79,14 @@ async function seedIrvGujarati() {
     name: IRV_BIBLE.name,
     externalId: IRV_BIBLE.externalId,
   });
+  if (!resolved.existing || resolved.existing.audioResourceId === null) {
+    await db
+      .update(bible_provider_resources)
+      .set({ hasAudio: true })
+      .where(
+        and(eq(bible_provider_resources.id, text.id), ne(bible_provider_resources.hasAudio, true))
+      );
+  }
 
   let bibleId: number;
   if (resolved.existing) {

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 
 import type { SeedBibleRow } from '@/db/seeds/bible-identity';
 
@@ -80,6 +80,22 @@ export async function seedSpecBibles(ctx: DemoCtx) {
     // Resolve by upstream identity (shared with seeds/bibles.ts so both
     // converge on one row — see resolveBibleByIdentity).
     const resolved = await resolveBibleByIdentity(spec);
+    const effectiveTextResourceId = textResourceId ?? resolved.existing?.textResourceId;
+    if (
+      (!resolved.existing || resolved.existing.audioResourceId === null) &&
+      effectiveTextResourceId != null &&
+      spec.hasAudio !== undefined
+    ) {
+      await db
+        .update(bible_provider_resources)
+        .set({ hasAudio: spec.hasAudio })
+        .where(
+          and(
+            eq(bible_provider_resources.id, effectiveTextResourceId),
+            ne(bible_provider_resources.hasAudio, spec.hasAudio)
+          )
+        );
+    }
     let bible: SeedBibleRow;
     if (resolved.existing) {
       bible = resolved.existing;
