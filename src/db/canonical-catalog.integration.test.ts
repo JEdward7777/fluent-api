@@ -61,8 +61,56 @@ for (const contracted of [false, true])
         { code: 'JHN', eng_display_name: 'John' },
       ]);
       queries.length = 0;
+      await database.insert(canonicalResources).values({
+        provider: 'dbl',
+        externalId: 'a3644a98420c2703-01',
+        hasAudio: false,
+        ttsLicenseStatus: 'forbidden',
+      });
       await seedBibles();
       await seedBsbBibleTexts();
+      const [irvBefore] = await database
+        .select()
+        .from(canonicalBibles)
+        .where(eq(canonicalBibles.abbreviation, 'IRV'));
+      const [irvNewResource] = await database
+        .select()
+        .from(canonicalResources)
+        .where(eq(canonicalResources.id, irvBefore.textResourceId!));
+      expect(irvNewResource).toMatchObject({ hasAudio: true, ttsLicenseStatus: 'forbidden' });
+      await database
+        .update(canonicalBibles)
+        .set({ audioResourceId: null })
+        .where(eq(canonicalBibles.id, irvBefore.id));
+      await database
+        .update(canonicalResources)
+        .set({ hasAudio: false, ttsLicenseStatus: 'forbidden' })
+        .where(eq(canonicalResources.id, irvBefore.textResourceId!));
+      await seedBibles();
+      const [irvFilled] = await database
+        .select()
+        .from(canonicalResources)
+        .where(eq(canonicalResources.id, irvBefore.textResourceId!));
+      const [irvLinked] = await database
+        .select()
+        .from(canonicalBibles)
+        .where(eq(canonicalBibles.id, irvBefore.id));
+      expect(irvFilled).toMatchObject({ hasAudio: true, ttsLicenseStatus: 'forbidden' });
+      expect(irvLinked.audioResourceId).toBe(irvBefore.audioResourceId);
+      await database
+        .update(canonicalResources)
+        .set({ hasAudio: false })
+        .where(eq(canonicalResources.id, irvBefore.textResourceId!));
+      await seedBibles();
+      const [irvCurated] = await database
+        .select()
+        .from(canonicalResources)
+        .where(eq(canonicalResources.id, irvBefore.textResourceId!));
+      expect(irvCurated.hasAudio).toBe(false);
+      await database
+        .update(canonicalResources)
+        .set({ hasAudio: true })
+        .where(eq(canonicalResources.id, irvBefore.textResourceId!));
       const demoCtx: DemoCtx = {
         spec: {
           organizations: [],
@@ -91,6 +139,12 @@ for (const contracted of [false, true])
         pericopeSets: new Map(),
         roles: new Map(),
       };
+      await database.insert(canonicalResources).values({
+        provider: 'dbl',
+        externalId: 'demo-text',
+        hasAudio: false,
+        ttsLicenseStatus: 'forbidden',
+      });
       await seedSpecBibles(demoCtx);
       const demoId = demoCtx.bibles.get('DEMO')!;
       const [demo] = await database
@@ -100,6 +154,11 @@ for (const contracted of [false, true])
       expect(await loadDblSeedExternalIds([demoId])).toEqual(new Map([[demoId, 'demo-text']]));
       expect(demo.textResourceId).not.toBeNull();
       expect(demo.audioResourceId).not.toBeNull();
+      const [demoNewResource] = await database
+        .select()
+        .from(canonicalResources)
+        .where(eq(canonicalResources.id, demo.textResourceId!));
+      expect(demoNewResource).toMatchObject({ hasAudio: true, ttsLicenseStatus: 'forbidden' });
       await database
         .update(canonicalResources)
         .set({ hasAudio: false, ttsLicenseStatus: 'forbidden' })
@@ -110,6 +169,63 @@ for (const contracted of [false, true])
         .from(canonicalResources)
         .where(eq(canonicalResources.id, demo.textResourceId!));
       expect(curated).toMatchObject({ hasAudio: false, ttsLicenseStatus: 'forbidden' });
+      await database
+        .update(canonicalBibles)
+        .set({ audioResourceId: null })
+        .where(eq(canonicalBibles.id, demoId));
+      await seedSpecBibles(demoCtx);
+      const [demoFilled] = await database
+        .select()
+        .from(canonicalResources)
+        .where(eq(canonicalResources.id, demo.textResourceId!));
+      const [demoLinked] = await database
+        .select()
+        .from(canonicalBibles)
+        .where(eq(canonicalBibles.id, demoId));
+      expect(demoFilled).toMatchObject({ hasAudio: true, ttsLicenseStatus: 'forbidden' });
+      expect(demoLinked.audioResourceId).toBe(demo.audioResourceId);
+      await seedSpecBibles(demoCtx);
+      const [demoRerun] = await database
+        .select()
+        .from(canonicalResources)
+        .where(eq(canonicalResources.id, demo.textResourceId!));
+      expect(demoRerun).toEqual(demoFilled);
+      await database
+        .update(canonicalBibles)
+        .set({ audioResourceId: null })
+        .where(eq(canonicalBibles.id, demoId));
+      const noExternalIdCtx: DemoCtx = {
+        ...demoCtx,
+        spec: {
+          ...demoCtx.spec,
+          bibles: [
+            {
+              abbreviation: 'DEMO',
+              name: 'Demo canonical Bible',
+              language: 'eng',
+              hasAudio: false,
+              audioExternalId: 'demo-audio',
+            },
+          ],
+        },
+      };
+      await seedSpecBibles(noExternalIdCtx);
+      const [withoutExternalId] = await database
+        .select()
+        .from(canonicalResources)
+        .where(eq(canonicalResources.id, demo.textResourceId!));
+      const [relinked] = await database
+        .select()
+        .from(canonicalBibles)
+        .where(eq(canonicalBibles.id, demoId));
+      expect(withoutExternalId).toMatchObject({ hasAudio: false, ttsLicenseStatus: 'forbidden' });
+      expect(relinked.audioResourceId).toBe(demo.audioResourceId);
+      await seedSpecBibles(demoCtx);
+      const [stillCurated] = await database
+        .select()
+        .from(canonicalResources)
+        .where(eq(canonicalResources.id, demo.textResourceId!));
+      expect(stillCurated).toEqual(withoutExternalId);
       const seedRows = await bibles.getAll();
       expect(seedRows.ok).toBe(true);
       if (!seedRows.ok) throw new Error('seed read failed');
