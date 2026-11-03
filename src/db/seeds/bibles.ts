@@ -64,7 +64,12 @@ async function seedIrvGujarati() {
   const [text] = await db
     .select({ id: bible_provider_resources.id })
     .from(bible_provider_resources)
-    .where(and(eq(bible_provider_resources.provider, 'dbl'), eq(bible_provider_resources.externalId, IRV_BIBLE.externalId)));
+    .where(
+      and(
+        eq(bible_provider_resources.provider, 'dbl'),
+        eq(bible_provider_resources.externalId, IRV_BIBLE.externalId)
+      )
+    );
   if (!text) throw new Error('IRV text resource missing');
 
   // 3. Resolve the bible row by upstream identity (see resolveBibleByIdentity)

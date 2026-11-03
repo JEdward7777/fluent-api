@@ -1,7 +1,11 @@
 import { and, eq } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { bibleProjection, canonicalBibles as bibles, canonicalResources } from '@/db/canonical-schema';
+import {
+  bibleProjection,
+  canonicalBibles as bibles,
+  canonicalResources,
+} from '@/db/canonical-schema';
 
 import { suffixedAbbreviation } from './reference-bibles';
 
@@ -40,7 +44,9 @@ const dbLookups: BibleLookups = {
       .select(columns)
       .from(bibles)
       .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
-      .where(and(eq(canonicalResources.provider, 'dbl'), eq(canonicalResources.externalId, externalId)))
+      .where(
+        and(eq(canonicalResources.provider, 'dbl'), eq(canonicalResources.externalId, externalId))
+      )
       .limit(1);
     return row;
   },
@@ -54,7 +60,12 @@ const dbLookups: BibleLookups = {
     return row;
   },
   async byName(name) {
-    const [row] = await db.select(columns).from(bibles).leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id)).where(eq(bibles.name, name)).limit(1);
+    const [row] = await db
+      .select(columns)
+      .from(bibles)
+      .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
+      .where(eq(bibles.name, name))
+      .limit(1);
     return row;
   },
 };
@@ -68,8 +79,8 @@ export type BibleResolution =
  *
  * (provider, externalId) is the canonical upstream identity — a catalogue sync
  * may already own it under a different abbreviation (e.g. QA's 'BSB-bba9f4'),
- * and stamping the same external_id on a second row violates
- * idx_bibles_provider_external_id. Resolution order:
+ * and linking the same text resource to a second row violates
+ * idx_bibles_text_resource_id. Resolution order:
  *   1. the DBL row holding `externalId` → adopt it;
  *   2. the bare-abbreviation DBL row, unless it claims a *different* upstream
  *      identity → adopt it (the caller claims `externalId` onto it);

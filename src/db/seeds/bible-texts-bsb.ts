@@ -37,15 +37,28 @@ export async function seedBsbBibleTexts(): Promise<void> {
   // abbreviation after a catalogue sync (e.g. QA's 'BSB-bba9f4') while the
   // bare 'BSB' row names a different upstream bible entirely.
   const [holder] = await db
-    .select({ id: bibles.id, provider: canonicalResources.provider, externalId: canonicalResources.externalId })
+    .select({
+      id: bibles.id,
+      provider: canonicalResources.provider,
+      externalId: canonicalResources.externalId,
+    })
     .from(bibles)
     .innerJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
-    .where(and(eq(canonicalResources.provider, 'dbl'), eq(canonicalResources.externalId, 'bba9f40183526463-01')))
+    .where(
+      and(
+        eq(canonicalResources.provider, 'dbl'),
+        eq(canonicalResources.externalId, 'bba9f40183526463-01')
+      )
+    )
     .limit(1);
   const [bible] = holder
     ? [holder]
     : await db
-        .select({ id: bibles.id, provider: bibleProjection.provider, externalId: canonicalResources.externalId })
+        .select({
+          id: bibles.id,
+          provider: bibleProjection.provider,
+          externalId: canonicalResources.externalId,
+        })
         .from(bibles)
         .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
         .where(eq(bibles.abbreviation, 'BSB'));
