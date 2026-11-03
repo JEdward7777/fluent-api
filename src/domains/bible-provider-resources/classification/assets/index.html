@@ -23,6 +23,39 @@
           <li>Save</li>
         </ol>
       </nav>
+      <section class="workflow-guide" aria-labelledby="guide-heading">
+        <h2 id="guide-heading">Follow the buttons in order</h2>
+        <p>The strip above shows your section; it does not run a step. Use the buttons below.</p>
+        <p id="guide-next" class="guide-next" role="status">Loading your next step…</p>
+        <ol class="guide-list">
+          <li id="guide-settings">
+            <strong>Check settings.</strong>
+            <span id="guide-settings-effect"> Check choices; apply changed settings.</span>
+          </li>
+          <li id="guide-inspect">
+            <strong>Click Inspect inputs.</strong>
+            <span> It reads the selected source and shows an inspection and request estimate.</span>
+            <span> It does not start analysis.</span>
+          </li>
+          <li id="guide-analyze">
+            <strong>Click Start analysis.</strong>
+            <span id="guide-analyze-effect"> It builds the evidence you will review.</span>
+          </li>
+          <li id="guide-review">
+            <strong>Review classification evidence.</strong>
+            <span> Read the results below and open notices for details.</span>
+            <span> Apply or discard any row edit before previewing.</span>
+          </li>
+          <li id="guide-preview">
+            <strong id="guide-preview-action">Click Preview current revision.</strong>
+            <span id="guide-preview-effect"> It shows the exact changes without saving them.</span>
+          </li>
+          <li id="guide-save">
+            <strong id="guide-save-action">Click Save reviewed changes.</strong>
+            <span id="guide-save-effect"> It writes the previewed result.</span>
+          </li>
+        </ol>
+      </section>
       <section id="practice-banner" class="notice" hidden aria-label="Practice mode">
         <strong>Offline practice · JSON → JSON only</strong>
         <p>Inspect copies the source into private scratch. The source stays unchanged.</p>
@@ -33,7 +66,7 @@
       </section>
       <section aria-labelledby="setup-heading">
         <h2 id="setup-heading">Choose inputs</h2>
-        <p>Editing this form reads no input. Apply settings before Inspect inputs.</p>
+        <p>Editing reads no input. Apply settings before Inspect only if you change the form.</p>
         <p id="status" role="status">Connecting to the local session…</p>
         <form id="setup" hidden>
           <div class="fields">
