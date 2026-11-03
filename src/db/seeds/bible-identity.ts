@@ -7,6 +7,7 @@ import { suffixedAbbreviation } from './reference-bibles';
 
 export interface SeedBibleRow {
   id: number;
+  provider: (typeof bibles.$inferSelect)['provider'];
   abbreviation: string;
   name: string;
   externalId: string | null;
@@ -23,6 +24,7 @@ export interface BibleLookups {
 
 const columns = {
   id: bibles.id,
+  provider: bibles.provider,
   abbreviation: bibles.abbreviation,
   name: bibles.name,
   externalId: bibles.externalId,
@@ -64,8 +66,8 @@ export type BibleResolution =
  * may already own it under a different abbreviation (e.g. QA's 'BSB-bba9f4'),
  * and stamping the same external_id on a second row violates
  * idx_bibles_provider_external_id. Resolution order:
- *   1. the row holding `externalId` → adopt it;
- *   2. the bare-abbreviation row, unless it claims a *different* upstream
+ *   1. the DBL row holding `externalId` → adopt it;
+ *   2. the bare-abbreviation DBL row, unless it claims a *different* upstream
  *      identity → adopt it (the caller claims `externalId` onto it);
  *   3. otherwise the catalogue sync's suffixed abbreviation — adopt a row
  *      there under the same rule, else return it as the insert target.
@@ -95,13 +97,19 @@ export async function resolveBibleByIdentity(
 
   if (!externalId) {
     const bare = await lookups.byAbbreviation(abbreviation);
+    if (bare && bare.provider !== 'dbl') {
+      throw new Error(
+        `Bible "${abbreviation}" belongs to ${bare.provider} — reconcile it manually before seeding.`
+      );
+    }
     return bare ? { existing: bare } : insertAt(abbreviation);
   }
 
   const holder = await lookups.byExternalId(externalId);
   if (holder) return { existing: holder };
 
-  const claimable = (row: SeedBibleRow) => row.externalId === null || row.externalId === externalId;
+  const claimable = (row: SeedBibleRow) =>
+    row.provider === 'dbl' && (row.externalId === null || row.externalId === externalId);
 
   const bare = await lookups.byAbbreviation(abbreviation);
   if (!bare) return insertAt(abbreviation);
@@ -112,7 +120,7 @@ export async function resolveBibleByIdentity(
   if (!taken) return insertAt(suffixed);
   if (claimable(taken)) return { existing: taken };
   throw new Error(
-    `Bible "${suffixed}" holds a different upstream identity ` +
-      `(${taken.externalId}) — reconcile it manually before seeding.`
+    `Bible "${suffixed}" holds a different provider or upstream identity ` +
+      `(${taken.provider}/${taken.externalId}) — reconcile it manually before seeding.`
   );
 }
