@@ -35,6 +35,39 @@ describe('license workbench launch', () => {
     expect(() => parseLicenseWorkbenchLaunch(['--ui=web', '--yes'], false)).toThrow('use --ui=cli');
   });
 
+  it('requires an exact loopback CodeServer proxy URL and matching explicit port', () => {
+    const args = ['--ui=web', '--port=8766', '--local-proxy-url=http://localhost:8454/proxy/8766/'];
+    expect(parseLicenseWorkbenchLaunch(args, false)).toMatchObject({
+      kind: 'web',
+      port: 8766,
+      localProxyUrl: 'http://localhost:8454/proxy/8766/',
+    });
+    for (const url of [
+      'https://localhost:8454/proxy/8766/',
+      'http://evil.example:8454/proxy/8766/',
+      'http://localhost:8454/proxy/8767/',
+      'http://localhost:8454/proxy/8766/?x=1',
+      'http://localhost:8454/proxy/8766/#secret',
+      'http://user@localhost:8454/proxy/8766/',
+      'http://localhost:8454/other/8766/',
+    ])
+      expect(() =>
+        parseLicenseWorkbenchLaunch(args.slice(0, 2).concat(`--local-proxy-url=${url}`), false)
+      ).toThrow('local-proxy-url');
+    expect(() =>
+      parseLicenseWorkbenchLaunch(
+        ['--ui=web', '--local-proxy-url=http://localhost:8454/proxy/8766/'],
+        false
+      )
+    ).toThrow('local-proxy-url');
+    expect(() =>
+      parseLicenseWorkbenchLaunch(
+        ['--ui=cli', '--local-proxy-url=http://localhost:8454/proxy/8766/'],
+        false
+      )
+    ).toThrow('browser mode');
+  });
+
   it('selects explicit browser practice and rejects automation, real targets and reviewer flags', () => {
     expect(parseLicenseWorkbenchLaunch(['--practice'], true)).toMatchObject({
       kind: 'web',

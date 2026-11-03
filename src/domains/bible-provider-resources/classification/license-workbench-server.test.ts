@@ -1,5 +1,6 @@
+import { Buffer } from 'node:buffer';
 import { readFile, rm, writeFile } from 'node:fs/promises';
-import { get } from 'node:http';
+import { createServer, get, request } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createLicenseArtifact, serializeLicenseArtifact } from '../license-artifact';
@@ -15,6 +16,61 @@ afterEach(async () => {
 });
 
 describe('local license workbench server', () => {
+  it('accepts only the configured local proxy Host while preserving token and Origin checks', async () => {
+    const port = await new Promise<number>((resolve, reject) => {
+      const socket = createServer();
+      socket.once('error', reject);
+      socket.listen(0, '127.0.0.1', () => {
+        const address = socket.address();
+        if (!address || typeof address === 'string') return reject(new Error('Missing port'));
+        socket.close(() => resolve(address.port));
+      });
+    });
+    const proxyUrl = `http://localhost:8454/proxy/${port}/`;
+    const session = await startLicenseWorkbenchServer(options.options, port, false, proxyUrl);
+    active.push(session);
+    const token = new URL(session.url).hash.slice(1);
+    expect(session.url).toBe(`${proxyUrl}#${token}`);
+    const call = (path: string, host: string, method = 'GET', origin?: string, auth = true) =>
+      new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+        const client = request(
+          `http://127.0.0.1:${port}${path}`,
+          {
+            method,
+            headers: {
+              host,
+              ...(auth ? { 'x-workbench-token': token } : {}),
+              ...(origin ? { origin } : {}),
+            },
+          },
+          (response) => {
+            const parts: Buffer[] = [];
+            response.on('data', (part: Buffer) => parts.push(part));
+            response.on('end', () =>
+              resolve({ status: response.statusCode, body: Buffer.concat(parts).toString() })
+            );
+          }
+        );
+        client.on('error', reject);
+        client.end();
+      });
+    expect((await call('/', 'localhost:8454')).body).toContain('href="./app.css"');
+    expect((await call('/', 'localhost:8454')).body).toContain('src="./app.js"');
+    expect((await call('/app.js', 'localhost:8454')).body).toMatch(/fetch\(`\.\/api\/\$\{path\}`/);
+    expect((await call('/api/setup', 'localhost:8454', 'GET', undefined, false)).status).toBe(403);
+    expect((await call('/api/setup', 'evil.example')).status).toBe(403);
+    expect((await call('/api/ping', 'localhost:8455')).status).toBe(403);
+    expect((await call('/api/setup', 'localhost:8454')).status).toBe(200);
+    expect((await call('/api/ping', 'localhost:8454', 'POST', 'http://evil.example')).status).toBe(
+      403
+    );
+    expect(
+      (await call('/api/ping', 'localhost:8454', 'POST', 'http://localhost:8454')).status
+    ).toBe(200);
+    expect(
+      (await call('/api/ping', 'localhost:8454', 'POST', 'http://localhost:8454', false)).status
+    ).toBe(403);
+  });
   it('allocates practice scratch only at Inspect and rejects forged real targets and attestation', async () => {
     const fixture = await makeCommandFixture();
     const session = await startLicenseWorkbenchServer(
