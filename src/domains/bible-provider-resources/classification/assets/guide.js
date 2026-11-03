@@ -27,11 +27,11 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed }) {
   let message;
   if (saveStatusUnconfirmed()) {
     message = next.practice
-      ? 'We could not confirm whether Save completed. Reload to check the same save. If it remains unknown, check the scratch output before saving again.'
-      : 'We could not confirm whether Save completed. Reload to check the same save. If it remains unknown, check the actual destinations before saving again.';
+      ? 'We could not confirm whether Save completed. Reload to check the same save. If it remains unknown, check the scratch output before starting a new session.'
+      : 'We could not confirm whether Save completed. Reload to check the same save. If it remains unknown, check the actual destinations before starting a new session.';
   } else if (next.state === 'uncertain') {
     message =
-      'The Save result is uncertain. Check the actual destinations before starting a new process.';
+      'The Save result is uncertain. Check the actual destinations before starting a new session.';
   } else if (sessionUnconfirmed) {
     message =
       'Session status is unavailable. Reload before another action; check destinations if Save may have started.';
