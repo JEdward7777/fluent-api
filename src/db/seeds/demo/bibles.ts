@@ -3,11 +3,15 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { SeedBibleRow } from '@/db/seeds/bible-identity';
 
 import { db } from '@/db';
-import { bible_books, bible_provider_resources, bibles, books } from '@/db/schema';
+import {
+  canonicalResources as bible_provider_resources,
+  bibleProjection,
+  canonicalBibles as bibles,
+} from '@/db/canonical-schema';
+import { bible_books, books } from '@/db/schema';
 import { resolveBibleByIdentity } from '@/db/seeds/bible-identity';
 
 import type { DemoCtx } from './context';
-import type { DemoBible } from './types';
 
 // ─── Stage 3: bibles + book links ───────────────────────────────────────────
 
@@ -39,7 +43,7 @@ export async function seedSpecBibles(ctx: DemoCtx) {
     // Insert-only like seeds/bibles.ts: spec values seed a missing row, but
     // an existing row's license state and display name are operator-owned —
     // a reseed never rewrites them.
-    const ensureResource = async (externalId: string, displayName: string) => {
+    const ensureResource = async (externalId: string, displayName: string, hasAudio = false) => {
       await db
         .insert(bible_provider_resources)
         .values({
@@ -48,6 +52,7 @@ export async function seedSpecBibles(ctx: DemoCtx) {
           ttsLicenseStatus: spec.ttsLicenseStatus ?? 'unknown',
           licenseNotice: spec.licenseNotice,
           displayName,
+          hasAudio,
         })
         .onConflictDoNothing();
       const [row] = await db
@@ -65,7 +70,9 @@ export async function seedSpecBibles(ctx: DemoCtx) {
       }
       return row.id;
     };
-    if (spec.externalId) await ensureResource(spec.externalId, spec.name);
+    const textResourceId = spec.externalId
+      ? await ensureResource(spec.externalId, spec.name, spec.hasAudio ?? false)
+      : undefined;
     const audioResourceId = spec.audioExternalId
       ? await ensureResource(spec.audioExternalId, `${spec.name} audio`)
       : undefined;
@@ -76,30 +83,35 @@ export async function seedSpecBibles(ctx: DemoCtx) {
     let bible: SeedBibleRow;
     if (resolved.existing) {
       bible = resolved.existing;
-      const patch = demoBiblePatch(bible, spec, audioResourceId);
+      const patch = demoBiblePatch(bible, textResourceId, audioResourceId);
       if (Object.keys(patch).length)
         await db.update(bibles).set(patch).where(eq(bibles.id, bible.id));
     } else {
-      [bible] = await db
+      const [inserted] = await db
         .insert(bibles)
         .values({
           abbreviation: resolved.abbreviation,
           name: resolved.name,
           languageId,
-          provider: 'dbl',
-          externalId: spec.externalId,
-          hasAudio: spec.hasAudio ?? false,
+          textResourceId,
           audioResourceId,
         })
-        .returning({
+        .returning({ id: bibles.id });
+      const [created] = await db
+        .select({
           id: bibles.id,
-          provider: bibles.provider,
+          provider: bibleProjection.provider,
           abbreviation: bibles.abbreviation,
           name: bibles.name,
-          externalId: bibles.externalId,
-          hasAudio: bibles.hasAudio,
+          externalId: bible_provider_resources.externalId,
+          hasAudio: bibleProjection.hasAudio,
           audioResourceId: bibles.audioResourceId,
-        });
+          textResourceId: bibles.textResourceId,
+        })
+        .from(bibles)
+        .leftJoin(bible_provider_resources, eq(bibles.textResourceId, bible_provider_resources.id))
+        .where(eq(bibles.id, inserted.id));
+      bible = created;
       console.log(`  bible ${resolved.abbreviation}`);
     }
     ctx.bibles.set(spec.abbreviation, bible.id);
@@ -140,25 +152,22 @@ export async function seedSpecBibles(ctx: DemoCtx) {
 }
 
 /**
- * The reconcile patch for an adopted spec bible. Spec-provided externalId wins
- * (only ever claimed onto a row whose identity is NULL — resolution never
- * adopts a row holding a different one). Audio state follows the same
+ * The reconcile patch for an adopted spec bible. The resolver ensures a
+ * text-resource claim never replaces another provider identity. Audio follows the
  * curated-selection rule as seeds/bibles.ts: an operator-chosen recording or
  * hasAudio flag isn't seed-owned drift, so spec audio values only fill an
  * empty audio slot.
  */
 export function demoBiblePatch(
-  bible: Pick<SeedBibleRow, 'externalId' | 'hasAudio' | 'audioResourceId'>,
-  spec: Pick<DemoBible, 'externalId' | 'hasAudio'>,
+  bible: Pick<SeedBibleRow, 'textResourceId' | 'audioResourceId'>,
+  textResourceId: number | undefined,
   audioResourceId: number | undefined
-): { externalId?: string; hasAudio?: boolean; audioResourceId?: number } {
-  const patch: { externalId?: string; hasAudio?: boolean; audioResourceId?: number } = {};
-  if (spec.externalId !== undefined && bible.externalId !== spec.externalId)
-    patch.externalId = spec.externalId;
+): { textResourceId?: number; audioResourceId?: number } {
+  const patch: { textResourceId?: number; audioResourceId?: number } = {};
+  if (textResourceId !== undefined && bible.textResourceId !== textResourceId)
+    patch.textResourceId = textResourceId;
   if (bible.audioResourceId === null) {
     if (audioResourceId !== undefined) patch.audioResourceId = audioResourceId;
-    if (spec.hasAudio !== undefined && bible.hasAudio !== spec.hasAudio)
-      patch.hasAudio = spec.hasAudio;
   }
   return patch;
 }

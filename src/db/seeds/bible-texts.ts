@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { db } from '@/db';
-import { canonicalBibles as bibles } from '@/db/canonical-schema';
+import { canonicalBibles as bibles, canonicalResources } from '@/db/canonical-schema';
 import { bible_books, bible_texts, books, translated_verses } from '@/db/schema';
 
 const IRV_ABBREVIATION = 'IRV';
@@ -41,15 +41,15 @@ export async function seedBibleTexts() {
   const [holder] = await db
     .select({ id: bibles.id })
     .from(bibles)
-    .where(and(eq(bibles.provider, 'dbl'), eq(bibles.externalId, 'a3644a98420c2703-01')))
+    .innerJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
+    .where(
+      and(
+        eq(canonicalResources.provider, 'dbl'),
+        eq(canonicalResources.externalId, 'a3644a98420c2703-01')
+      )
+    )
     .limit(1);
-  const [bible] = holder
-    ? [holder]
-    : await db
-        .select({ id: bibles.id })
-        .from(bibles)
-        .where(eq(bibles.abbreviation, IRV_ABBREVIATION))
-        .limit(1);
+  const bible = holder;
 
   if (!bible) {
     throw new Error(`Bible "${IRV_ABBREVIATION}" not found. Run seedBibles first.`);

@@ -19,6 +19,7 @@ function bibleRow(overrides: Partial<SeedBibleRow> = {}): SeedBibleRow {
     externalId: null,
     hasAudio: false,
     audioResourceId: null,
+    textResourceId: null,
     ...overrides,
   };
 }

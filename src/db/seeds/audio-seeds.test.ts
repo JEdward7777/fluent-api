@@ -27,6 +27,7 @@ vi.mock('@/db', () => ({ db: dbMock }));
 function selectResult(rows: unknown[]) {
   const result = {
     from: vi.fn().mockReturnThis(),
+    innerJoin: vi.fn().mockReturnThis(),
     leftJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
@@ -53,7 +54,7 @@ function queueDemoReferences() {
   for (const ref of [
     { id: 1 },
     { id: 2 },
-    { id: 3, languageId: 4 },
+    { bibles: { id: 3, languageId: 4 } },
     { id: 43 },
     { id: 5 },
     { id: 6 },

@@ -1,7 +1,8 @@
-import { and, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { bible_books, bibles } from '@/db/schema';
+import { canonicalBibles as bibles, canonicalResources } from '@/db/canonical-schema';
+import { bible_books } from '@/db/schema';
 import env from '@/env';
 import { ensureWorkerQueue } from '@/lib/dead-letter-queues';
 import { initializeQueue, QUEUE_NAMES, stopQueue } from '@/lib/queue';
@@ -61,6 +62,22 @@ export function planIngestJobs(
   return plan;
 }
 
+/** Canonical text-resource lookup used before any DBL enqueue. */
+export async function loadDblSeedExternalIds(
+  bibleIds: number[]
+): Promise<Map<number, string | null>> {
+  const bibleRows = await db
+    .select({
+      id: bibles.id,
+      externalId: canonicalResources.externalId,
+      provider: canonicalResources.provider,
+    })
+    .from(bibles)
+    .leftJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
+    .where(inArray(bibles.id, bibleIds));
+  return new Map(bibleRows.map((row) => [row.id, row.provider === 'dbl' ? row.externalId : null]));
+}
+
 /**
  * Reproduces the enqueue side of milestones.service's book-link flow, which
  * the engine bypasses by writing `project_unit_bible_books` directly. The
@@ -82,17 +99,13 @@ export async function seedIngestJobs(ctx: IngestCtx): Promise<void> {
   // abbreviation lookup can hit a different upstream row after a catalogue
   // sync (QA's 'BSB' is 317e…; the adopted 'BSB-bba9f4' holds our bba9f…).
   const bibleIds = abbrevs.map((a) => ctx.bibles.get(a)!);
-  const bibleRows = await db
-    .select({ id: bibles.id, externalId: bibles.externalId })
-    .from(bibles)
-    .where(inArray(bibles.id, bibleIds));
-  const externalIdById = new Map(bibleRows.map((r) => [r.id, r.externalId]));
+  const externalIdById = await loadDblSeedExternalIds(bibleIds);
   const externalIds = new Map(
     abbrevs.map((a) => [a, externalIdById.get(ctx.bibles.get(a)!) ?? null])
   );
   const noExternalId = abbrevs.filter((a) => !externalIds.get(a));
   if (noExternalId.length) {
-    console.warn(`  ingest jobs: skipping ${noExternalId.join(', ')} — no bibles.externalId`);
+    console.warn(`  ingest jobs: skipping ${noExternalId.join(', ')} — no DBL text resource`);
   }
 
   // bible_books.textIngestedAt is the codebase's ingest-complete marker:
