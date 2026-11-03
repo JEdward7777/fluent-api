@@ -57,6 +57,35 @@ nav [aria-current] {
   background: #164f6e;
   color: white;
 }
+.workflow-guide {
+  border-color: #9db8c7;
+}
+.workflow-guide > p {
+  margin: 0.5rem 0;
+}
+.guide-next {
+  padding: 0.65rem 0.8rem;
+  border-left: 0.3rem solid #164f6e;
+  background: #eaf3f8;
+  font-weight: 700;
+}
+.guide-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  gap: 0.55rem;
+  padding-left: 0;
+  margin-bottom: 0;
+}
+.guide-list li {
+  list-style-position: inside;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #d7e0e6;
+  border-radius: 0.35rem;
+}
+.guide-list li[aria-current='step'] {
+  border-color: #164f6e;
+  background: #eaf3f8;
+}
 dl {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));

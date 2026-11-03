@@ -1,3 +1,4 @@
+import { renderGuide as updateGuide } from './guide.js';
 import { licenseWorkbenchPreviewLines } from './preview-text.js';
 import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
 import { initSave, renderSave, saveStatusUnconfirmed } from './save.js';
@@ -28,6 +29,8 @@ const reportWrite = document.getElementById('report-write');
 const reportOverwrite = document.getElementById('report-overwrite');
 let reportPlan = null;
 
+const renderGuide = (next) => updateGuide(next, { dirty, practiceBusy, sessionUnconfirmed });
+
 function clearReportPlan() {
   reportPlan = null;
   reportTarget.textContent = 'Inspect the selected target path before export.';
@@ -42,7 +45,6 @@ function renderExactPreview(next) {
   const blocked = hasUnsavedReviewDraft() || sessionUnconfirmed || saveStatusUnconfirmed() || dirty;
   previewButton.disabled =
     blocked ||
-    dirty ||
     practiceBusy ||
     Boolean(next.activeOperationId) ||
     !['reviewing', 'previewed'].includes(next.state);
@@ -131,6 +133,7 @@ initReview(
     if (setup) {
       renderExactPreview(setup);
       renderSave(setup);
+      renderGuide(setup);
     }
   }
 );
@@ -261,14 +264,17 @@ function render(next, populate = false) {
     status.textContent = 'Inputs inspected. Review the request estimate, then start analysis.';
   else if (next.latestOperation?.state === 'failed')
     status.textContent = next.latestOperation.error;
-  else if (busy)
-    status.textContent = `${next.state}… You can reload this page without restarting the operation.`;
-  else status.textContent = `Session ${next.state}. Apply settings, then Inspect inputs.`;
+  else if (busy) status.textContent = `${next.state}… Reloading keeps the operation.`;
+  else
+    status.textContent = next.readyForInspect
+      ? 'Settings ready. Click Inspect inputs.'
+      : 'Choose settings and click Apply settings.';
   const practiceReview = document.getElementById('practice-review');
   practiceReview.hidden = !next.practice || !next.analysis;
   renderExactPreview(next);
   renderSave(next);
   syncPracticeDraftControls();
+  renderGuide(next);
   setReviewBusy(
     sessionUnconfirmed || saveStatusUnconfirmed() || practiceBusy || Boolean(next.activeOperationId)
   );
@@ -289,6 +295,7 @@ form.addEventListener('input', () => {
     renderExactPreview(setup);
     renderSave(setup);
     syncPracticeDraftControls();
+    renderGuide(setup);
   }
   status.textContent = 'Settings changed. Apply settings before inspecting.';
 });
@@ -361,6 +368,7 @@ async function practiceAction(path, body) {
   }
   practiceBusy = true;
   setReviewBusy(true);
+  renderGuide(setup);
   let failure;
   for (const id of ['practice-preview', 'practice-save'])
     document.getElementById(id).disabled = true;
@@ -371,6 +379,7 @@ async function practiceAction(path, body) {
   } finally {
     practiceBusy = false;
     setReviewBusy(false);
+    renderGuide(setup);
     if (failure) await recoverActionFailure(failure);
     else render(setup);
   }
@@ -387,6 +396,7 @@ async function recoverActionFailure(message, report = false) {
       renderExactPreview(setup);
       syncPracticeDraftControls();
       setReviewBusy(true);
+      renderGuide(setup);
     }
     status.textContent = `${message} Session status unavailable; inspect actual targets and reload before retrying.`;
   }
@@ -403,6 +413,7 @@ initSave({
   setPracticeBusy: (value) => {
     practiceBusy = value;
     setReviewBusy(value);
+    if (setup) renderGuide(setup);
   },
   render,
 });
@@ -479,14 +490,17 @@ document.getElementById('practice-preview').addEventListener('click', () => {
     contentRevision: setup.contentRevision,
   });
 });
-if (!token)
+if (!token) {
   status.textContent =
     'Open the exact local URL printed by the workbench. Its fragment contains this session’s access token.';
-else {
+  document.getElementById('guide-next').textContent = 'Open the printed session URL to begin.';
+} else {
   try {
     render(await request('setup'), true);
     if (setup.activeOperationId) await refresh();
   } catch (error) {
     status.textContent = error.message;
+    document.getElementById('guide-next').textContent =
+      'Session status is unavailable. Reload or check the local workbench before continuing.';
   }
 }
