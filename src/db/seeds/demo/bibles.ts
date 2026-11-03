@@ -86,12 +86,14 @@ export async function seedSpecBibles(ctx: DemoCtx) {
           abbreviation: resolved.abbreviation,
           name: resolved.name,
           languageId,
+          provider: 'dbl',
           externalId: spec.externalId,
           hasAudio: spec.hasAudio ?? false,
           audioResourceId,
         })
         .returning({
           id: bibles.id,
+          provider: bibles.provider,
           abbreviation: bibles.abbreviation,
           name: bibles.name,
           externalId: bibles.externalId,
