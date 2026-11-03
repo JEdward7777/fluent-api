@@ -35,13 +35,13 @@ function sameToken(actual: string | undefined, expected: string) {
 function createLicenseWorkbenchApp(
   session: LicenseWorkbenchSession,
   getPort: () => number,
-  token: string
+  token: string,
+  localProxyUrl?: string
 ) {
   const app = new Hono();
   app.use('*', async (c, next) => {
     const host = c.req.header('host') ?? '';
-    if (host !== `localhost:${getPort()}` && host !== `127.0.0.1:${getPort()}`)
-      return c.text('Invalid local Host', 403);
+    if (!allowedHost(host, getPort(), localProxyUrl)) return c.text('Invalid local Host', 403);
     c.header('Cache-Control', 'no-store');
     c.header('X-Content-Type-Options', 'nosniff');
     c.header('Referrer-Policy', 'no-referrer');
@@ -271,23 +271,45 @@ function createLicenseWorkbenchApp(
   return app;
 }
 
+function allowedHost(host: string, port: number, localProxyUrl?: string) {
+  return (
+    host === `localhost:${port}` ||
+    host === `127.0.0.1:${port}` ||
+    (localProxyUrl !== undefined && host === new URL(localProxyUrl).host)
+  );
+}
+
 export async function startLicenseWorkbenchServer(
   options: LicenseCommandOptions,
   requestedPort: number,
-  practice = false
+  practice = false,
+  localProxyUrl?: string
 ) {
+  if (localProxyUrl) {
+    const proxy = new URL(localProxyUrl);
+    if (
+      requestedPort === 0 ||
+      proxy.protocol !== 'http:' ||
+      !['localhost', '127.0.0.1'].includes(proxy.hostname) ||
+      !proxy.port ||
+      proxy.username ||
+      proxy.password ||
+      proxy.search ||
+      proxy.hash ||
+      proxy.pathname !== `/proxy/${requestedPort}/` ||
+      proxy.href !== localProxyUrl
+    )
+      throw new Error('Invalid loopback CodeServer proxy URL');
+  }
   const token = randomBytes(32).toString('base64url');
   const session = new LicenseWorkbenchSession(options, practice);
   let selectedPort = requestedPort;
   const listen = () =>
     new Promise<Server>((resolve, reject) => {
-      const app = createLicenseWorkbenchApp(session, () => selectedPort, token);
+      const app = createLicenseWorkbenchApp(session, () => selectedPort, token, localProxyUrl);
       const listener = getRequestListener(app.fetch);
       const candidate = createServer((request, response) => {
-        if (
-          request.headers.host !== `localhost:${selectedPort}` &&
-          request.headers.host !== `127.0.0.1:${selectedPort}`
-        ) {
+        if (!allowedHost(request.headers.host ?? '', selectedPort, localProxyUrl)) {
           response.writeHead(403, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
           response.end('Invalid local Host');
           return;
@@ -314,7 +336,7 @@ export async function startLicenseWorkbenchServer(
   return {
     server,
     port: selectedPort,
-    url: `http://127.0.0.1:${selectedPort}/#${token}`,
+    url: `${localProxyUrl ?? `http://127.0.0.1:${selectedPort}/`}#${token}`,
     close: async () => {
       await session.close();
       await new Promise<void>((resolve, reject) =>

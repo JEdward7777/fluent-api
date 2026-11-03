@@ -5,6 +5,8 @@ import { LICENSE_COMMAND_HELP, parseLicenseCommandOptions } from './license-comm
 export const LICENSE_WORKBENCH_HELP = `${LICENSE_COMMAND_HELP}
 
 Browser workbench: npm run db:classify:licenses -- [--ui=web] [--port=8766]
+For a loopback CodeServer proxy, add --local-proxy-url=http://localhost:8454/proxy/8766/
+with the proxy port matching --port. This explicitly permits that local Host and Origin.
 With both stdin and stdout on a terminal, no UI flag opens browser setup. Non-terminal
 invocations use the CLI unless --ui=web is explicit. --ui=cli retains terminal review.
 Browser setup never reads inputs or spends model requests before Inspect inputs; Start analysis
@@ -38,6 +40,7 @@ export function parseLicenseWorkbenchLaunch(args: string[], interactive: boolean
     options: {
       ui: { type: 'string' },
       port: { type: 'string' },
+      'local-proxy-url': { type: 'string' },
       practice: { type: 'boolean' },
     },
   });
@@ -47,11 +50,17 @@ export function parseLicenseWorkbenchLaunch(args: string[], interactive: boolean
   const remaining: string[] = [];
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
-    if (arg === '--ui' || arg === '--port') {
+    if (arg === '--ui' || arg === '--port' || arg === '--local-proxy-url') {
       index++;
       continue;
     }
-    if (arg === '--practice' || arg.startsWith('--ui=') || arg.startsWith('--port=')) continue;
+    if (
+      arg === '--practice' ||
+      arg.startsWith('--ui=') ||
+      arg.startsWith('--port=') ||
+      arg.startsWith('--local-proxy-url=')
+    )
+      continue;
     remaining.push(arg);
   }
   if (
@@ -70,7 +79,7 @@ export function parseLicenseWorkbenchLaunch(args: string[], interactive: boolean
       )
     )
       throw new Error(
-        'Practice accepts only --input, --port and --ui=web; it cannot select real targets, automation or reviewers'
+        'Practice accepts only --input, --port, --local-proxy-url and --ui=web; it cannot select real targets, automation or reviewers'
       );
     if (!interactive && ui !== 'web')
       throw new Error('Non-terminal practice requires explicit --ui=web');
@@ -79,11 +88,13 @@ export function parseLicenseWorkbenchLaunch(args: string[], interactive: boolean
     const port = values.port === undefined ? 0 : Number(values.port);
     if (!Number.isSafeInteger(port) || (values.port !== undefined && port < 1) || port > 65535)
       throw new Error('--port must be an integer from 1 to 65535');
+    const localProxyUrl = parseLocalProxyUrl(values['local-proxy-url'], port);
     const inputSelected = remaining.some((arg) => arg === '--input' || arg.startsWith('--input='));
     return {
       kind: 'web' as const,
       options: { ...parsed.options, input: inputSelected ? parsed.options.input : '' },
       port,
+      localProxyUrl,
       practice: true as const,
     };
   }
@@ -94,12 +105,45 @@ export function parseLicenseWorkbenchLaunch(args: string[], interactive: boolean
       !remaining.includes('--yes') &&
       !remaining.includes('--plan-only') &&
       !remaining.includes('--open-report'));
-  if (!web && values.port !== undefined) throw new Error('--port applies only to browser mode');
+  if (!web && (values.port !== undefined || values['local-proxy-url'] !== undefined))
+    throw new Error('--port and --local-proxy-url apply only to browser mode');
   const parsed = parseLicenseCommandOptions(remaining, web || interactive);
   if (parsed.help) return { kind: 'help' as const };
   if (!web) return { kind: 'cli' as const, options: parsed.options };
   const port = values.port === undefined ? 0 : Number(values.port);
   if (!Number.isSafeInteger(port) || (values.port !== undefined && port < 1) || port > 65535)
     throw new Error('--port must be an integer from 1 to 65535');
-  return { kind: 'web' as const, options: parsed.options, port };
+  return {
+    kind: 'web' as const,
+    options: parsed.options,
+    port,
+    localProxyUrl: parseLocalProxyUrl(values['local-proxy-url'], port),
+  };
+}
+
+function parseLocalProxyUrl(value: string | boolean | undefined, port: number): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new Error('--local-proxy-url requires a URL');
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('--local-proxy-url must be a loopback HTTP CodeServer proxy URL');
+  }
+  if (
+    port === 0 ||
+    url.protocol !== 'http:' ||
+    !['localhost', '127.0.0.1'].includes(url.hostname) ||
+    !url.port ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.pathname !== `/proxy/${port}/` ||
+    url.href !== value
+  )
+    throw new Error(
+      '--local-proxy-url must be http://localhost:LOCAL_PORT/proxy/WORKBENCH_PORT/ matching --port'
+    );
+  return value;
 }
