@@ -413,6 +413,7 @@ initSave({
   setPracticeBusy: (value) => {
     practiceBusy = value;
     setReviewBusy(value);
+    if (setup) syncPracticeDraftControls();
     if (setup) renderGuide(setup);
   },
   render,
@@ -491,8 +492,7 @@ document.getElementById('practice-preview').addEventListener('click', () => {
   });
 });
 if (!token) {
-  status.textContent =
-    'Open the exact local URL printed by the workbench. Its fragment contains this session’s access token.';
+  status.textContent = 'Open the printed local URL, including its session token after #.';
   document.getElementById('guide-next').textContent = 'Open the printed session URL to begin.';
 } else {
   try {
@@ -501,6 +501,6 @@ if (!token) {
   } catch (error) {
     status.textContent = error.message;
     document.getElementById('guide-next').textContent =
-      'Session status is unavailable. Reload or check the local workbench before continuing.';
+      'Session unavailable. Reload before continuing.';
   }
 }
