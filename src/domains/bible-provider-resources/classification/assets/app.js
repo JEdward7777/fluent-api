@@ -108,7 +108,7 @@ function syncPracticeDraftControls() {
 }
 
 async function request(path, method = 'GET', body) {
-  const response = await fetch(`/api/${path}`, {
+  const response = await fetch(`./api/${path}`, {
     method,
     headers: {
       'x-workbench-token': token,

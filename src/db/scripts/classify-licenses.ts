@@ -28,11 +28,12 @@ try {
     const workbench = await startLicenseWorkbenchServer(
       parsed.options,
       parsed.port,
-      'practice' in parsed && parsed.practice
+      'practice' in parsed && parsed.practice,
+      parsed.localProxyUrl
     );
     io.write(`Open ${workbench.url}`);
     io.write(
-      'Loopback only. Ctrl+C stops the local workbench. Container access: forward this port to local 127.0.0.1 with an IDE Ports panel or SSH local tunnel; do not use a public forwarding domain.'
+      'Loopback only. Ctrl+C stops the local workbench. Use only a local port forward or the explicitly configured loopback CodeServer proxy.'
     );
     if (interactive) {
       const command =
