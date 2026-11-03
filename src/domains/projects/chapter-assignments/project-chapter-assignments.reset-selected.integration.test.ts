@@ -61,7 +61,6 @@ describe('resetSelectedChapters (PGlite)', () => {
       verse_audio_takes: schema.verse_audio_takes,
       authUser: schema.authUser,
       authSession: schema.authSession,
-      bibleProviderEnum: schema.bibleProviderEnum,
       resourceProviderEnum: schema.resourceProviderEnum,
       ttsLicenseStatusEnum: schema.ttsLicenseStatusEnum,
       scriptDirectionEnum: schema.scriptDirectionEnum,
@@ -113,11 +112,14 @@ describe('resetSelectedChapters (PGlite)', () => {
       .returning();
     bookId = book.id;
 
-    await database.insert(schema.bible_provider_resources).values({
-      provider: 'dbl',
-      externalId: 'reset-text-id',
-      ttsLicenseStatus: 'allowed',
-    });
+    const [textResource] = await database
+      .insert(schema.bible_provider_resources)
+      .values({
+        provider: 'dbl',
+        externalId: 'reset-text-id',
+        ttsLicenseStatus: 'allowed',
+      })
+      .returning();
 
     const [bible] = await database
       .insert(schema.bibles)
@@ -125,8 +127,7 @@ describe('resetSelectedChapters (PGlite)', () => {
         name: 'Reset Bible',
         abbreviation: 'RST',
         languageId: lang.id,
-        provider: 'dbl',
-        externalId: 'reset-text-id',
+        textResourceId: textResource.id,
       })
       .returning();
     bibleId = bible.id;
