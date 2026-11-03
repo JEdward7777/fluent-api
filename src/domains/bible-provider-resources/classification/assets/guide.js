@@ -25,9 +25,16 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed }) {
 
   let step;
   let message;
-  if (sessionUnconfirmed || saveStatusUnconfirmed() || next.state === 'uncertain') {
+  if (saveStatusUnconfirmed()) {
+    message = next.practice
+      ? 'We could not confirm whether Save completed. Reload to check the same save. If it remains unknown, check the scratch output before saving again.'
+      : 'We could not confirm whether Save completed. Reload to check the same save. If it remains unknown, check the actual destinations before saving again.';
+  } else if (next.state === 'uncertain') {
     message =
-      'Next: Check the session and actual targets before another action. See the status below.';
+      'The Save result is uncertain. Check the actual destinations before starting a new process.';
+  } else if (sessionUnconfirmed) {
+    message =
+      'Session status is unavailable. Reload before another action; check destinations if Save may have started.';
   } else if (
     next.activeOperationId ||
     practiceBusy ||
