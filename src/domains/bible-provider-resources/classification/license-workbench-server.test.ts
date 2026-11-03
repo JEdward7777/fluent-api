@@ -57,6 +57,7 @@ describe('local license workbench server', () => {
     expect((await call('/', 'localhost:8454')).body).toContain('href="./app.css"');
     expect((await call('/', 'localhost:8454')).body).toContain('src="./app.js"');
     expect((await call('/app.js', 'localhost:8454')).body).toMatch(/fetch\(`\.\/api\/\$\{path\}`/);
+    expect((await call('/guide.js', 'localhost:8454')).status).toBe(200);
     expect((await call('/api/setup', 'localhost:8454', 'GET', undefined, false)).status).toBe(403);
     expect((await call('/api/setup', 'evil.example')).status).toBe(403);
     expect((await call('/api/ping', 'localhost:8455')).status).toBe(403);
