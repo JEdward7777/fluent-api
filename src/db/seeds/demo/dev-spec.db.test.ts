@@ -3,8 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { db } from '@/db';
+import {
+  canonicalResources as bible_provider_resources,
+  canonicalBibles as bibles,
+} from '@/db/canonical-schema';
 import { config as localConfig } from '@/db/env-configs/local';
-import { bible_provider_resources, bibles } from '@/db/schema';
 import { IRV_BIBLE } from '@/db/seeds/reference-bibles';
 
 import { seedDemoSpec } from './index';
@@ -13,9 +16,19 @@ let irv: { id: number; hasAudio: boolean; audioResourceId: number | null };
 
 beforeAll(async () => {
   const [bible] = await db
-    .select({ id: bibles.id, hasAudio: bibles.hasAudio, audioResourceId: bibles.audioResourceId })
+    .select({
+      id: bibles.id,
+      hasAudio: bible_provider_resources.hasAudio,
+      audioResourceId: bibles.audioResourceId,
+    })
     .from(bibles)
-    .where(and(eq(bibles.provider, 'dbl'), eq(bibles.externalId, IRV_BIBLE.externalId)));
+    .innerJoin(bible_provider_resources, eq(bibles.textResourceId, bible_provider_resources.id))
+    .where(
+      and(
+        eq(bible_provider_resources.provider, 'dbl'),
+        eq(bible_provider_resources.externalId, IRV_BIBLE.externalId)
+      )
+    );
   if (!bible) throw new Error('Run local db:setup before DB tests');
   irv = bible;
 });
@@ -52,10 +65,11 @@ describe('seedDemoSpec on the local spec (real database)', () => {
     try {
       // Operator actions a reseed must not undo: pick a different recording,
       // turn audio off, block the TTS license, rename the audio resource.
+      await db.update(bibles).set({ audioResourceId: alternate.id }).where(eq(bibles.id, irv.id));
       await db
-        .update(bibles)
-        .set({ audioResourceId: alternate.id, hasAudio: false })
-        .where(eq(bibles.id, irv.id));
+        .update(bible_provider_resources)
+        .set({ hasAudio: false })
+        .where(eq(bible_provider_resources.id, text.id));
       await db
         .update(bible_provider_resources)
         .set({ ttsLicenseStatus: 'forbidden', licenseNotice: 'operator note' })
@@ -69,12 +83,12 @@ describe('seedDemoSpec on the local spec (real database)', () => {
 
       const [after] = await db.select().from(bibles).where(eq(bibles.id, irv.id));
       expect(after.audioResourceId).toBe(alternate.id);
-      expect(after.hasAudio).toBe(false);
       const [afterText] = await db
         .select()
         .from(bible_provider_resources)
         .where(eq(bible_provider_resources.id, text.id));
       expect(afterText.ttsLicenseStatus).toBe('forbidden');
+      expect(afterText.hasAudio).toBe(false);
       expect(afterText.licenseNotice).toBe('operator note');
       const [afterAudio] = await db
         .select()
@@ -84,11 +98,15 @@ describe('seedDemoSpec on the local spec (real database)', () => {
     } finally {
       await db
         .update(bibles)
-        .set({ audioResourceId: irv.audioResourceId, hasAudio: irv.hasAudio })
+        .set({ audioResourceId: irv.audioResourceId })
         .where(eq(bibles.id, irv.id));
       await db
         .update(bible_provider_resources)
-        .set({ ttsLicenseStatus: text.ttsLicenseStatus, licenseNotice: text.licenseNotice })
+        .set({
+          ttsLicenseStatus: text.ttsLicenseStatus,
+          licenseNotice: text.licenseNotice,
+          hasAudio: irv.hasAudio,
+        })
         .where(eq(bible_provider_resources.id, text.id));
       await db
         .update(bible_provider_resources)

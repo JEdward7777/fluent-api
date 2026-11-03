@@ -1,10 +1,14 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
+import type { DemoCtx } from '@/db/seeds/demo/context';
+
 import { canonicalBibles, canonicalResources } from '@/db/canonical-schema';
 import * as schema from '@/db/schema';
 import { seedBsbBibleTexts } from '@/db/seeds/bible-texts-bsb';
 import { seedBibles } from '@/db/seeds/bibles';
+import { seedSpecBibles } from '@/db/seeds/demo/bibles';
+import { loadDblSeedExternalIds } from '@/db/seeds/demo/ingest';
 import { contractCatalogFixture } from '@/db/testing/contract-catalog-fixture';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
 import * as classifications from '@/domains/bible-provider-resources/classification/license-classifications.repository';
@@ -59,15 +63,62 @@ for (const contracted of [false, true])
       queries.length = 0;
       await seedBibles();
       await seedBsbBibleTexts();
+      const demoCtx: DemoCtx = {
+        spec: {
+          organizations: [],
+          users: [],
+          projects: [],
+          bibles: [
+            {
+              abbreviation: 'DEMO',
+              name: 'Demo canonical Bible',
+              language: 'eng',
+              externalId: 'demo-text',
+              audioExternalId: 'demo-audio',
+              hasAudio: true,
+              books: ['JHN'],
+            },
+          ],
+        },
+        grantPlan: [],
+        orgs: new Map(),
+        users: new Map(),
+        projects: new Map(),
+        milestones: new Map(),
+        languages: new Map([['eng', 1]]),
+        bibles: new Map(),
+        books: new Map(),
+        pericopeSets: new Map(),
+        roles: new Map(),
+      };
+      await seedSpecBibles(demoCtx);
+      const demoId = demoCtx.bibles.get('DEMO')!;
+      const [demo] = await database
+        .select()
+        .from(canonicalBibles)
+        .where(eq(canonicalBibles.id, demoId));
+      expect(await loadDblSeedExternalIds([demoId])).toEqual(new Map([[demoId, 'demo-text']]));
+      expect(demo.textResourceId).not.toBeNull();
+      expect(demo.audioResourceId).not.toBeNull();
+      await database
+        .update(canonicalResources)
+        .set({ hasAudio: false, ttsLicenseStatus: 'forbidden' })
+        .where(eq(canonicalResources.id, demo.textResourceId!));
+      await seedSpecBibles(demoCtx);
+      const [curated] = await database
+        .select()
+        .from(canonicalResources)
+        .where(eq(canonicalResources.id, demo.textResourceId!));
+      expect(curated).toMatchObject({ hasAudio: false, ttsLicenseStatus: 'forbidden' });
       const seedRows = await bibles.getAll();
       expect(seedRows.ok).toBe(true);
       if (!seedRows.ok) throw new Error('seed read failed');
-      const unlinked = seedRows.data.find((row) => row.abbreviation === 'IRV');
-      expect(unlinked).toMatchObject({
-        textResourceId: null,
-        externalId: null,
+      const irv = seedRows.data.find((row) => row.abbreviation === 'IRV');
+      expect(irv).toMatchObject({
+        textResourceId: expect.any(Number),
+        externalId: 'a3644a98420c2703-01',
         provider: 'dbl',
-        hasAudio: false,
+        hasAudio: true,
       });
       const initial = await getAllBibles();
       expect(initial).toMatchObject({
@@ -195,5 +246,36 @@ for (const contracted of [false, true])
         .from(canonicalBibles)
         .where(eq(canonicalBibles.abbreviation, 'BATCH'));
       expect(batch[0].textResourceId).not.toBeNull();
+      const [foreign] = await database
+        .insert(canonicalResources)
+        .values({ provider: 'aquifer', externalId: 'foreign-bsb' })
+        .returning();
+      const [bareBsb] = await database
+        .select()
+        .from(canonicalBibles)
+        .where(eq(canonicalBibles.abbreviation, 'BSB'));
+      await database
+        .update(canonicalBibles)
+        .set({ textResourceId: foreign.id })
+        .where(eq(canonicalBibles.id, bareBsb.id));
+      await seedBibles();
+      await seedBsbBibleTexts();
+      const [preserved] = await database
+        .select()
+        .from(canonicalBibles)
+        .where(eq(canonicalBibles.id, bareBsb.id));
+      expect(preserved.textResourceId).toBe(foreign.id);
+      expect(await loadDblSeedExternalIds([bareBsb.id])).toEqual(new Map([[bareBsb.id, null]]));
+      const [adopted] = await database
+        .select()
+        .from(canonicalBibles)
+        .where(eq(canonicalBibles.abbreviation, 'BSB-bba9f4'));
+      expect(adopted.textResourceId).toBe(bareBsb.textResourceId);
+      const seededVerse = await database
+        .select({ id: schema.bible_texts.id })
+        .from(schema.bible_texts)
+        .where(eq(schema.bible_texts.bibleId, adopted.id))
+        .limit(1);
+      expect(seededVerse).toHaveLength(1);
     }, 30_000);
   });
