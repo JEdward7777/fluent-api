@@ -5,6 +5,7 @@ import { db } from '@/db';
 import {
   canonicalResources as bible_provider_resources,
   canonicalBibles as bibles,
+  canonicalResources,
 } from '@/db/canonical-schema';
 import {
   books,
@@ -50,11 +51,15 @@ export async function seedAudioDemo(
   const [holder] = await db
     .select()
     .from(bibles)
-    .where(and(eq(bibles.provider, 'dbl'), eq(bibles.externalId, 'bba9f40183526463-01')))
+    .innerJoin(canonicalResources, eq(bibles.textResourceId, canonicalResources.id))
+    .where(
+      and(
+        eq(canonicalResources.provider, 'dbl'),
+        eq(canonicalResources.externalId, 'bba9f40183526463-01')
+      )
+    )
     .limit(1);
-  const [bible] = holder
-    ? [holder]
-    : await db.select().from(bibles).where(eq(bibles.abbreviation, 'BSB'));
+  const bible = holder?.bibles;
   const [book] = await db.select().from(books).where(eq(books.code, 'JHN'));
   const [target] = await db.select().from(languages).where(eq(languages.langCodeIso6393, 'guj'));
   const [pericopes] = await db.select().from(pericope_sets).where(eq(pericope_sets.name, 'FCBH'));
