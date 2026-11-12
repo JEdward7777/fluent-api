@@ -23,7 +23,13 @@ const io = {
   },
 };
 try {
-  const parsed = parseLicenseWorkbenchLaunch(process.argv.slice(2), interactive);
+  const args = process.argv.slice(2);
+  // Help and practice stay keyless and do not read local configuration.
+  if (!args.includes('--help') && !args.includes('-h') && !args.includes('--practice'))
+    config({ quiet: true });
+  const parsed = parseLicenseWorkbenchLaunch(args, interactive, {
+    GOOGLE_AI_MODEL: process.env.GOOGLE_AI_MODEL,
+  });
   if (parsed.kind === 'help') io.write(LICENSE_WORKBENCH_HELP);
   else if (parsed.kind === 'web') {
     const workbench = await startLicenseWorkbenchServer(
@@ -60,8 +66,6 @@ try {
       });
     });
   } else {
-    // CLI alone loads credentials. Help and the browser setup shell do not read .env.
-    config({ quiet: true });
     const apiKey = licenseApiKey();
     if (!apiKey) throw new Error('A nonempty GOOGLE_AI_API_KEY is required');
     const options = parsed.options;

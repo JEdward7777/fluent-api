@@ -33,4 +33,29 @@ describe('developer command configuration before analysis', () => {
       options: { sampleCount: 10001, reportFormats: 'html,html', openReport: true },
     });
   });
+  it('uses the explicit model before the environment and otherwise normalizes a bare Google model ID', () => {
+    expect(
+      parseLicenseCommandOptions(required, false, { GOOGLE_AI_MODEL: 'gemini-2.5-flash-lite' })
+    ).toMatchObject({ options: { model: 'google:gemini-2.5-flash-lite' } });
+    expect(
+      parseLicenseCommandOptions(required, false, {
+        GOOGLE_AI_MODEL: 'google:gemini-2.5-flash-lite',
+      })
+    ).toMatchObject({ options: { model: 'google:gemini-2.5-flash-lite' } });
+    expect(
+      parseLicenseCommandOptions([...required, '--model=google:chosen'], false, {
+        GOOGLE_AI_MODEL: 'openrouter:invalid',
+      })
+    ).toMatchObject({ options: { model: 'google:chosen' } });
+  });
+  it('defaults for missing or blank environment values and rejects invalid configured models', () => {
+    for (const value of [undefined, '', '  '])
+      expect(parseLicenseCommandOptions(required, false, { GOOGLE_AI_MODEL: value })).toMatchObject(
+        { options: { model: 'google:gemini-3.8-flash' } }
+      );
+    for (const value of ['openrouter:other', ' google:gemini', 'gemini model', 'google:gemini '])
+      expect(() => parseLicenseCommandOptions(required, false, { GOOGLE_AI_MODEL: value })).toThrow(
+        'Unsupported model prefix'
+      );
+  });
 });

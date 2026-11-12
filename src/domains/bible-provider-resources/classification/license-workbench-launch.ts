@@ -31,7 +31,11 @@ Examples:
   npm run db:classify:licenses -- --source=database --destination=json --yes
 `;
 
-export function parseLicenseWorkbenchLaunch(args: string[], interactive: boolean) {
+export function parseLicenseWorkbenchLaunch(
+  args: string[],
+  interactive: boolean,
+  environment: { GOOGLE_AI_MODEL?: string } = {}
+) {
   // Help does not validate unrelated options or initialize credentials, files, or a server.
   if (args.includes('--help') || args.includes('-h')) return { kind: 'help' as const };
   const { values } = parseArgs({
@@ -107,7 +111,7 @@ export function parseLicenseWorkbenchLaunch(args: string[], interactive: boolean
       !remaining.includes('--open-report'));
   if (!web && (values.port !== undefined || values['local-proxy-url'] !== undefined))
     throw new Error('--port and --local-proxy-url apply only to browser mode');
-  const parsed = parseLicenseCommandOptions(remaining, web || interactive);
+  const parsed = parseLicenseCommandOptions(remaining, web || interactive, environment);
   if (parsed.help) return { kind: 'help' as const };
   if (!web) return { kind: 'cli' as const, options: parsed.options };
   const port = values.port === undefined ? 0 : Number(values.port);
