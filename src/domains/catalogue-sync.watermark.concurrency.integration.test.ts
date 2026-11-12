@@ -211,9 +211,9 @@ describe.skipIf(!connectionString)('catalogue watermark commit ordering (Postgre
       await sql`SELECT id,name,abbreviation,provider,external_id,has_audio,updated_at FROM bibles ORDER BY id`;
     await sql.begin(async (tx) => {
       for (const name of [
-        '0045_provider_resource_link_expand.sql',
-        '0046_provider_resource_link_bridge.sql',
-        '0047_canonical_resource_watermarks.sql',
+        '0046_provider_resource_link_expand.sql',
+        '0047_provider_resource_link_bridge.sql',
+        '0048_canonical_resource_watermarks.sql',
       ]) {
         for (const statement of migrationStatements(name)) await tx.unsafe(statement);
       }

@@ -49,12 +49,12 @@ async function installProviderResourceLicenseTrigger(client: Pick<PGlite, 'exec'
   await client.exec(
     'DROP TRIGGER IF EXISTS trg_bump_bibles_on_provider_resource_license ON bible_provider_resources'
   );
-  for (const statement of migrationStatements('0046_provider_resource_link_bridge.sql')) {
+  for (const statement of migrationStatements('0047_provider_resource_link_bridge.sql')) {
     if (/CREATE (?:OR REPLACE )?(?:FUNCTION|TRIGGER) /.test(statement)) {
       await client.exec(statement);
     }
   }
-  for (const statement of migrationStatements('0047_canonical_resource_watermarks.sql'))
+  for (const statement of migrationStatements('0048_canonical_resource_watermarks.sql'))
     await client.exec(statement);
 }
 

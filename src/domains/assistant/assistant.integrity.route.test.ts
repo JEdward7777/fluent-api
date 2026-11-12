@@ -30,7 +30,8 @@ const passage: PassageContext = {
   integritySource: {
     organizationId: 1,
     sourceBibleId: 9,
-    provider: 'dbl',
+    textResourceId: null,
+    provider: null,
     externalId: null,
     pericopeSetId: 3,
     membership: { number: '12', section: null },
@@ -149,6 +150,42 @@ describe('guarded briefing integrity integration', () => {
       ).ok
     ).toBe(true);
     expect(assistantRouteMocks.findCompletedBriefing).toHaveBeenCalledTimes(lookups);
+  });
+  it('rejects old receipts across text link, replacement and unlink while accepting fresh delivery', async () => {
+    const versions: PassageContext['integritySource'][] = [
+      passage.integritySource,
+      {
+        ...passage.integritySource!,
+        textResourceId: 101,
+        provider: 'aquifer',
+        externalId: 'shared',
+      },
+      { ...passage.integritySource!, textResourceId: 102, provider: 'dbl', externalId: 'shared' },
+      passage.integritySource,
+    ];
+    let prior: Awaited<ReturnType<typeof delivery>> | null = null;
+    for (const integritySource of versions) {
+      const currentPassage = { ...passage, integritySource };
+      vi.mocked(assistantRouteMocks.resolveCanonicalPassage).mockResolvedValue(currentPassage);
+      const currentContext = resolveTurnContext({
+        projectId: 7,
+        passage: currentPassage,
+        config,
+        outputLanguage: 'en',
+        resourceLanguage: 'en',
+        groundingInstruction: config.languages.en.grounding.en.instruction,
+      })!;
+      const events = await delivery(true);
+      const receipts = new receiptModule.TurnReceipts(key, 17, currentContext);
+      expect(verifyTurnTranscript(receipts, currentContext, continuation(events), 5).ok).toBe(true);
+      if (prior) {
+        expect(verifyTurnTranscript(receipts, currentContext, continuation(prior), 5)).toEqual({
+          ok: false,
+          code: 'context_changed',
+        });
+      }
+      prior = events;
+    }
   });
   it('keeps ordinary briefing usable without signing credentials', async () => {
     vi.mocked(receiptModule.loadReceiptKey).mockReturnValue(null);

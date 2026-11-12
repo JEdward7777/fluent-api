@@ -1,7 +1,8 @@
 import { and, asc, eq, gte, lte, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { bible_texts, bibles, books, languages, pericope_verses, projects } from '@/db/schema';
+import { canonicalBibles, canonicalResources } from '@/db/canonical-schema';
+import { bible_texts, books, languages, pericope_verses, projects } from '@/db/schema';
 
 import type { SourceVerse } from './assistant.prompt';
 
@@ -9,7 +10,8 @@ export interface PassageContext {
   integritySource?: {
     organizationId: number;
     sourceBibleId: number;
-    provider: string;
+    textResourceId: number | null;
+    provider: string | null;
     externalId: string | null;
     pericopeSetId: number | null;
     membership: { number: string; section: number | null } | null;
@@ -58,14 +60,16 @@ export async function resolveCanonicalPassage(input: {
       .select({
         sourceBibleId: projects.sourceBibleId,
         organizationId: projects.organization,
-        provider: bibles.provider,
-        externalId: bibles.externalId,
+        textResourceId: canonicalBibles.textResourceId,
+        provider: canonicalResources.provider,
+        externalId: canonicalResources.externalId,
         pericopeSetId: projects.pericopeSetId,
-        sourceBible: bibles.name,
+        sourceBible: canonicalBibles.name,
         sourceLanguageCode: languages.langCodeIso6393,
       })
       .from(projects)
-      .innerJoin(bibles, eq(bibles.id, projects.sourceBibleId))
+      .innerJoin(canonicalBibles, eq(canonicalBibles.id, projects.sourceBibleId))
+      .leftJoin(canonicalResources, eq(canonicalResources.id, canonicalBibles.textResourceId))
       .innerJoin(languages, eq(languages.id, projects.sourceLanguage))
       .where(eq(projects.id, input.projectId)),
     db
@@ -77,6 +81,7 @@ export async function resolveCanonicalPassage(input: {
   const integritySource = {
     organizationId: project.organizationId,
     sourceBibleId: project.sourceBibleId,
+    textResourceId: project.textResourceId,
     provider: project.provider,
     externalId: project.externalId,
     pericopeSetId: project.pericopeSetId,

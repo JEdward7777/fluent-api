@@ -36,15 +36,15 @@ export async function createResourceLinkLegacyFixture(client: PGlite) {
   await client.exec(
     'ALTER TABLE bibles ALTER COLUMN updated_at SET DEFAULT next_catalogue_watermark()'
   );
-  for (const statement of migrationStatements('0044_license_notice_bridge_and_watermarks.sql'))
+  for (const statement of migrationStatements('0045_license_notice_bridge_and_watermarks.sql'))
     await client.exec(statement);
 }
 
 export async function expandResourceLinks(client: PGlite) {
   await client.transaction(async (tx) => {
     for (const name of [
-      '0045_provider_resource_link_expand.sql',
-      '0046_provider_resource_link_bridge.sql',
+      '0046_provider_resource_link_expand.sql',
+      '0047_provider_resource_link_bridge.sql',
     ]) {
       for (const statement of migrationStatements(name)) await tx.exec(statement);
     }
