@@ -10,8 +10,8 @@ export function licenseWorkbenchBrowserError(error: unknown) {
       ? 'Published file state diverged during compensation. Inspect the affected targets, retained recovery files and policy before retrying.'
       : 'Write failed; the database commit outcome may be uncertain. Inspect actual file targets and policy before retrying.';
   const message = error instanceof Error ? error.message : '';
-  if (message.includes('GEMINI_API_KEY'))
-    return 'A nonempty GEMINI_API_KEY is required before reading any source';
+  if (message.includes('GOOGLE_AI_API_KEY'))
+    return 'A nonempty GOOGLE_AI_API_KEY is required before reading any source';
   if (message.includes('Inspect inputs before')) return message;
   if (message.includes('Stale license')) return 'Inputs changed; inspect again before continuing';
   if (message.includes('not found'))

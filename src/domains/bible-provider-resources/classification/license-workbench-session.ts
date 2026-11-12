@@ -11,6 +11,7 @@ import type { LicenseReviewQuery } from './license-workbench-review';
 import type { operationSchema, setupSchema } from './license-workbench-schema';
 import type { LicenseInspection, LicenseReviewEdit } from './license-workflow.types';
 
+import { licenseApiKey } from './license-api-key';
 import { createLicensePractice } from './license-practice';
 import { licenseWorkbenchBrowserError } from './license-workbench-error';
 import { licenseWorkbenchPreviewView } from './license-workbench-preview-view';
@@ -253,7 +254,7 @@ export class LicenseWorkbenchSession {
     if (kind === 'inspect' && !this.workflow && !this.practiceMode) {
       loadDotenv({ quiet: true });
       this.workflow = new LicenseWorkflow(this.options, {
-        apiKey: process.env.GEMINI_API_KEY ?? '',
+        apiKey: licenseApiKey(),
       });
     }
     if (!this.workflow && kind !== 'inspect')

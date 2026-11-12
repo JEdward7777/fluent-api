@@ -178,7 +178,7 @@ describe('direct Google SDK transport (fake fetch, no live calls)', () => {
   it('rejects missing credentials and unsupported providers before fetching', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>();
     vi.stubGlobal('fetch', fetch);
-    expect(() => createGoogleTransport(' ')).toThrow('GEMINI_API_KEY');
+    expect(() => createGoogleTransport(' ')).toThrow('GOOGLE_AI_API_KEY');
     await expect(
       createGoogleTransport('fake-test-key')(makeLlmRequest({ provider: 'openrouter' }))
     ).rejects.toMatchObject({ retryable: false });

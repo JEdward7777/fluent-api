@@ -180,7 +180,9 @@ describe('license classifier', () => {
     }
   );
   it('requires a nonempty key before any classification and supports explicit models', async () => {
-    expect(() => createLicenseClassifier({ ...options(), apiKey: ' ' })).toThrow('GEMINI_API_KEY');
+    expect(() => createLicenseClassifier({ ...options(), apiKey: ' ' })).toThrow(
+      'GOOGLE_AI_API_KEY'
+    );
     const transport = vi.fn().mockResolvedValue(vote('allowed'));
     const result = await createLicenseClassifier({
       ...options(),

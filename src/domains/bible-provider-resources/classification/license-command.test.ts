@@ -42,7 +42,7 @@ describe('license command source/destination and responsibility boundary', () =>
       )
     ).toBe(1);
     expect(f.dependencies.database).not.toHaveBeenCalled();
-    expect(f.messages.join()).toContain('GEMINI_API_KEY');
+    expect(f.messages.join()).toContain('GOOGLE_AI_API_KEY');
   });
   it.each(['database', 'both'] as const)(
     'bootstraps an empty table from attested JSON to %s without requiring new reviewer flags',

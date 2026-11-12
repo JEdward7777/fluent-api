@@ -194,8 +194,8 @@ describe('local license workbench server', () => {
       contentRevision: 999,
     });
     await writeFile(fixture.input, serializeLicenseArtifact(createLicenseArtifact(extended)).bytes);
-    const previousKey = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'offline-test-key';
+    const previousKey = process.env.GOOGLE_AI_API_KEY;
+    process.env.GOOGLE_AI_API_KEY = 'offline-test-key';
     const session = await startLicenseWorkbenchServer(fixture.options, 0);
     active.push(session);
     const token = new URL(session.url).hash.slice(1);
@@ -376,8 +376,8 @@ describe('local license workbench server', () => {
       expect(failed.error).not.toContain(invalid.input);
       expect((await api('setup')).body.latestOperation.state).toBe('failed');
     } finally {
-      if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
-      else process.env.GEMINI_API_KEY = previousKey;
+      if (previousKey === undefined) delete process.env.GOOGLE_AI_API_KEY;
+      else process.env.GOOGLE_AI_API_KEY = previousKey;
       await fixture.cleanup();
     }
   });
