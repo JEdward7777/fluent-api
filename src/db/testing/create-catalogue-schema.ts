@@ -19,7 +19,7 @@ export function migrationStatements(fileName: string): string[] {
 
 /** DROP/CREATE for the provider-resource → bibles watermark trigger (single source). */
 export const PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL = migrationStatements(
-  '0044_license_notice_bridge_and_watermarks.sql'
+  '0045_license_notice_bridge_and_watermarks.sql'
 )
   .filter(
     (statement) =>
@@ -46,7 +46,7 @@ async function seedCatalogueWatermarkSingleton(client: Pick<PGlite, 'exec'>): Pr
 
 /** bump_linked_bibles function + trigger; fires on bible_provider_resources, updates bibles. */
 async function installProviderResourceLicenseTrigger(client: Pick<PGlite, 'exec'>): Promise<void> {
-  const bump = migrationStatements('0044_license_notice_bridge_and_watermarks.sql').find(
+  const bump = migrationStatements('0045_license_notice_bridge_and_watermarks.sql').find(
     (statement) =>
       statement.includes(
         'CREATE OR REPLACE FUNCTION bump_linked_bibles_on_provider_resource_license'
@@ -78,7 +78,7 @@ export async function createTestSchema(
   await seedCatalogueWatermarkSingleton(client);
 
   if ('bible_provider_resources' in tables) {
-    const bridge = migrationStatements('0044_license_notice_bridge_and_watermarks.sql').filter(
+    const bridge = migrationStatements('0045_license_notice_bridge_and_watermarks.sql').filter(
       (statement) =>
         statement.includes('CREATE OR REPLACE FUNCTION bridge_recording_license_notice()') ||
         statement.includes('CREATE TRIGGER trg_bridge_recording_license_notice')
