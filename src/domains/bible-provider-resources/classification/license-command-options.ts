@@ -10,11 +10,13 @@ export const LICENSE_COMMAND_HELP = `Usage: npm run db:classify:licenses -- --so
   --force Replace the entire classification table from JSON, deleting absent keys.
   --reviewer=NAME --review-reason=REASON Attest the exact JSON revision with --yes.
   --no-cache --cache-dir=PATH --sample-count=INTEGER (>=2, default 3)
-  --model=google:<id> (default google:gemini-3.8-flash; other/repeated adapters unsupported)
+  --model=google:<id> (overrides GOOGLE_AI_MODEL; default google:gemini-3.8-flash)
   --report-formats=markdown|html|markdown,html|none --report-dir=PATH --open-report
   --preserve-existing-non-unknowns Invocation only: preserve current resource policy in the preview;
     a later ordinary sync may overwrite it. This is not a durable permission override.
 Requires GOOGLE_AI_API_KEY even without inference. JSON-to-JSON needs no database or DBL credentials.
+Normal startup reads local .env for GOOGLE_AI_MODEL before browser setup; shell values take precedence.
+Help and practice do not read .env. Browser source, database, cache, and provider work waits for Inspect/Analyze.
 Source/destination are independent; JSON-to-database imports, database-to-JSON exports.
 An empty table bootstraps only from attested JSON. --force never bypasses review.
 Exit 0: complete/no unknown; 2: successful/unknown retained; 1: operational failure;
@@ -41,7 +43,11 @@ export interface LicenseCommandOptions {
   preserveExistingNonUnknowns: boolean;
 }
 
-export function parseLicenseCommandOptions(args: string[], interactive: boolean) {
+export function parseLicenseCommandOptions(
+  args: string[],
+  interactive: boolean,
+  environment: { GOOGLE_AI_MODEL?: string } = {}
+) {
   const { values } = parseArgs({
     args,
     options: {
@@ -74,7 +80,14 @@ export function parseLicenseCommandOptions(args: string[], interactive: boolean)
     throw new Error('Select both --source and --destination');
   if (values.model && values.model.length !== 1)
     throw new Error('Repeated model adapters are not implemented');
-  const model = values.model?.[0] ?? 'google:gemini-3.8-flash';
+  const configuredModel = environment.GOOGLE_AI_MODEL;
+  const model =
+    values.model?.[0] ??
+    (configuredModel?.trim()
+      ? configuredModel.startsWith('google:')
+        ? configuredModel
+        : `google:${configuredModel}`
+      : 'google:gemini-3.8-flash');
   if (!/^google:[^\s:]+$/.test(model))
     throw new Error('Unsupported model prefix; use google:<model-id>');
   const sampleCount = Number(values['sample-count'] ?? 3);
