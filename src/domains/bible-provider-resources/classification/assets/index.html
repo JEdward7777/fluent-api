@@ -94,6 +94,66 @@
             <label>Samples <input name="samples" type="number" min="2" step="1" required /></label>
           </div>
           <p id="database-target" class="notice"></p>
+          <fieldset id="database-settings">
+            <legend>Database connection for this session</legend>
+            <p>
+              Applies when source or destination uses a database. Test checks the applied connection
+              only. Inspect reads the selected inputs.
+            </p>
+            <div class="fields">
+              <label
+                >Connection source
+                <select name="databaseMode">
+                  <option value="environment">Existing environment connection</option>
+                  <option value="session">Enter connection for this session</option>
+                </select>
+              </label>
+            </div>
+            <div id="session-database-fields" class="fields" hidden>
+              <label>Host <input name="databaseHost" autocomplete="off" maxlength="253" /></label>
+              <label
+                >Port <input name="databasePort" type="number" min="1" max="65535" value="5432"
+              /></label>
+              <label
+                >Database <input name="databaseName" autocomplete="off" maxlength="128"
+              /></label>
+              <label
+                >Username <input name="databaseUsername" autocomplete="username" maxlength="128"
+              /></label>
+              <label
+                >Password
+                <input
+                  name="databasePassword"
+                  type="password"
+                  autocomplete="current-password"
+                  maxlength="1024"
+              /></label>
+              <label
+                ><input name="databaseClearPassword" type="checkbox" /> Clear retained
+                password</label
+              >
+              <label
+                >TLS
+                <select name="databaseTls">
+                  <option value="verify-full">Verify server certificate and host</option>
+                  <option value="disable">Disable TLS (local/trusted connections only)</option>
+                </select>
+              </label>
+            </div>
+            <p id="database-password-note">
+              Password stays in this server session only. After Apply, the field clears. A blank
+              field retains the password only when the other connection fields are unchanged. Check
+              Clear retained password or choose the environment connection to remove it.
+            </p>
+            <p>
+              Connection settings last for this server session. Your browser may offer to remember
+              the username and password.
+            </p>
+          </fieldset>
+          <div class="actions">
+            <button id="database-test" type="button" disabled>Test connection</button>
+            <p id="database-test-result" role="status"></p>
+          </div>
           <details>
             <summary>Advanced settings</summary>
             <div class="fields">
@@ -122,7 +182,9 @@
         </form>
         <details id="cli-details">
           <summary>Equivalent CLI command</summary>
-          <p>Use these settings in terminal review. Credentials stay in the server environment.</p>
+          <p id="cli-connection-note">
+            Use these settings in terminal review. The CLI uses its environment database connection.
+          </p>
           <p>For a database source, CLI plan-only may call Gemini and write cache or reports.</p>
           <p>It may write JSON too, while leaving policy untouched.</p>
           <pre id="cli-command"></pre>

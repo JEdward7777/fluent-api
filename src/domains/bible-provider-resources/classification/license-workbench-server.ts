@@ -108,6 +108,27 @@ function createLicenseWorkbenchApp(
       );
     }
   });
+  app.post('/api/database/test', async (c) => {
+    const parsed = z
+      .object({ configurationRevision: z.number().int().positive() })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid test request', 400);
+    try {
+      return c.json(await session.testDatabase(parsed.data.configurationRevision));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      return c.text(
+        message.includes('Configuration changed') ||
+          message.includes('Cannot test') ||
+          message.includes('Practice cannot') ||
+          message.includes('Save outcome uncertain')
+          ? message
+          : 'Connection failed. Check the selected host, credentials and TLS setting',
+        409
+      );
+    }
+  });
   for (const kind of ['inspect', 'analysis'] as const) {
     app.post(`/api/${kind}`, async (c) => {
       const parsed = operationSchema.safeParse(await c.req.json().catch(() => null));

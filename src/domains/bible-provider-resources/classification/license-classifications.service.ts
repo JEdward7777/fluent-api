@@ -20,8 +20,16 @@ export function createLicenseDatabaseAdapter(): LicenseDatabaseAdapter {
 }
 
 /** The local workbench owns this connection and closes it with the workflow. */
-export function createOwnedLicenseDatabaseAdapter(databaseUrl: string): LicenseDatabaseAdapter {
-  const client = postgres(databaseUrl, { max: 1, idle_timeout: 20 });
+export function createOwnedLicenseDatabaseAdapter(
+  databaseUrl: string,
+  password?: () => string
+): LicenseDatabaseAdapter {
+  const client = postgres(databaseUrl, {
+    max: 1,
+    idle_timeout: 20,
+    connect_timeout: 5,
+    ...(password ? { password } : {}),
+  });
   const database = drizzle(client, { schema });
   return {
     load: () => repo.loadClassificationSnapshot(database),
