@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '@/db/schema';
+
 import { integrityDigest } from './assistant.receipts';
 import { resolveCanonicalPassage } from './assistant.repository';
 
