@@ -140,6 +140,17 @@ button:disabled {
   gap: 0.8rem;
   margin: 1rem 0;
 }
+#database-settings {
+  min-width: 0;
+  margin: 1rem 0;
+  border: 1px solid #d7e0e6;
+  border-radius: 0.35rem;
+}
+#session-database-fields label:has(input[type='checkbox']) {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
 label {
   display: grid;
   gap: 0.35rem;

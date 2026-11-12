@@ -16,6 +16,69 @@ afterEach(async () => {
 });
 
 describe('local license workbench server', () => {
+  it('keeps browser connection secrets out of setup and failed test responses', async () => {
+    const server = await startLicenseWorkbenchServer(options.options, 0);
+    active.push(server);
+    const base = `http://127.0.0.1:${server.port}`;
+    const headers = {
+      'x-workbench-token': new URL(server.url).hash.slice(1),
+      origin: base,
+      'content-type': 'application/json',
+    };
+    const initial = await (await fetch(`${base}/api/setup`, { headers })).json();
+    const body = {
+      configurationRevision: initial.configurationRevision,
+      discardReviewedState: false,
+      source: initial.source,
+      destination: initial.destination,
+      input: initial.input,
+      output: initial.output,
+      model: initial.model,
+      sampleCount: initial.sampleCount,
+      force: initial.force,
+      noCache: initial.noCache,
+      cacheDir: initial.cacheDir,
+      reportFormats: initial.reportFormats,
+      reportDir: initial.reportDir,
+      preserveExistingNonUnknowns: initial.preserveExistingNonUnknowns,
+      databaseConnection: {
+        mode: 'session',
+        host: '127.0.0.1',
+        port: 1,
+        database: 'review_db',
+        username: 'reader',
+        password: 'secret-api-test',
+        clearPassword: false,
+        tls: 'verify-full',
+      },
+    };
+    const apply = await fetch(`${base}/api/setup`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    expect(apply.status).toBe(200);
+    expect(await apply.text()).not.toContain('secret-api-test');
+    const test = await fetch(`${base}/api/database/test`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ configurationRevision: 2 }),
+    });
+    expect(test.status).toBe(409);
+    expect(await test.text()).toMatch(/^Connection failed/);
+    expect(
+      JSON.stringify(await (await fetch(`${base}/api/setup`, { headers })).json())
+    ).not.toContain('secret-api-test');
+    expect(
+      (
+        await fetch(`${base}/api/database/test`, {
+          method: 'POST',
+          headers: { ...headers, origin: 'http://evil.example' },
+          body: JSON.stringify({ configurationRevision: 2 }),
+        })
+      ).status
+    ).toBe(403);
+  });
   it('accepts only the configured local proxy Host while preserving token and Origin checks', async () => {
     const port = await new Promise<number>((resolve, reject) => {
       const socket = createServer();
@@ -229,6 +292,8 @@ describe('local license workbench server', () => {
       delete changed.contentRevision;
       delete changed.readyForInspect;
       delete changed.databaseTarget;
+      delete changed.databaseTest;
+      delete changed.testingDatabase;
       delete changed.inspected;
       delete changed.analysis;
       delete changed.activeOperationId;

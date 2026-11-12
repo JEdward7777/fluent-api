@@ -9,6 +9,35 @@ const help = [
     'Choose where a reviewed result would be saved: a JSON file, the configured database, or both. Practice saves incomplete scratch JSON only.',
   ],
   [
+    '#setup [name="databaseMode"]',
+    'Use the server environment connection or enter a connection held only for this workbench session. Switching connections requires Apply and a new Inspect.',
+  ],
+  [
+    '#setup [name="databaseHost"]',
+    'Hostname or IP address of the PostgreSQL server. Connection is attempted only at Test or Inspect.',
+  ],
+  ['#setup [name="databasePort"]', 'TCP port for PostgreSQL, usually 5432.'],
+  [
+    '#setup [name="databaseName"]',
+    'PostgreSQL database name. The selected identity is shown before Inspect or Save.',
+  ],
+  [
+    '#setup [name="databaseUsername"]',
+    'Database login name. Your browser may offer to remember this field.',
+  ],
+  [
+    '#setup [name="databasePassword"]',
+    'Masked database password. It stays only in server session memory after Apply and is never shown again. A blank field retains it only if the other connection fields are unchanged.',
+  ],
+  [
+    '#setup [name="databaseClearPassword"]',
+    'Remove any password retained by this server session when applying the settings.',
+  ],
+  [
+    '#setup [name="databaseTls"]',
+    'Verified TLS checks the server certificate and hostname. Disable TLS only for a trusted local connection.',
+  ],
+  [
     '#setup [name="input"]',
     'Local path to the saved JSON source, read when you inspect inputs. Practice can use the bundled example.',
   ],

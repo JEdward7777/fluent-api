@@ -13,6 +13,9 @@ const inspect = document.getElementById('inspect');
 const analyze = document.getElementById('analyze');
 const stop = document.getElementById('stop');
 const inspection = document.getElementById('inspection');
+const databaseTest = document.getElementById('database-test');
+const databaseTestResult = document.getElementById('database-test-result');
+const databaseFields = document.getElementById('session-database-fields');
 let setup;
 let dirty = false;
 let practiceBusy = false;
@@ -28,6 +31,13 @@ const reportTarget = document.getElementById('report-target');
 const reportWrite = document.getElementById('report-write');
 const reportOverwrite = document.getElementById('report-overwrite');
 let reportPlan = null;
+
+function syncDatabaseFields() {
+  const selected = form.elements.databaseMode.value === 'session';
+  databaseFields.hidden = !selected;
+  for (const key of ['databaseHost', 'databasePort', 'databaseName', 'databaseUsername'])
+    form.elements[key].required = selected;
+}
 
 const renderGuide = (next) => updateGuide(next, { dirty, practiceBusy, sessionUnconfirmed });
 
@@ -156,6 +166,20 @@ function render(next, populate = false) {
     form.elements.samples.value = next.sampleCount;
     for (const key of ['force', 'noCache']) form.elements[key].checked = next[key];
     form.elements.preserve.checked = next.preserveExistingNonUnknowns;
+    form.elements.databaseMode.value = next.databaseConnection.mode;
+    if (next.databaseConnection.mode === 'session') {
+      for (const [control, key] of [
+        ['databaseHost', 'host'],
+        ['databasePort', 'port'],
+        ['databaseName', 'database'],
+        ['databaseUsername', 'username'],
+        ['databaseTls', 'tls'],
+      ])
+        form.elements[control].value = next.databaseConnection[key];
+    }
+    form.elements.databasePassword.value = '';
+    form.elements.databaseClearPassword.checked = false;
+    syncDatabaseFields();
     dirty = false;
   }
   form.hidden = false;
@@ -182,6 +206,17 @@ function render(next, populate = false) {
   }
   document.getElementById('discard-label').hidden = !next.analysis;
   document.getElementById('database-target').textContent = next.databaseTarget;
+  document.getElementById('cli-connection-note').textContent =
+    next.databaseConnection.mode === 'session'
+      ? 'The CLI command below does not transfer this session database or its password. The CLI uses its own environment database connection.'
+      : 'The CLI uses its environment database connection.';
+  databaseTestResult.textContent = next.practice
+    ? 'No database in offline practice.'
+    : next.databaseTest === 'passed'
+      ? `Connection passed for ${next.databaseTarget}`
+      : next.databaseTest === 'failed'
+        ? `Connection failed for ${next.databaseTarget}. Check the selected fields and TLS setting.`
+        : `Selected: ${next.databaseTarget}. Test before Inspect if you want to verify access.`;
   const step = ['inspected', 'analyzing'].includes(next.state)
     ? 'Analyze'
     : ['reviewing', 'previewing'].includes(next.state)
@@ -219,7 +254,9 @@ function render(next, populate = false) {
       next.state
     );
   for (const field of form.elements) field.disabled = busy;
+  databaseTest.disabled = busy || dirty || next.practice || next.testingDatabase;
   if (next.practice) {
+    document.getElementById('database-settings').hidden = true;
     for (const key of [
       'source',
       'destination',
@@ -288,7 +325,9 @@ async function refresh() {
   }
 }
 form.addEventListener('input', () => {
+  syncDatabaseFields();
   dirty = true;
+  databaseTest.disabled = true;
   inspect.disabled = true;
   analyze.disabled = true;
   if (setup) {
@@ -331,11 +370,45 @@ form.addEventListener('submit', async (event) => {
         force: values.force.checked,
         noCache: values.noCache.checked,
         preserveExistingNonUnknowns: values.preserve.checked,
+        databaseConnection:
+          values.databaseMode.value === 'environment'
+            ? { mode: 'environment' }
+            : {
+                mode: 'session',
+                host: values.databaseHost.value,
+                port: Number(values.databasePort.value),
+                database: values.databaseName.value,
+                username: values.databaseUsername.value,
+                password: values.databasePassword.value,
+                clearPassword: values.databaseClearPassword.checked,
+                tls: values.databaseTls.value,
+              },
       }),
       true
     );
   } catch (error) {
     status.textContent = error.message;
+  }
+});
+databaseTest.addEventListener('click', async () => {
+  if (!setup || dirty || sessionUnconfirmed || saveStatusUnconfirmed()) return;
+  databaseTest.disabled = true;
+  databaseTestResult.textContent = `Testing ${setup.databaseTarget}…`;
+  try {
+    render(
+      await request('database/test', 'POST', {
+        configurationRevision: setup.configurationRevision,
+      })
+    );
+  } catch (error) {
+    databaseTestResult.textContent = error.message;
+    try {
+      render(await request('setup'));
+      databaseTestResult.textContent = error.message;
+    } catch {
+      sessionUnconfirmed = true;
+      databaseTest.disabled = true;
+    }
   }
 });
 async function start(kind) {
