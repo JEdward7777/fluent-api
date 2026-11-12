@@ -136,21 +136,33 @@ function describe(control, description, index) {
     [control.getAttribute('aria-describedby'), id].filter(Boolean).join(' ')
   );
   const alignTooltip = () => {
-    const availableWidth = Math.min(400, window.innerWidth - 48);
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
     const bounds = label.getBoundingClientRect();
-    if (bounds.bottom <= 0 || bounds.top >= window.innerHeight) {
+    if (bounds.bottom <= viewportTop || bounds.top >= viewportBottom) {
       label.classList.add('help-dismissed');
       label.classList.remove('help-touch-open');
       return;
     }
-    label.classList.toggle('help-align-left', bounds.right < availableWidth + 8);
+    const tooltipWidth = Math.min(400, viewportWidth - 32);
+    label.style.setProperty('--help-width', `${tooltipWidth}px`);
     label.classList.remove('help-align-above');
     label.classList.add('help-measuring');
-    const tooltipHeight = Number.parseFloat(getComputedStyle(label, '::before').height);
+    const tooltipStyle = getComputedStyle(label, '::before');
+    const tooltipHeight = Number.parseFloat(tooltipStyle.height);
     label.classList.remove('help-measuring');
+    const left = Math.min(
+      Math.max(bounds.left, viewportLeft + 16),
+      viewportLeft + viewportWidth - tooltipWidth - 16
+    );
+    label.style.setProperty('--help-left', `${left - bounds.left}px`);
     label.classList.toggle(
       'help-align-above',
-      bounds.bottom + tooltipHeight + 8 > window.innerHeight && bounds.top >= tooltipHeight + 8
+      bounds.bottom + tooltipHeight + 8 > viewportBottom &&
+        bounds.top - tooltipHeight >= viewportTop + 8
     );
   };
   label.addEventListener('pointerup', (event) => {
@@ -203,6 +215,8 @@ function initFieldHelp() {
   };
   window.addEventListener('scroll', repositionOpenHelp, true);
   window.addEventListener('resize', repositionOpenHelp);
+  window.visualViewport?.addEventListener('scroll', repositionOpenHelp);
+  window.visualViewport?.addEventListener('resize', repositionOpenHelp);
 }
 
 initFieldHelp();
