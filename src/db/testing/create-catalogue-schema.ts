@@ -17,17 +17,6 @@ export function migrationStatements(fileName: string): string[] {
     .filter(Boolean);
 }
 
-/** DROP/CREATE for the provider-resource → bibles watermark trigger (single source). */
-export const PROVIDER_RESOURCE_LICENSE_TRIGGER_SQL = migrationStatements(
-  '0045_license_notice_bridge_and_watermarks.sql'
-)
-  .filter(
-    (statement) =>
-      statement.includes('DROP TRIGGER IF EXISTS trg_bump_bibles_on_provider_resource_license') ||
-      statement.includes('CREATE TRIGGER trg_bump_bibles_on_provider_resource_license')
-  )
-  .join('\n');
-
 /** Install next_catalogue_watermark() before CREATE TABLE … DEFAULT that references it. */
 async function installNextCatalogueWatermarkFunction(client: Pick<PGlite, 'exec'>): Promise<void> {
   const allocator = migrationStatements('0038_catalogue_watermark_allocator.sql').find(
