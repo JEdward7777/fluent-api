@@ -12,8 +12,8 @@ afterEach(async () => {
 describe('workbench Save operation', () => {
   it('saves incomplete synthetic JSON once and exposes the known result across reloads', async () => {
     const fixture = await makeCommandFixture(false);
-    const priorKey = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'offline-test-key';
+    const priorKey = process.env.GOOGLE_AI_API_KEY;
+    process.env.GOOGLE_AI_API_KEY = 'offline-test-key';
     const server = await startLicenseWorkbenchServer(fixture.options, 0);
     active.push(server);
     const base = `http://127.0.0.1:${server.port}`;
@@ -77,16 +77,16 @@ describe('workbench Save operation', () => {
         (await api('save', 'POST', { ...retry, operationId: crypto.randomUUID() })).status
       ).toBe(409);
     } finally {
-      if (priorKey === undefined) delete process.env.GEMINI_API_KEY;
-      else process.env.GEMINI_API_KEY = priorKey;
+      if (priorKey === undefined) delete process.env.GOOGLE_AI_API_KEY;
+      else process.env.GOOGLE_AI_API_KEY = priorKey;
       await fixture.cleanup();
     }
   });
 
   it('refuses an externally changed output and clears the stale preview', async () => {
     const fixture = await makeCommandFixture(false);
-    const priorKey = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'offline-test-key';
+    const priorKey = process.env.GOOGLE_AI_API_KEY;
+    process.env.GOOGLE_AI_API_KEY = 'offline-test-key';
     const server = await startLicenseWorkbenchServer(fixture.options, 0);
     active.push(server);
     const base = `http://127.0.0.1:${server.port}`;
@@ -128,8 +128,8 @@ describe('workbench Save operation', () => {
       expect(after.preview).toBeNull();
       expect(await readFile(fixture.output, 'utf8')).toBe('external edit');
     } finally {
-      if (priorKey === undefined) delete process.env.GEMINI_API_KEY;
-      else process.env.GEMINI_API_KEY = priorKey;
+      if (priorKey === undefined) delete process.env.GOOGLE_AI_API_KEY;
+      else process.env.GOOGLE_AI_API_KEY = priorKey;
       await fixture.cleanup();
     }
   });

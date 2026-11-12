@@ -38,7 +38,7 @@ export async function runLicenseCommand(
   let workflow: LicenseWorkflow | undefined;
   try {
     if (!dependencies.apiKey.trim())
-      throw new Error('A nonempty GEMINI_API_KEY is required before reading any source');
+      throw new Error('A nonempty GOOGLE_AI_API_KEY is required before reading any source');
     const options = freezeReviewValue(input);
     if (!options.source || !options.destination)
       throw new Error('Select both source and destination before analysis');

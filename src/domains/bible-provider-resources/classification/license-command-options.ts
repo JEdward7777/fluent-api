@@ -14,7 +14,7 @@ export const LICENSE_COMMAND_HELP = `Usage: npm run db:classify:licenses -- --so
   --report-formats=markdown|html|markdown,html|none --report-dir=PATH --open-report
   --preserve-existing-non-unknowns Invocation only: preserve current resource policy in the preview;
     a later ordinary sync may overwrite it. This is not a durable permission override.
-Requires GEMINI_API_KEY even without inference. JSON-to-JSON needs no database or DBL credentials.
+Requires GOOGLE_AI_API_KEY even without inference. JSON-to-JSON needs no database or DBL credentials.
 Source/destination are independent; JSON-to-database imports, database-to-JSON exports.
 An empty table bootstraps only from attested JSON. --force never bypasses review.
 Exit 0: complete/no unknown; 2: successful/unknown retained; 1: operational failure;

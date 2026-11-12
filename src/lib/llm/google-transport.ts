@@ -18,7 +18,7 @@ function retryAfterMilliseconds(value: string | null): number | undefined {
 
 /** Direct Developer API only. Disable SDK retries; the structured runner owns all five attempts. */
 export function createGoogleTransport(apiKey: string): LlmTransport {
-  if (!apiKey.trim()) throw new Error('A nonempty GEMINI_API_KEY is required');
+  if (!apiKey.trim()) throw new Error('A nonempty GOOGLE_AI_API_KEY is required');
   return async (request) => {
     if (request.provider !== 'google') throw new LlmTransportError(false);
     // Per attempt, not shared across concurrent samples: failures after an HTTP success

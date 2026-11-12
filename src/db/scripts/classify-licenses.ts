@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { promisify } from 'node:util';
 
+import { licenseApiKey } from '@/domains/bible-provider-resources/classification/license-api-key';
 import { runLicenseCommand } from '@/domains/bible-provider-resources/classification/license-command';
 import {
   LICENSE_WORKBENCH_HELP,
@@ -61,8 +62,8 @@ try {
   } else {
     // CLI alone loads credentials. Help and the browser setup shell do not read .env.
     config({ quiet: true });
-    if (!process.env.GEMINI_API_KEY?.trim())
-      throw new Error('A nonempty GEMINI_API_KEY is required');
+    const apiKey = licenseApiKey();
+    if (!apiKey) throw new Error('A nonempty GOOGLE_AI_API_KEY is required');
     const options = parsed.options;
     while (!options.source) {
       const source = (
@@ -82,7 +83,7 @@ try {
         options.destination = destination;
     }
     const exit = await runLicenseCommand(options, {
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey,
       interactive,
       io,
       openReport: async (path) => {

@@ -7,7 +7,11 @@ import { describe, expect, it } from 'vitest';
 
 import { makeCommandFixture } from './license-command.test-fixtures';
 
-async function invoke(directory: string, args: string[], key: string) {
+async function invoke(
+  directory: string,
+  args: string[],
+  keys: { GOOGLE_AI_API_KEY?: string; GEMINI_API_KEY?: string }
+) {
   return new Promise<{ code: number | null; output: string }>((done, reject) => {
     const child = spawn(
       process.execPath,
@@ -21,7 +25,7 @@ async function invoke(directory: string, args: string[], key: string) {
       {
         cwd: directory,
         // No app .env, DATABASE_URL, DBL credentials, auth settings, or inherited provider key.
-        env: { PATH: process.env.PATH, HOME: process.env.HOME, GEMINI_API_KEY: key },
+        env: { PATH: process.env.PATH, HOME: process.env.HOME, ...keys },
         stdio: ['ignore', 'pipe', 'pipe'],
       }
     );
@@ -38,7 +42,7 @@ async function invoke(directory: string, args: string[], key: string) {
 }
 
 describe('actual offline developer entry without application environment', () => {
-  it('runs JSON-to-JSON with only a Gemini key and writes exact authority without DB/DBL initialization', async () => {
+  it('runs JSON-to-JSON with only the Google AI key and writes exact authority without DB/DBL initialization', async () => {
     const f = await makeCommandFixture();
     try {
       const result = await invoke(
@@ -51,7 +55,7 @@ describe('actual offline developer entry without application environment', () =>
           `--output=${f.output}`,
           '--report-formats=none',
         ],
-        'mock-offline-key'
+        { GOOGLE_AI_API_KEY: 'mock-offline-key' }
       );
       expect(result.code, result.output).toBe(2);
       expect(JSON.parse(await readFile(f.output, 'utf8')).reviewContentHash).toBe(
@@ -69,14 +73,29 @@ describe('actual offline developer entry without application environment', () =>
       const result = await invoke(
         f.dir,
         ['--source=json', '--destination=json', '--input=/missing', '--yes'],
-        ''
+        { GOOGLE_AI_API_KEY: '' }
       );
       expect(result.code).toBe(1);
-      expect(result.output).toContain('GEMINI_API_KEY');
-      const omission = await invoke(f.dir, ['--yes'], 'mock');
+      expect(result.output).toContain('GOOGLE_AI_API_KEY');
+      const omission = await invoke(f.dir, ['--yes'], { GOOGLE_AI_API_KEY: 'mock' });
       expect(omission.code).toBe(1);
       expect(omission.output).toContain('Select both');
       expect(omission.output).toContain('Usage: npm run db:classify:licenses');
+    } finally {
+      await f.cleanup();
+    }
+  }, 30000);
+  it('does not accept the legacy key alone', async () => {
+    const f = await makeCommandFixture();
+    try {
+      const result = await invoke(
+        f.dir,
+        ['--source=json', '--destination=json', '--input=/missing', '--yes'],
+        { GEMINI_API_KEY: 'legacy-only' }
+      );
+      expect(result.code).toBe(1);
+      expect(result.output).toContain('GOOGLE_AI_API_KEY');
+      expect(result.output).not.toContain('JSON source not found');
     } finally {
       await f.cleanup();
     }

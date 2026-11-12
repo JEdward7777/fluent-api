@@ -12,8 +12,8 @@ afterEach(async () => {
 describe('local license preview, attestation and report export', () => {
   it('hides inspected source details after detected preview drift', async () => {
     const fixture = await makeCommandFixture(false);
-    const previousKey = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'offline-test-key';
+    const previousKey = process.env.GOOGLE_AI_API_KEY;
+    process.env.GOOGLE_AI_API_KEY = 'offline-test-key';
     const session = await startLicenseWorkbenchServer(fixture.options, 0);
     active.push(session);
     const base = `http://127.0.0.1:${session.port}`;
@@ -56,15 +56,15 @@ describe('local license preview, attestation and report export', () => {
       expect(after.preview).toBeNull();
       expect(after.analysis).toBeNull();
     } finally {
-      if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
-      else process.env.GEMINI_API_KEY = previousKey;
+      if (previousKey === undefined) delete process.env.GOOGLE_AI_API_KEY;
+      else process.env.GOOGLE_AI_API_KEY = previousKey;
       await fixture.cleanup();
     }
   });
   it('previews exact synthetic JSON, attests only its hash, and exports only an inspected report', async () => {
     const fixture = await makeCommandFixture(false);
-    const previousKey = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'offline-test-key';
+    const previousKey = process.env.GOOGLE_AI_API_KEY;
+    process.env.GOOGLE_AI_API_KEY = 'offline-test-key';
     const session = await startLicenseWorkbenchServer(fixture.options, 0);
     active.push(session);
     const base = `http://127.0.0.1:${session.port}`;
@@ -205,8 +205,8 @@ describe('local license preview, attestation and report export', () => {
       expect(JSON.parse((await api('setup')).body).preview.incomplete).toBe(false);
       expect(await fixture.readOutput().catch(() => null)).toBeNull();
     } finally {
-      if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
-      else process.env.GEMINI_API_KEY = previousKey;
+      if (previousKey === undefined) delete process.env.GOOGLE_AI_API_KEY;
+      else process.env.GOOGLE_AI_API_KEY = previousKey;
       await fixture.cleanup();
     }
   });

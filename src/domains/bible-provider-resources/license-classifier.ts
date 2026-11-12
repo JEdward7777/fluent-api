@@ -37,7 +37,7 @@ export function createLicenseClassifier(options: ClassifierOptions) {
   const match = /^google:([^\s:]+)$/.exec(modelReference);
   if (!match)
     throw new Error(`Unsupported model reference: ${modelReference}. Use google:<model-id>`);
-  if (!options.apiKey.trim()) throw new Error('A nonempty GEMINI_API_KEY is required');
+  if (!options.apiKey.trim()) throw new Error('A nonempty GOOGLE_AI_API_KEY is required');
   const sampleCount = options.sampleCount ?? 3;
   if (!Number.isInteger(sampleCount) || sampleCount < 2)
     throw new Error('Sample count must be an integer of at least two');
