@@ -172,6 +172,7 @@ label {
 }
 .field-help-label::before {
   content: attr(data-help);
+  box-sizing: border-box;
   display: none;
   position: absolute;
   right: 0;
@@ -194,6 +195,15 @@ label {
 .field-help-label.help-align-left::before {
   left: 0;
   right: auto;
+}
+.field-help-label.help-align-above::before {
+  top: auto;
+  bottom: 100%;
+  border-top: 0;
+  border-bottom: 0.25rem solid transparent;
+}
+.field-help-label.help-measuring::before {
+  display: block;
 }
 .field-help-label:not(.help-dismissed):hover::before,
 .field-help-label:not(.help-dismissed):focus-visible::before,

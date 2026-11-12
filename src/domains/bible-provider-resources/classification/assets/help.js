@@ -137,13 +137,27 @@ function describe(control, description, index) {
   );
   const alignTooltip = () => {
     const availableWidth = Math.min(400, window.innerWidth - 48);
+    const bounds = label.getBoundingClientRect();
+    if (bounds.bottom <= 0 || bounds.top >= window.innerHeight) {
+      label.classList.add('help-dismissed');
+      label.classList.remove('help-touch-open');
+      return;
+    }
+    label.classList.toggle('help-align-left', bounds.right < availableWidth + 8);
+    label.classList.remove('help-align-above');
+    label.classList.add('help-measuring');
+    const tooltipHeight = Number.parseFloat(getComputedStyle(label, '::before').height);
+    label.classList.remove('help-measuring');
     label.classList.toggle(
-      'help-align-left',
-      label.getBoundingClientRect().right < availableWidth + 8
+      'help-align-above',
+      bounds.bottom + tooltipHeight + 8 > window.innerHeight && bounds.top >= tooltipHeight + 8
     );
   };
   label.addEventListener('pointerup', (event) => {
-    if (event.pointerType === 'touch') label.classList.add('help-touch-open');
+    if (event.pointerType === 'touch') {
+      alignTooltip();
+      label.classList.add('help-touch-open');
+    }
   });
   label.addEventListener('pointerenter', () => {
     alignTooltip();
@@ -154,6 +168,7 @@ function describe(control, description, index) {
     alignTooltip();
     label.classList.remove('help-dismissed');
   });
+  label.addEventListener('field-help-position', alignTooltip);
 }
 
 function initFieldHelp() {
@@ -181,6 +196,13 @@ function initFieldHelp() {
       if (document.activeElement?.matches('.field-help-label')) document.activeElement.blur();
     }
   });
+  const repositionOpenHelp = () => {
+    for (const label of document.querySelectorAll('.field-help-label'))
+      if (label.matches(':hover, :focus-visible, .help-touch-open'))
+        label.dispatchEvent(new Event('field-help-position'));
+  };
+  window.addEventListener('scroll', repositionOpenHelp, true);
+  window.addEventListener('resize', repositionOpenHelp);
 }
 
 initFieldHelp();
