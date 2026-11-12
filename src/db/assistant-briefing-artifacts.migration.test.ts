@@ -7,6 +7,29 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 
+it('retains both Assistant artifact definitions in every descendant snapshot', async () => {
+  const migrationsFolder = fileURLToPath(new URL('./migrations', import.meta.url));
+  const metadataFolder = join(migrationsFolder, 'meta');
+  const journal = JSON.parse(await readFile(join(metadataFolder, '_journal.json'), 'utf8')) as {
+    entries: { idx: number }[];
+  };
+  const baseline = JSON.parse(
+    await readFile(join(metadataFolder, '0041_snapshot.json'), 'utf8')
+  ) as {
+    tables: Record<string, unknown>;
+  };
+  const names = ['public.assistant_briefing_artifacts', 'public.assistant_turn_artifacts'];
+  for (const name of names) expect(baseline.tables[name]).toBeDefined();
+  for (const { idx } of journal.entries.filter(({ idx }) => idx > 41)) {
+    const snapshot = JSON.parse(
+      await readFile(join(metadataFolder, `${String(idx).padStart(4, '0')}_snapshot.json`), 'utf8')
+    ) as { tables: Record<string, unknown> };
+    for (const name of names) {
+      expect(snapshot.tables[name], `${name} at migration ${idx}`).toEqual(baseline.tables[name]);
+    }
+  }
+});
+
 it('creates the standalone completed-artifact table on a fresh database', async () => {
   const database = new PGlite();
   try {
