@@ -1,12 +1,13 @@
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '@/db/schema';
-import { contractCatalogFixture } from '@/db/testing/contract-catalog-fixture';
-
 import { integrityDigest } from './assistant.receipts';
 import { resolveCanonicalPassage } from './assistant.repository';
 
@@ -94,17 +95,45 @@ describe('canonical Assistant passage resolution', () => {
     expect(changedBible?.integritySource).not.toEqual(changedMembership?.integritySource);
   });
 
-  it.each([false, true])(
-    'binds selected text FK on %s contracted schema, preserving unlinked local verses',
-    async (contracted) => {
+  it.each([
+    ['expanded', false],
+    ['contracted', true],
+  ] as const)(
+    'binds selected text FK on %s schema, preserving unlinked local verses',
+    async (_label, contracted) => {
       const database = new PGlite();
       const previous = databaseState.db;
+      const migrationsFolder = fileURLToPath(new URL('../../db/migrations', import.meta.url));
+      const temporaryMigrations = contracted
+        ? null
+        : await mkdtemp(join(tmpdir(), 'assistant-r2-'));
       try {
         databaseState.db = drizzle(database, { schema });
+        if (temporaryMigrations) {
+          const journal = JSON.parse(
+            await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')
+          ) as { entries: { tag: string }[] };
+          const expandedJournal = { ...journal, entries: journal.entries.slice(0, -1) };
+          expect(journal.entries.at(-1)?.tag).toBe('0049_license_identity_contract');
+          await mkdir(join(temporaryMigrations, 'meta'));
+          await writeFile(
+            join(temporaryMigrations, 'meta', '_journal.json'),
+            JSON.stringify(expandedJournal)
+          );
+          await Promise.all(
+            expandedJournal.entries.map(({ tag }) =>
+              cp(join(migrationsFolder, `${tag}.sql`), join(temporaryMigrations, `${tag}.sql`))
+            )
+          );
+        }
         await migrate(drizzle(database), {
-          migrationsFolder: fileURLToPath(new URL('../../db/migrations', import.meta.url)),
+          migrationsFolder: temporaryMigrations ?? migrationsFolder,
         });
-        if (contracted) await contractCatalogFixture(database);
+        const legacyColumns = await database.query(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_name = 'bibles' AND column_name IN ('provider', 'external_id', 'has_audio')`
+        );
+        expect(legacyColumns.rows).toHaveLength(contracted ? 0 : 3);
         await seedPassage(database);
         const revision = (passage: Awaited<ReturnType<typeof resolveCanonicalPassage>>) =>
           integrityDigest('source-revision', passage?.integritySource);
@@ -157,6 +186,7 @@ describe('canonical Assistant passage resolution', () => {
       } finally {
         databaseState.db = previous;
         await database.close();
+        if (temporaryMigrations) await rm(temporaryMigrations, { recursive: true, force: true });
       }
     },
     60_000
