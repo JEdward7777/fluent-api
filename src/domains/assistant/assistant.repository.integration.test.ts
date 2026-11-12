@@ -8,7 +8,6 @@ import * as schema from '@/db/schema';
 import { contractCatalogFixture } from '@/db/testing/contract-catalog-fixture';
 
 import { integrityDigest } from './assistant.receipts';
-
 import { resolveCanonicalPassage } from './assistant.repository';
 
 const databaseState = vi.hoisted(() => ({ db: undefined as unknown }));
