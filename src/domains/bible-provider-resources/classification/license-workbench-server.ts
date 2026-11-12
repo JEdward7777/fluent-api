@@ -21,6 +21,7 @@ const assets = new Map([
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/guide.js', ['guide.js', 'text/javascript; charset=utf-8']],
+  ['/help.js', ['help.js', 'text/javascript; charset=utf-8']],
   ['/review.js', ['review.js', 'text/javascript; charset=utf-8']],
   ['/save.js', ['save.js', 'text/javascript; charset=utf-8']],
   ['/preview-text.js', ['preview-text.js', 'text/javascript; charset=utf-8']],
@@ -263,7 +264,14 @@ function createLicenseWorkbenchApp(
   app.get('*', async (c) => {
     const asset = assets.get(
       c.req.path as
-        '/' | '/app.css' | '/app.js' | '/guide.js' | '/review.js' | '/save.js' | '/preview-text.js'
+        | '/'
+        | '/app.css'
+        | '/app.js'
+        | '/guide.js'
+        | '/help.js'
+        | '/review.js'
+        | '/save.js'
+        | '/preview-text.js'
     );
     if (!asset) return c.text('Not found', 404);
     const [name, contentType] = asset;

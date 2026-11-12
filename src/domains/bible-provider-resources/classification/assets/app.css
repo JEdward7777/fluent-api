@@ -145,6 +145,65 @@ label {
   gap: 0.35rem;
   font-weight: 600;
 }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.field-help-label {
+  position: relative;
+  padding-right: 1.6rem;
+  cursor: help;
+}
+.field-help-label::after {
+  content: 'ⓘ';
+  position: absolute;
+  right: 0;
+  top: 0;
+  color: #164f6e;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.field-help-label::before {
+  content: attr(data-help);
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 30;
+  width: min(25rem, calc(100vw - 3rem));
+  padding: 0.65rem 0.8rem;
+  border-top: 0.25rem solid transparent;
+  border-radius: 0.35rem;
+  background: #172b3a;
+  color: white;
+  font-weight: 400;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  box-shadow: 0 0.3rem 0.8rem #172b3a40;
+  pointer-events: auto;
+  white-space: normal;
+  background-clip: padding-box;
+}
+.field-help-label.help-align-left::before {
+  left: 0;
+  right: auto;
+}
+.field-help-label:not(.help-dismissed):hover::before,
+.field-help-label:not(.help-dismissed):focus-visible::before,
+.field-help-label:not(.help-dismissed).help-touch-open::before {
+  display: block;
+}
+.field-help-label:focus-visible {
+  outline: 3px solid #0b6b9b;
+  outline-offset: 3px;
+}
 input,
 textarea,
 select {
