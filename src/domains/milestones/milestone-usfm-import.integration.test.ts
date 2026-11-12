@@ -108,8 +108,8 @@ describe('milestone USFM import (#418, #419, #420)', () => {
       { id: 44, code: 'ACT', eng_display_name: 'Acts' },
     ]);
     await database.insert(schema.bibles).values([
-      { id: 1, languageId: 1, name: 'Source Bible', abbreviation: 'SRC', provider: 'dbl' },
-      { id: 2, languageId: 1, name: 'Other Bible', abbreviation: 'OTH', provider: 'dbl' },
+      { id: 1, languageId: 1, name: 'Source Bible', abbreviation: 'SRC' },
+      { id: 2, languageId: 1, name: 'Other Bible', abbreviation: 'OTH' },
     ]);
     // John is not in the source Bible; Luke and Acts are, but their text is not ingested yet.
     // The other Bible, which the project can be switched to, has Luke but not Genesis.
