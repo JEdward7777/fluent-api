@@ -33,7 +33,8 @@ const passage: PassageContext = {
   integritySource: {
     organizationId: 1,
     sourceBibleId: 9,
-    provider: 'dbl',
+    textResourceId: null,
+    provider: null,
     externalId: null,
     pericopeSetId: 3,
     membership: { number: '12', section: null },
