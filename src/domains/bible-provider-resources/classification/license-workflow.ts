@@ -15,18 +15,13 @@ import type {
   LicenseWorkflowState,
 } from './license-workflow.types';
 
-import {
-  attestLicenseArtifact,
-  checkLicenseArtifactReview,
-  serializeLicenseArtifact,
-} from '../license-artifact';
+import { attestLicenseArtifact, serializeLicenseArtifact } from '../license-artifact';
 import { freezeLicenseRevision, freezeReviewValue } from '../license-review-revision';
 import { LicenseAnalysisStoppedError } from './license-analysis';
 import { LicensePolicyDriftError } from './license-database.types';
 import { LicenseInspectionStaleError, requireFreshLicenseSources } from './license-freshness';
 import { buildLicenseSavePlan } from './license-save-plan';
 import { analyzeInspectedLicenses } from './license-workflow-analyze';
-import { LicenseBootstrapRequiredError } from './license-workflow-freshness';
 import { inspectLicenseWorkflowInputs } from './license-workflow-inspect';
 import { LicenseOperationRegistry } from './license-workflow-operations';
 import { exportPreviewedLicenseReport } from './license-workflow-report-export';
@@ -195,12 +190,6 @@ export class LicenseWorkflow {
       throw new Error('Inspect inputs before starting analysis');
     const inspection = this.inspection;
     const options = this.options;
-    if (
-      options.source === 'database' &&
-      options.destination !== 'json' &&
-      !inspection.database?.classifications.length
-    )
-      throw new LicenseBootstrapRequiredError();
     this.state = 'analyzing';
     this.stopAnalysisRequested = false;
     this.beginBusy();
@@ -332,15 +321,8 @@ export class LicenseWorkflow {
       preview.contentRevision !== frozenRequest.contentRevision
     )
       throw new Error('Stale license preview revision');
-    if (preview.plan.requiresForceAgreement && !frozenRequest.agreeToReplace)
-      throw new Error('Explicit agreement is required to replace the existing policy table');
-    if (preview.plan.requiresForceAgreement && !this.options.force)
-      throw new Error('Select force replacement and preview again before saving');
-    if (
-      preview.plan.replace &&
-      checkLicenseArtifactReview(this.analysis.artifact).status !== 'ready'
-    )
-      throw new Error('Attested review and human notes for retained unknowns are required');
+    if (preview.plan.conflicts.length)
+      throw new Error(`Save conflicts: ${preview.plan.conflicts.join('; ')}`);
     this.state = 'saving';
     this.beginBusy();
     const promise = this.performSave(frozenRequest, preview, this.inspection, this.analysis);
@@ -456,7 +438,7 @@ export class LicenseWorkflow {
     this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
     if (!this.analysis || this.state !== 'previewed' || !this.previewResult)
       throw new Error('Preview this exact revision before attestation');
-    if (this.previewResult.reports.reviewContentHash !== expectedReviewHash)
+    if (this.analysis.artifact.reviewContentHash !== expectedReviewHash)
       throw new Error('Stale license review hash');
     if (!metadata.reviewedBy.trim() || !metadata.reviewReason.trim())
       throw new Error('Reviewer identity and review reason are required');

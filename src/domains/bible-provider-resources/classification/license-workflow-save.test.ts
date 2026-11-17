@@ -116,12 +116,9 @@ describe('shared workflow exact-preview Save', () => {
     }
   });
 
-  it('shows signed source rewrite and requires separate replacement agreement', async () => {
+  it('imports valid unattested unknowns without a force agreement or source rewrite', async () => {
     const f = await fixture(false);
-    const workflow = new LicenseWorkflow(
-      { ...f.options, destination: 'database', force: true },
-      f.dependencies
-    );
+    const workflow = new LicenseWorkflow({ ...f.options, destination: 'database' }, f.dependencies);
     f.snapshot.classifications.push({
       normalizedText: 'existing policy',
       status: 'allowed',
@@ -131,42 +128,40 @@ describe('shared workflow exact-preview Save', () => {
     });
     await workflow.inspect(1);
     await workflow.startAnalysis(1);
-    const initial = await workflow.preview(1, 1);
-    expect(initial.plan.targets).toEqual([]);
-    expect(() =>
-      workflow.save({
-        operationId: 'unattested',
-        configurationRevision: 1,
-        contentRevision: 1,
-        agreeToReplace: false,
-      })
-    ).toThrow('Explicit agreement');
-    workflow.attest(
-      {
-        reviewedBy: 'operator',
-        reviewReason: 'Reviewed evidence',
-        reviewedAt: '2026-11-01T00:00:00.000Z',
-      },
-      1,
-      1,
-      initial.reports.reviewContentHash
-    );
-    const preview = await workflow.preview(1, 2);
-    expect(preview.plan.targets).toEqual([
-      { path: f.input, previous: f.sourceBytes, role: 'signed-source' },
-    ]);
+    const preview = await workflow.preview(1, 1);
+    expect(preview.plan.targets).toEqual([]);
+    expect(preview.plan.requiresForceAgreement).toBe(false);
+    expect(preview.plan.databaseChanges.preserved).toContain('existing policy');
     const result = await workflow.save({
-      operationId: 'approved-replacement',
+      operationId: 'mixed-import',
       configurationRevision: 1,
-      contentRevision: 2,
-      agreeToReplace: true,
+      contentRevision: 1,
+      agreeToReplace: false,
     });
-    expect(result.targets).toEqual(preview.plan.targets);
+    expect(result.targets).toEqual([]);
     expect(f.adapter.apply).toHaveBeenCalledOnce();
     expect(f.adapter.apply.mock.calls[0]?.[4]).toEqual(f.snapshot.classifications);
-    expect(checkLicenseArtifactReview(JSON.parse(await readFile(f.input, 'utf8'))).status).toBe(
-      'ready'
+    expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
+    await workflow.close();
+  });
+
+  it('assesses catalog notices and saves when a DB source policy table is empty', async () => {
+    const f = await fixture(false);
+    const workflow = new LicenseWorkflow(
+      { ...f.options, source: 'database', destination: 'database' },
+      f.dependencies
     );
+    await workflow.inspect(1);
+    await workflow.startAnalysis(1);
+    const preview = await workflow.preview(1, 1);
+    expect(preview.plan.databaseChanges.inserted.length).toBeGreaterThan(0);
+    await workflow.save({
+      operationId: 'empty-db-source',
+      configurationRevision: 1,
+      contentRevision: 1,
+      agreeToReplace: false,
+    });
+    expect(f.adapter.apply).toHaveBeenCalledOnce();
     await workflow.close();
   });
 

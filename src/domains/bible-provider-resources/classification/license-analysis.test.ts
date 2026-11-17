@@ -24,7 +24,7 @@ function storedRows(artifact: ReturnType<typeof makeLicenseArtifact>) {
     status: row.status,
     rationale: row.rationale.text,
     classifiedBy: row.classifiedBy,
-    reviewedAt: row.reviewedAt?.toISOString() ?? null,
+    reviewedAt: null,
     evidence: row.rationale.evidence,
     classificationRun: row.rationale.classificationRun,
   }));

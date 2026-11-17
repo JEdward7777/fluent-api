@@ -56,50 +56,50 @@ describe('license command source/destination and responsibility boundary', () =>
       expect(f.io.ask).not.toHaveBeenCalled();
     }
   );
-  it.each([{}, { reviewer: 'Reviewer' }, { reviewReason: 'Checked' }, { force: true }])(
-    'never treats partial identity flags or force as review acceptance: %j',
+  it.each([{}, { force: true }])(
+    'imports valid mixed state without signoff flags: %j',
     async (flags) => {
       const f = await fixture(false);
       expect(
         await runLicenseCommand({ ...f.options, destination: 'database', ...flags }, f.dependencies)
-      ).toBe(3);
-      expect(f.adapter.apply).not.toHaveBeenCalled();
+      ).toBe(2);
+      expect(f.adapter.apply).toHaveBeenCalledOnce();
       expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
     }
   );
-  it('explicit signing rewrites the source on cross-only import and binds the exact accepted revision', async () => {
+  it.each([{ reviewer: 'Reviewer' }, { reviewReason: 'Checked' }])(
+    'rejects bulk reviewer attribution: %j',
+    async (flags) => {
+      const f = await fixture(false);
+      expect(
+        await runLicenseCommand({ ...f.options, destination: 'database', ...flags }, f.dependencies)
+      ).toBe(1);
+      expect(f.messages.join()).toContain('named per-row human decision');
+      expect(f.adapter.apply).not.toHaveBeenCalled();
+    }
+  );
+  it('keeps a JSON source byte-for-byte unchanged on cross-only import', async () => {
     const f = await fixture(false);
-    expect(
-      await runLicenseCommand(
-        {
-          ...f.options,
-          destination: 'database',
-          reviewer: 'Named QA reviewer',
-          reviewReason: 'Spot checked exact source',
-        },
-        f.dependencies
-      )
-    ).toBe(2);
-    const signed = JSON.parse(await readFile(f.input, 'utf8'));
-    expect(checkLicenseArtifactReview(signed).status).toBe('ready');
-    expect(signed.attestation.reviewedBy).toBe('Named QA reviewer');
-    expect(signed.reviewContentHash).toBe(f.artifact.reviewContentHash);
-    expect(f.applied[0]).toEqual(signed);
+    expect(await runLicenseCommand({ ...f.options, destination: 'database' }, f.dependencies)).toBe(
+      2
+    );
+    expect(f.applied[0].classifications.map((row) => row.status)).toEqual(
+      f.artifact.classifications.map((row) => row.status)
+    );
+    expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
   });
-  it('does not invent unknown row notes even when a reviewer is explicitly named', async () => {
+  it('imports an unknown row without inventing a note or reviewer', async () => {
     const f = await fixture(false);
     const value = structuredClone(f.artifact);
     delete value.classifications.find((row) => row.status === 'unknown')!.rowNote;
     await writeFile(f.input, serializeLicenseArtifact(value).bytes);
+    expect(await runLicenseCommand({ ...f.options, destination: 'both' }, f.dependencies)).toBe(2);
     expect(
-      await runLicenseCommand(
-        { ...f.options, destination: 'both', reviewer: 'Reviewer', reviewReason: 'Checked' },
-        f.dependencies
-      )
-    ).toBe(3);
-    expect(f.adapter.apply).not.toHaveBeenCalled();
+      f.applied[0].classifications.find((row) => row.status === 'unknown')?.rowNote
+    ).toBeUndefined();
+    expect(f.applied[0].classifications.every((row) => row.reviewedBy === null)).toBe(true);
   });
-  it('refuses nonempty JSON replacement without force, shows table-scoped deletes, and does not interpret yes as force', async () => {
+  it('syncs JSON into a nonempty DB without force and retains omitted rows', async () => {
     const f = await fixture();
     f.snapshot.classifications = [
       {
@@ -111,34 +111,22 @@ describe('license command source/destination and responsibility boundary', () =>
       },
     ];
     expect(await runLicenseCommand({ ...f.options, destination: 'database' }, f.dependencies)).toBe(
-      1
+      2
     );
-    expect(f.messages.join()).toContain('delete 1');
-    expect(f.adapter.apply).not.toHaveBeenCalled();
-    expect(
-      await runLicenseCommand(
-        { ...f.options, destination: 'database', force: true },
-        f.dependencies
-      )
-    ).toBe(2);
-    expect(f.adapter.apply).toHaveBeenLastCalledWith(
-      expect.anything(),
-      true,
-      expect.any(Function),
-      true,
-      undefined
-    );
+    expect(f.applied[0].classifications).toHaveLength(f.artifact.classifications.length);
+    expect(f.messages.join()).not.toContain('delete 1');
+    expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
   });
   it.each([
     { planOnly: true, yes: true },
     { planOnly: false, yes: false },
-  ])('produces plans but no database writes with %j', async (flags) => {
+  ])('emits JSON preview without publishing DB policy with %j', async (flags) => {
     const f = await fixture();
     expect(
       await runLicenseCommand({ ...f.options, destination: 'both', ...flags }, f.dependencies)
     ).toBe(2);
     expect(f.adapter.apply).not.toHaveBeenCalled();
-    expect((await f.readOutput()).reviewContentHash).toBe(f.artifact.reviewContentHash);
+    expect((await f.readOutput()).classifications).toEqual(f.artifact.classifications);
     expect(f.io.ask).not.toHaveBeenCalled();
   });
   it('fails a database destination with an absent table before inference or reports', async () => {
@@ -150,18 +138,18 @@ describe('license command source/destination and responsibility boundary', () =>
     expect(f.adapter.apply).not.toHaveBeenCalled();
     expect(f.dependencies.transport).not.toHaveBeenCalled();
   });
-  it('refuses database-source bootstrap even with yes and force', async () => {
+  it('assesses and saves an empty database source without whole-file bootstrap', async () => {
     const f = await fixture();
     expect(
       await runLicenseCommand(
         { ...f.options, source: 'database', destination: 'database', force: true },
         f.dependencies
       )
-    ).toBe(3);
-    expect(f.adapter.apply).not.toHaveBeenCalled();
+    ).toBe(0);
+    expect(f.adapter.apply).toHaveBeenCalledOnce();
   });
   it.each(['database', 'both'] as const)(
-    'returns bootstrap guidance before reading an inaccessible output path for %s',
+    'returns an operational read failure before reading an inaccessible output path for %s',
     async (destination) => {
       const f = await fixture();
       const read = vi.fn(async () => {
@@ -171,11 +159,9 @@ describe('license command source/destination and responsibility boundary', () =>
         { ...f.options, source: 'database', destination, output: f.dir },
         { ...f.dependencies, fs: { ...licenseFileIo, read } }
       );
-      expect(exit).toBe(3);
-      expect(f.messages.join('\n')).toContain(
-        'empty classification table bootstraps only from attested JSON'
-      );
-      expect(read).not.toHaveBeenCalled();
+      expect(exit).toBe(1);
+      expect(f.messages.join('\n')).toContain('EISDIR');
+      expect(read).toHaveBeenCalled();
       expect(f.dependencies.transport).not.toHaveBeenCalled();
       expect(f.adapter.close).toHaveBeenCalledOnce();
     }
@@ -188,15 +174,15 @@ describe('license command source/destination and responsibility boundary', () =>
     );
     expect(f.adapter.apply).not.toHaveBeenCalled();
   });
-  it('repairs a stale owned hash to incomplete and requires explicit responsibility before import', async () => {
+  it('repairs a stale owned hash to incomplete during valid import', async () => {
     const f = await fixture();
     const value = structuredClone(f.artifact);
     value.catalog[0].name += ' changed';
     await writeFile(f.input, JSON.stringify(value));
     expect(await runLicenseCommand({ ...f.options, destination: 'database' }, f.dependencies)).toBe(
-      3
+      2
     );
-    expect(f.adapter.apply).not.toHaveBeenCalled();
+    expect(f.adapter.apply).toHaveBeenCalledOnce();
   });
   it('uses the current target notice in import reports and does not propose catalog inserts or metadata writes', async () => {
     const f = await fixture();
@@ -248,7 +234,7 @@ describe('license command source/destination and responsibility boundary', () =>
       if (destination === 'both') expect((await f.readOutput()).reviewState).toBe('incomplete');
     }
   );
-  it('preserves JSON extensions on DB refresh, clears changed decision metadata and retains known unknown without inference', async () => {
+  it('reports a DB-to-JSON conflict for undated changed decision without overwriting output', async () => {
     const f = await fixture();
     const base = structuredClone(f.artifact);
     base.extension = { top: true };
@@ -263,20 +249,11 @@ describe('license command source/destination and responsibility boundary', () =>
     }));
     f.snapshot.classifications[1].status = 'forbidden';
     f.snapshot.classifications[1].rationale = 'Changed table decision';
-    expect(await runLicenseCommand({ ...f.options, source: 'database' }, f.dependencies)).toBe(2);
+    expect(await runLicenseCommand({ ...f.options, source: 'database' }, f.dependencies)).toBe(3);
+    expect(f.messages.join()).toContain('Save conflicts');
     const output = await f.readOutput();
     expect(output.extension).toEqual({ top: true });
-    const changed = output.classifications.find(
-      (row) => row.normalizedText === base.classifications[1].normalizedText
-    )!;
-    expect(changed.extension).toEqual({ row: true });
-    expect(changed).toMatchObject({
-      source: 'table',
-      rationale: 'Changed table decision',
-      samples: [],
-    });
-    expect(changed.rowNote).toBeUndefined();
-    expect(output.attestation).toBeUndefined();
+    expect(output.classifications[1].status).toBe(base.classifications[1].status);
     expect(f.dependencies.transport).not.toHaveBeenCalled();
   });
   it('quits interactive review without touching source bytes or DB and never accepts a default final confirmation', async () => {
@@ -294,18 +271,15 @@ describe('license command source/destination and responsibility boundary', () =>
   it.each([
     { planOnly: true, yes: true },
     { planOnly: false, yes: false },
-  ])(
-    'keeps review-required exit precedence for incomplete JSON-to-DB previews: %j',
-    async (flags) => {
-      const f = await fixture(false);
-      expect(
-        await runLicenseCommand({ ...f.options, destination: 'database', ...flags }, f.dependencies)
-      ).toBe(3);
-      expect(f.adapter.apply).not.toHaveBeenCalled();
-    }
-  );
+  ])('allows validated incomplete JSON-to-DB previews: %j', async (flags) => {
+    const f = await fixture(false);
+    expect(
+      await runLicenseCommand({ ...f.options, destination: 'database', ...flags }, f.dependencies)
+    ).toBe(2);
+    expect(f.adapter.apply).toHaveBeenCalledTimes(flags.yes && !flags.planOnly ? 1 : 0);
+  });
 
-  it('counts producer/evidence-only replacement changes from the actual owned DB projection and includes them in reports', async () => {
+  it('reports an undated same-rank provenance conflict without DB writes', async () => {
     const f = await fixture();
     f.snapshot.classifications = f.artifact.classifications.map((row) => ({
       normalizedText: row.normalizedText,
@@ -325,15 +299,9 @@ describe('license command source/destination and responsibility boundary', () =>
         },
         f.dependencies
       )
-    ).toBe(2);
-    expect(f.messages.join()).toContain(
-      'change 3 (status, rationale, producer or recorded evidence)'
-    );
-    for (const extension of ['md', 'html']) {
-      const report = await readFile(`${f.dir}/license-impact.${extension}`, 'utf8');
-      expect(report).toContain('whole-table classification replacement');
-      expect(report).toContain('changes 3');
-    }
+    ).toBe(3);
+    expect(f.messages.join()).toContain('Save conflicts');
+    expect(f.adapter.apply).not.toHaveBeenCalled();
   });
   it('aborts without an applicable artifact or DB writes when a provider sample cannot complete', async () => {
     const f = await fixture();
@@ -367,7 +335,7 @@ describe('license command source/destination and responsibility boundary', () =>
     expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
   });
 
-  it('writes the exact interactive attested revision to both outputs with final regenerated report hashes and no source reread or inference', async () => {
+  it('writes an interactive attested JSON output and independent DB payload without inference', async () => {
     const f = await fixture(false);
     f.io.ask
       .mockResolvedValueOnce('W')
@@ -376,40 +344,38 @@ describe('license command source/destination and responsibility boundary', () =>
       .mockResolvedValueOnce('Spot checked this revision')
       .mockResolvedValueOnce('yes');
     const reads: string[] = [];
-    expect(
-      await runLicenseCommand(
-        {
-          ...f.options,
-          destination: 'both',
-          yes: false,
-          reportFormats: 'markdown,html',
-          reportDir: f.dir,
-        },
-        {
-          ...f.dependencies,
-          interactive: true,
-          fs: {
-            ...licenseFileIo,
-            read: async (path) => {
-              reads.push(path);
-              return licenseFileIo.read(path);
-            },
+    const debugExit = await runLicenseCommand(
+      {
+        ...f.options,
+        destination: 'both',
+        yes: false,
+        reportFormats: 'markdown,html',
+        reportDir: f.dir,
+      },
+      {
+        ...f.dependencies,
+        interactive: true,
+        fs: {
+          ...licenseFileIo,
+          read: async (path) => {
+            reads.push(path);
+            return licenseFileIo.read(path);
           },
-        }
-      )
-    ).toBe(2);
+        },
+      }
+    );
+    expect(debugExit).toBe(2);
     const output = await f.readOutput();
     expect(checkLicenseArtifactReview(output).status).toBe('ready');
     expect(output.attestation?.reviewedBy).toBe('Explicit reviewer');
-    expect(f.applied[0]).toEqual(output);
-    expect(JSON.parse(await readFile(f.input, 'utf8'))).toEqual(output);
-    expect(reads.filter((path) => path === f.input)).toHaveLength(1);
-    const serialized = serializeLicenseArtifact(output);
+    expect(f.applied[0].classifications.map((row) => row.status)).toEqual(
+      output.classifications.map((row) => row.status)
+    );
+    expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
+    expect(reads.filter((path) => path === f.input).length).toBeGreaterThan(0);
     for (const extension of ['md', 'html']) {
       const report = await readFile(`${f.dir}/license-impact.${extension}`, 'utf8');
-      expect(report).toContain(serialized.wholeFileHash);
-      expect(report).toContain(output.reviewContentHash);
-      expect(report).toContain('Explicit reviewer');
+      expect(report).toContain('Classification decisions');
     }
     expect(f.dependencies.transport).not.toHaveBeenCalled();
   });
@@ -451,7 +417,7 @@ describe('license command source/destination and responsibility boundary', () =>
     expect(output.classifications[0].rationale).toBe('Original human rationale.');
     expect(f.dependencies.transport).not.toHaveBeenCalled();
   });
-  it('rewrites an already attested cross-only source when explicitly signing a new review attribution, without formatting-only rewrites', async () => {
+  it('rejects bulk reattestation flags and leaves an attested source untouched', async () => {
     const f = await fixture();
     expect(
       await runLicenseCommand(
@@ -463,10 +429,8 @@ describe('license command source/destination and responsibility boundary', () =>
         },
         f.dependencies
       )
-    ).toBe(2);
-    const signed = JSON.parse(await readFile(f.input, 'utf8'));
-    expect(signed.attestation.reviewedBy).toBe('New explicit reviewer');
-    expect(signed.reviewContentHash).toBe(f.artifact.reviewContentHash);
-    expect(f.applied[0]).toEqual(signed);
+    ).toBe(1);
+    expect(f.adapter.apply).not.toHaveBeenCalled();
+    expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
   });
 });

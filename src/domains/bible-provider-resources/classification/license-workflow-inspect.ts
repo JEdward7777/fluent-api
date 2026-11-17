@@ -7,10 +7,7 @@ import type { LicenseInspection, LicenseWorkflowDependencies } from './license-w
 import { freezeReviewValue } from '../license-review-revision';
 import { isIssuedLicensePractice } from './license-practice';
 import { inspectLicensePreflight } from './license-preflight';
-import {
-  LicenseBootstrapRequiredError,
-  parseLicenseArtifactBytes,
-} from './license-workflow-freshness';
+import { parseLicenseArtifactBytes } from './license-workflow-freshness';
 import { licenseFileIo } from './license-write';
 
 export async function inspectLicenseWorkflowInputs(input: {
@@ -74,12 +71,6 @@ export async function inspectLicenseWorkflowInputs(input: {
     throw new Error(
       'The license_classifications table must exist before a database destination can be used'
     );
-  if (
-    options.source === 'database' &&
-    options.destination !== 'json' &&
-    !snapshot?.classifications.length
-  )
-    throw new LicenseBootstrapRequiredError();
   const inputBytes = options.source === 'json' ? await fs.read(options.input) : null;
   if (options.source === 'json' && inputBytes === null)
     throw new Error(`JSON source not found: ${options.input}`);

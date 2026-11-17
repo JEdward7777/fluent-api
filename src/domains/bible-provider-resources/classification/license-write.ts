@@ -69,6 +69,7 @@ export const licenseFileIo: LicenseFileIo = {
 /** Bounded compensation, not distributed atomicity: staged DB, atomic files, then DB commit. */
 export async function writeLicenseDestinations(options: {
   artifact: LicenseArtifact;
+  fileArtifact?: LicenseArtifact;
   files: { path: string; previous: string | null }[];
   database?: LicenseDatabaseAdapter;
   replace: boolean;
@@ -79,7 +80,7 @@ export async function writeLicenseDestinations(options: {
   expectedPolicy?: StoredLicenseClassification[];
 }) {
   const fs = options.fs ?? licenseFileIo;
-  const { bytes } = serializeLicenseArtifact(options.artifact);
+  const { bytes } = serializeLicenseArtifact(options.fileArtifact ?? options.artifact);
   if (checkLicenseArtifactReview(JSON.parse(bytes)).status === 'invalid')
     throw new Error('Invalid staged JSON');
   const expected = options.expectedFiles;

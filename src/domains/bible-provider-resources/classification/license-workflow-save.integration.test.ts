@@ -36,7 +36,7 @@ beforeEach(async () => {
 afterAll(() => client.close());
 
 describe('save through actual classification adapter', () => {
-  it('bootstraps from attested JSON and publishes the signed source at the previewed hash', async () => {
+  it('bootstraps an empty database from valid unattested mixed-state JSON', async () => {
     const f = await makeCommandFixture(false);
     try {
       const workflow = new LicenseWorkflow(
@@ -45,30 +45,19 @@ describe('save through actual classification adapter', () => {
       );
       await workflow.inspect(1);
       await workflow.startAnalysis(1);
-      const first = await workflow.preview(1, 1);
-      workflow.attest(
-        {
-          reviewedBy: 'operator',
-          reviewReason: 'Reviewed evidence',
-          reviewedAt: '2026-11-01T00:00:00.000Z',
-        },
-        1,
-        1,
-        first.reports.reviewContentHash
-      );
-      const preview = await workflow.preview(1, 2);
-      expect(preview.plan.targets.map((target) => target.path)).toEqual([f.input]);
-      const result = await workflow.save({
-        operationId: 'bootstrap-signed-source',
+      const preview = await workflow.preview(1, 1);
+      expect(preview.plan.targets).toEqual([]);
+      await workflow.save({
+        operationId: 'bootstrap-mixed',
         configurationRevision: 1,
-        contentRevision: 2,
+        contentRevision: 1,
         agreeToReplace: false,
       });
-      expect(result.wholeFileHash).toBe(preview.plan.wholeFileHash);
-      expect((await createLicenseDatabaseAdapter().load()).classifications).toHaveLength(
-        f.artifact.classifications.length
-      );
-      expect(await readFile(f.input, 'utf8')).not.toBe(f.sourceBytes);
+      const rows = (await createLicenseDatabaseAdapter().load()).classifications;
+      expect(rows).toHaveLength(f.artifact.classifications.length);
+      expect(rows.some((row) => row.status === 'unknown')).toBe(true);
+      expect(rows.every((row) => row.reviewedBy === null)).toBe(true);
+      expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
       await workflow.close();
     } finally {
       await f.cleanup();
