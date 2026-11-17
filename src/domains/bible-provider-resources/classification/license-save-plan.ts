@@ -54,7 +54,15 @@ export function buildLicenseSavePlan(input: {
       ? {
           ...database.context,
           ...(options.destination !== 'json'
-            ? { classificationTable: { existing: database.classifications, replace: true } }
+            ? {
+                classificationTable: {
+                  changes: {
+                    deletedKeys: [],
+                    insertedKeys: destinations.databaseChanges.inserted,
+                    changedKeys: destinations.databaseChanges.updated,
+                  },
+                },
+              }
             : {}),
         }
       : undefined,

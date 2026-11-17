@@ -1,11 +1,11 @@
 import { eq } from 'drizzle-orm';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '@/db/schema';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
 
-import { recordHumanLicenseDecision } from '../license-artifact';
+import { recordHumanLicenseDecision, serializeLicenseArtifact } from '../license-artifact';
 import { createLicenseDatabaseAdapter } from './license-classifications.service';
 import { makeCommandFixture } from './license-command.test-fixtures';
 import { LicenseWorkflow } from './license-workflow';
@@ -92,6 +92,11 @@ describe('save through actual classification adapter', () => {
         f.artifact.classifications.length
       );
       expect(preview.plan.databaseArtifact?.classifications).toHaveLength(0);
+      expect(preview.reports.model.impact.classificationChanges).toEqual({
+        deletedKeys: [],
+        insertedKeys: [],
+        changedKeys: [],
+      });
       await replay.save({
         operationId: 'repeat-import',
         configurationRevision: 1,
@@ -135,6 +140,11 @@ describe('save through actual classification adapter', () => {
       expect(preview.plan.databaseChanges.preserved).toContain(key);
       expect(preview.plan.databaseChanges.inserted).toContain(missingKey);
       expect(preview.plan.databaseArtifact?.classifications).toHaveLength(1);
+      expect(preview.reports.model.impact.classificationChanges).toEqual({
+        deletedKeys: [],
+        insertedKeys: [missingKey],
+        changedKeys: [],
+      });
       await workflow.save({
         operationId: 'partial-import',
         configurationRevision: 1,
@@ -145,6 +155,102 @@ describe('save through actual classification adapter', () => {
       expect(rows.find((row) => row.normalizedText === key)?.reviewedBy).toBe('DB reviewer');
       expect(rows.some((row) => row.normalizedText === missingKey)).toBe(true);
       expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
+      await workflow.close();
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it('reports exactly the DB rows written while retaining an omitted legacy decision', async () => {
+    const f = await makeCommandFixture(false);
+    try {
+      const legacy = {
+        normalizedText: 'omitted destination policy',
+        status: 'allowed' as const,
+        rationale: 'Historical decision',
+        classifiedBy: 'historical-producer',
+      };
+      await database.insert(schema.license_classifications).values(legacy);
+      const before = await database.select().from(schema.license_classifications);
+      const workflow = new LicenseWorkflow(
+        { ...f.options, destination: 'database', reportFormats: 'markdown' },
+        { ...f.dependencies, database: async () => createLicenseDatabaseAdapter() }
+      );
+      await workflow.inspect(1);
+      await workflow.startAnalysis(1);
+      const preview = await workflow.preview(1, 1);
+      expect(preview.plan.databaseChanges.preserved).toContain(legacy.normalizedText);
+      expect(preview.reports.model.impact.classificationChanges).toEqual({
+        deletedKeys: [],
+        insertedKeys: preview.plan.databaseChanges.inserted,
+        changedKeys: preview.plan.databaseChanges.updated,
+      });
+      expect(preview.reports.model.impact.classificationChanges?.changedKeys).not.toContain(
+        legacy.normalizedText
+      );
+      expect(preview.reports.reports[0].bytes).toContain('Planned scoped classification writes');
+      expect(preview.reports.reports[0].bytes).not.toContain(
+        'whole-table classification replacement'
+      );
+      await workflow.save({
+        operationId: 'omit-legacy',
+        configurationRevision: 1,
+        contentRevision: 1,
+        agreeToReplace: false,
+      });
+      const after = await database.select().from(schema.license_classifications);
+      expect(after).toHaveLength(before.length + preview.plan.databaseChanges.inserted.length);
+      expect(after.find((row) => row.normalizedText === legacy.normalizedText)).toEqual(before[0]);
+      await workflow.close();
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it('reports one metadata update and writes that same DB row', async () => {
+    const f = await makeCommandFixture(false);
+    try {
+      const adapter = createLicenseDatabaseAdapter();
+      await adapter.apply(f.artifact, true);
+      const key = f.artifact.classifications[2].normalizedText;
+      const reviewed = recordHumanLicenseDecision(
+        f.artifact,
+        key,
+        'unknown',
+        'Confirmed unresolved',
+        'Reviewer',
+        '2026-11-17T12:00:00.000Z'
+      );
+      await writeFile(f.input, serializeLicenseArtifact(reviewed).bytes);
+      const before = await database.select().from(schema.license_classifications);
+      const workflow = new LicenseWorkflow(
+        { ...f.options, destination: 'database', reportFormats: 'markdown' },
+        { ...f.dependencies, database: async () => adapter }
+      );
+      await workflow.inspect(1);
+      await workflow.startAnalysis(1);
+      const preview = await workflow.preview(1, 1);
+      expect(preview.plan.databaseChanges.updated).toEqual([key]);
+      expect(preview.reports.model.impact.classificationChanges).toEqual({
+        deletedKeys: [],
+        insertedKeys: [],
+        changedKeys: [key],
+      });
+      await workflow.save({
+        operationId: 'metadata-only',
+        configurationRevision: 1,
+        contentRevision: 1,
+        agreeToReplace: false,
+      });
+      const after = await database.select().from(schema.license_classifications);
+      expect(
+        after.filter(
+          (row, index) => row.updatedAt?.getTime() !== before[index].updatedAt?.getTime()
+        )
+      ).toHaveLength(1);
+      const changed = after.find((row) => row.normalizedText === key)!;
+      expect(changed.reviewState).toBe('human_reviewed');
+      expect(changed.reviewedBy).toBe('Reviewer');
       await workflow.close();
     } finally {
       await f.cleanup();
