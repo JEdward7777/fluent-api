@@ -1,6 +1,10 @@
 import { hashCanonicalJson } from '@/lib/llm/canonical-json';
 
-import type { LicenseArtifact, LicenseClassification } from './license-artifact.schemas';
+import type {
+  LegacyLicenseArtifact,
+  LicenseArtifact,
+  LicenseClassification,
+} from './license-artifact.schemas';
 
 // Explicit, locale-independent ordering. Every sort operates on newly mapped arrays.
 const compare = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
@@ -84,7 +88,10 @@ export function ownedLicenseClassification(row: LicenseClassification, includeDe
  * Attestation, review markers/hash, acquisition/file times, cache diagnostics and every
  * passthrough extension are excluded. Promoting an extension requires a domain-version change.
  */
-export function computeLicenseReviewHash(artifact: LicenseArtifact): string {
+function hashOwnedArtifact(
+  artifact: LicenseArtifact | LegacyLicenseArtifact,
+  legacy: boolean
+): string {
   return hashCanonicalJson({
     schemaVersion: artifact.schemaVersion,
     hashDomainVersion: artifact.hashDomainVersion,
@@ -104,7 +111,27 @@ export function computeLicenseReviewHash(artifact: LicenseArtifact): string {
           compare(left.provider, right.provider) || compare(left.externalId, right.externalId)
       ),
     classifications: artifact.classifications
-      .map((row) => ownedLicenseClassification(row))
+      .map((row) => {
+        const owned = ownedLicenseClassification(row);
+        if (!legacy) return owned;
+        const {
+          reviewState: _reviewState,
+          decisionAt: _decisionAt,
+          reviewedBy: _reviewedBy,
+          humanReviewedAt: _humanReviewedAt,
+          ...v2
+        } = owned;
+        return v2;
+      })
       .sort((left, right) => compare(left.normalizedText, right.normalizedText)),
   });
+}
+
+/** Exact v2 owned projection; verify it before any version or attestation conversion. */
+export function computeLegacyLicenseReviewHash(artifact: LegacyLicenseArtifact): string {
+  return hashOwnedArtifact(artifact, true);
+}
+
+export function computeLicenseReviewHash(artifact: LicenseArtifact): string {
+  return hashOwnedArtifact(artifact, false);
 }

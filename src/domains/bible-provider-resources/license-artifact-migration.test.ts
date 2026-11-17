@@ -29,10 +29,54 @@ describe('tracked v2 candidate migration', () => {
       )
     ).toBe(true);
     expect(upgraded.attestation).toBeUndefined();
+    expect(upgraded.historicalAttestation).toBeUndefined();
     const roundTrip = parseLicenseArtifact(JSON.parse(serializeLicenseArtifact(upgraded).bytes));
     expect(roundTrip.reviewContentHash).toBe(upgraded.reviewContentHash);
     const after = await readFile(LICENSE_CLASSIFICATIONS_PATH);
     expect(after.equals(before)).toBe(true);
     expect(createHash('sha256').update(after).digest('hex')).toBe(beforeHash);
+  }, 20000);
+
+  it('retains a valid v2 assertion only as historical metadata', async () => {
+    const before = await readFile(LICENSE_CLASSIFICATIONS_PATH);
+    const legacy = JSON.parse(before.toString('utf8')) as Record<string, unknown>;
+    const v2Hash = legacy.reviewContentHash as string;
+    legacy.attestation = {
+      reviewedBy: 'Historical reviewer',
+      reviewReason: 'Reviewed the original v2 content',
+      reviewedAt: '2026-10-27T00:00:00.000Z',
+      reviewContentHash: v2Hash,
+    };
+    const upgraded = parseLicenseArtifact(legacy);
+    expect(upgraded.attestation).toBeUndefined();
+    expect(checkLicenseArtifactReview(upgraded).status).toBe('review-required');
+    expect(upgraded.historicalAttestation).toEqual({
+      schemaVersion: 2,
+      hashDomainVersion: 2,
+      ...(legacy.attestation as object),
+    });
+    expect(upgraded.classifications.every((row) => row.reviewState !== 'human_reviewed')).toBe(
+      true
+    );
+    const roundTrip = parseLicenseArtifact(JSON.parse(serializeLicenseArtifact(upgraded).bytes));
+    expect(roundTrip.historicalAttestation).toEqual(upgraded.historicalAttestation);
+    expect(roundTrip.attestation).toBeUndefined();
+    const mismatched = structuredClone(legacy);
+    mismatched.attestation = {
+      ...(legacy.attestation as Record<string, unknown>),
+      reviewContentHash: '0'.repeat(64),
+    };
+    expect(() => parseLicenseArtifact(mismatched)).toThrow(
+      'Legacy v2 attestation is bound to another revision'
+    );
+    expect((await readFile(LICENSE_CLASSIFICATIONS_PATH)).equals(before)).toBe(true);
+  }, 20000);
+
+  it('rejects a v2 owned-content edit before assigning a v3 hash', async () => {
+    const legacy = JSON.parse(await readFile(LICENSE_CLASSIFICATIONS_PATH, 'utf8')) as {
+      classifications: Array<{ rationale: string }>;
+    };
+    legacy.classifications[0].rationale = 'Tampered legacy rationale';
+    expect(() => parseLicenseArtifact(legacy)).toThrow('Legacy v2 review content hash mismatch');
   }, 20000);
 });
