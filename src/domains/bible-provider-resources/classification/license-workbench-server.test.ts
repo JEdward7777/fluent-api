@@ -367,6 +367,7 @@ describe('local license workbench server', () => {
           normalizedText: row.normalizedText,
           status: 'allowed',
           reason: 'The reviewer accepts this exception.',
+          reviewedBy: 'Named reviewer',
         },
       };
       expect((await api('review/edit', 'POST', edit)).status).toBe(409);

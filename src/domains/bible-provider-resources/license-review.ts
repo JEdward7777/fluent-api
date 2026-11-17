@@ -26,7 +26,8 @@ interface ReviewOptions {
   regenerateReports?: (reports: LicenseReportBundle) => Promise<void>;
   now?: () => string;
   edit?: (change: LicenseReviewEdit) => LicenseArtifact;
-  attest?: (
+  reassess?: (key: string, kind: 'rule' | 'model') => Promise<LicenseArtifact | null>;
+  assertWholeArtifact?: (
     metadata: { reviewedBy: string; reviewReason: string; reviewedAt: string },
     reviewHash: string
   ) => LicenseArtifact;
@@ -58,7 +59,7 @@ export async function runLicenseReview(options: ReviewOptions) {
       await io.write(`Report: ${report.path}${report.url ? `\n${report.url}` : ''}`);
   };
   await regenerate();
-  const finish = (action: 'write' | 'quit' | 'review-required', attestationDeclined = false) =>
+  const finish = (action: 'write' | 'quit') =>
     freezeReviewValue({
       action,
       writeIntent: action === 'write',
@@ -66,12 +67,12 @@ export async function runLicenseReview(options: ReviewOptions) {
       config,
       reports,
       reviewStatus: checkLicenseArtifactReview(artifact).status,
-      attestationDeclined,
+      attestationDeclined: false,
     });
   while (true) {
     const command = (
       await io.ask(
-        '[W] Write current decisions  [R] Review or edit classifications  [Q] Quit without writing classifications: '
+        '[W] Write current decisions  [R] Review or edit classifications  [A] Optional whole-file assertion  [Q] Quit: '
       )
     )
       .trim()
@@ -83,7 +84,8 @@ export async function runLicenseReview(options: ReviewOptions) {
         io,
         config.database,
         config.preserveExistingNonUnknowns,
-        options.edit
+        options.edit,
+        options.reassess
       );
       if (serializeLicenseArtifact(edited).wholeFileHash !== reports.wholeFileHash) {
         artifact = freezeLicenseRevision(edited);
@@ -91,64 +93,34 @@ export async function runLicenseReview(options: ReviewOptions) {
       } else await options.preview?.();
       continue;
     }
-    if (command !== 'W') {
-      await io.write('Choose W, R, or Q.');
+    if (command === 'A') {
+      const reviewedBy = await io.ask('Name for optional whole-file assertion: ');
+      const reviewReason = await io.ask('Reason and scope of this assertion: ');
+      if (!reviewedBy.trim() || !reviewReason.trim()) {
+        await io.write('Name and reason are required; no assertion was added.');
+        continue;
+      }
+      const metadata = {
+        reviewedBy,
+        reviewReason,
+        reviewedAt: options.now?.() ?? new Date().toISOString(),
+      };
+      artifact = options.assertWholeArtifact
+        ? options.assertWholeArtifact(metadata, artifact.reviewContentHash)
+        : freezeLicenseRevision(attestLicenseArtifact(artifact, metadata));
+      await regenerate();
       continue;
     }
-    let attestationDeclined = false;
-    if (
-      (config.source === 'json' || config.destination !== 'database') &&
-      checkLicenseArtifactReview(artifact).status !== 'ready'
-    ) {
-      const accept = yes(
-        await io.ask(
-          `Have you spot-checked this exact revision ${artifact.reviewContentHash} and accept review responsibility? [y/N] `
-        )
-      );
-      if (accept) {
-        if (artifact.classifications.some((row) => row.status === 'unknown' && !row.rowNote)) {
-          await io.write(
-            'Every retained unknown needs a human row note. Use Review before completing JSON.'
-          );
-          continue;
-        }
-        const reviewedBy = await io.ask('Reviewer identity (required): ');
-        const reviewReason = await io.ask(
-          'Reason/scope of this exact-revision review (required): '
-        );
-        if (!reviewedBy.trim() || !reviewReason.trim()) {
-          await io.write('Identity and review reason are required; no attestation was added.');
-          continue;
-        }
-        const metadata = {
-          reviewedBy,
-          reviewReason,
-          reviewedAt: options.now?.() ?? new Date().toISOString(),
-        };
-        artifact = options.attest
-          ? options.attest(metadata, artifact.reviewContentHash)
-          : freezeLicenseRevision(attestLicenseArtifact(artifact, metadata));
-      } else {
-        attestationDeclined = true;
-        if (config.source === 'json' && config.destination !== 'json') {
-          await io.write(
-            'Review required. This JSON revision is incomplete; no database rows will change.'
-          );
-          await regenerate();
-          return finish('review-required', true);
-        }
-        await io.write('No review attestation was added. The JSON revision remains incomplete.');
-      }
-      // Attestation changes final JSON bytes even when its owned review hash is unchanged.
-      await regenerate();
+    if (command !== 'W') {
+      await io.write('Choose W, R, A, or Q.');
+      continue;
     }
-    const state = checkLicenseArtifactReview(artifact).status;
     const accepted = yes(
       await io.ask(
-        `Write these decisions to ${config.destination}? Review hash ${artifact.reviewContentHash}, file SHA-256 ${reports.wholeFileHash}, JSON review ${state === 'ready' ? 'attested' : 'incomplete'}. [y/N] `
+        `Write the previewed decisions to ${config.destination}? Review hash ${artifact.reviewContentHash}, file SHA-256 ${reports.wholeFileHash}. [y/N] `
       )
     );
-    if (accepted) return finish('write', attestationDeclined);
+    if (accepted) return finish('write');
     await io.write('Write canceled; no classifications were written.');
   }
 }

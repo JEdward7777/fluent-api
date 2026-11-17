@@ -12,7 +12,10 @@ import { licenseInlineSummary } from '../license-report-model';
 import { renderLicenseReports } from '../license-reports';
 import { runLicenseReview } from '../license-review';
 import { freezeReviewValue } from '../license-review-revision';
+import { licenseKeyDigest } from './license-eligibility';
+import { inspectLicensePreflight } from './license-preflight';
 import { LicenseWorkflow } from './license-workflow';
+import { parseLicenseArtifactBytes } from './license-workflow-freshness';
 import { licenseFileIo, writeLicenseDestinations } from './license-write';
 
 interface CommandDependencies {
@@ -57,6 +60,15 @@ export async function runLicenseCommand(
       now: dependencies.now,
     });
     const inspection = await workflow.inspect(workflow.status.configurationRevision);
+    await io.write(
+      `Preflight: ${inspection.preflight.distinctKeys} keys; ${inspection.preflight.ruleHits} rule matches; ${inspection.preflight.modelKeys} model keys; ${inspection.preflight.validCacheHits} valid cached samples; ${inspection.preflight.expectedUncachedRequests} expected uncached requests, up to ${inspection.preflight.maximumAttempts} attempts. ${inspection.preflight.rows
+        .filter((row) => row.action !== 'retain')
+        .map(
+          (row) =>
+            `${licenseKeyDigest(row.normalizedText)}:${row.action}${row.ruleMatches ? ':rule-match' : ':rule-nonmatch'}`
+        )
+        .join(' ')}`
+    );
     const snapshot = inspection.database;
     const { inputBytes } = inspection;
     const analysis = await workflow.startAnalysis(workflow.status.configurationRevision);
@@ -106,6 +118,47 @@ export async function runLicenseCommand(
             workflow!.status.configurationRevision,
             workflow!.status.contentRevision
           ).analysis!.artifact,
+        reassess: async (key, kind) => {
+          const digest = licenseKeyDigest(key);
+          const nextOptions: LicenseCommandOptions = {
+            ...options,
+            rerunRule: kind === 'rule' ? [digest] : [],
+            rerunModel: kind === 'model' ? [digest] : [],
+          };
+          const saved = inputBytes === null ? undefined : parseLicenseArtifactBytes(inputBytes);
+          const estimate = await inspectLicensePreflight({
+            database: options.source === 'database' ? inspection.database : undefined,
+            jsonClassifications: saved?.classifications,
+            jsonNotices: saved?.catalog.flatMap((row) =>
+              row.rawNotice?.trim() ? [row.rawNotice] : []
+            ),
+            rerunRule: nextOptions.rerunRule,
+            rerunModel: nextOptions.rerunModel,
+            model: options.model,
+            sampleCount: options.sampleCount,
+            cacheDir: options.cacheDir,
+            noCache: options.noCache,
+          });
+          const row = estimate.rows.find((entry) => entry.normalizedText === key)!;
+          await io.write(
+            `${kind} reassessment for ${JSON.stringify(key)}: ${row.ruleMatches ? 'rule match' : 'rule nonmatch'}; ${estimate.validCacheHits} valid cached samples, ${estimate.expectedUncachedRequests} expected uncached requests, up to ${estimate.maximumAttempts} attempts. Current unsaved row edits will be discarded.`
+          );
+          const answer = await io.ask('Select this reassessment and continue to Analyze? [y/N] ');
+          if (!['y', 'yes'].includes(answer.trim().toLowerCase())) return null;
+          await workflow!.configure(nextOptions, workflow!.status.configurationRevision, true);
+          const fresh = await workflow!.inspect(workflow!.status.configurationRevision);
+          if (JSON.stringify(fresh.preflight) !== JSON.stringify(estimate))
+            throw new Error('Preflight changed; Inspect again before reassessment');
+          await io.write('Inspected selection is unchanged. Starting the selected analysis.');
+          return (await workflow!.startAnalysis(workflow!.status.configurationRevision)).artifact;
+        },
+        assertWholeArtifact: (metadata, reviewHash) =>
+          workflow!.attest(
+            metadata,
+            workflow!.status.configurationRevision,
+            workflow!.status.contentRevision,
+            reviewHash
+          ).artifact,
         preview: async () =>
           (
             await workflow!.preview(
@@ -113,17 +166,9 @@ export async function runLicenseCommand(
               workflow!.status.contentRevision
             )
           ).reports,
-        attest: (metadata, _reviewHash) =>
-          workflow!.attest(
-            metadata,
-            workflow!.status.configurationRevision,
-            workflow!.status.contentRevision,
-            workflow!.analyzed!.artifact.reviewContentHash
-          ).artifact,
       });
       artifact = reviewed.artifact;
       reports = reviewed.reports;
-      if (reviewed.action === 'review-required') return 3;
       write = reviewed.writeIntent;
     }
     const preview = await workflow.preview(
@@ -131,6 +176,26 @@ export async function runLicenseCommand(
       workflow.status.contentRevision
     );
     await emitReports(preview.reports);
+    const changes = (label: string, operation: string, value: typeof preview.plan.jsonChanges) =>
+      `${label} ${operation}: ${value.inserted.length} inserts, ${value.updated.length} updates, ${value.preserved.length} preserved, ${value.unchanged.length} unchanged`;
+    await io.write(
+      preview.plan.jsonArtifact
+        ? changes(
+            'JSON',
+            options.source === 'json' ? 'overwrite' : 'sync',
+            preview.plan.jsonChanges
+          )
+        : 'JSON remains unchanged'
+    );
+    await io.write(
+      preview.plan.databaseArtifact
+        ? changes(
+            'Database',
+            options.source === 'database' ? 'overwrite' : 'sync',
+            preview.plan.databaseChanges
+          )
+        : 'Database remains unchanged'
+    );
     await io.write(
       `Planned JSON SHA-256: ${preview.plan.wholeFileHash}; review hash: ${preview.plan.reviewContentHash}`
     );

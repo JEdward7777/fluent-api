@@ -33,8 +33,6 @@ import {
 } from './license-workflow-save';
 import { LicenseFileDriftError, licenseFileIo } from './license-write';
 
-export { LicenseBootstrapRequiredError } from './license-workflow-freshness';
-
 export type { LicenseReviewEdit } from './license-workflow.types';
 
 export class LicenseWorkflow {
@@ -231,7 +229,11 @@ export class LicenseWorkflow {
     if (!this.analysis || !['reviewing', 'previewed'].includes(this.state))
       throw new Error(`Cannot edit review while ${this.state}`);
     const before = this.analysis.artifact;
-    const { artifact, warning } = applyLicenseReviewEdit(before, edit);
+    const { artifact, warning } = applyLicenseReviewEdit(
+      before,
+      edit,
+      this.dependencies.now ?? (() => new Date().toISOString())
+    );
     if (serializeLicenseArtifact(artifact).bytes !== serializeLicenseArtifact(before).bytes) {
       this.analysis = freezeReviewValue({
         ...this.analysis,

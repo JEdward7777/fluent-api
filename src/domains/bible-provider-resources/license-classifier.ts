@@ -46,7 +46,8 @@ export function createLicenseClassifier(options: ClassifierOptions) {
   const cache = createRequestCache(options.cacheDir);
   return async (
     notice: string,
-    authoritative: ReadonlyMap<string, AuthoritativeClassification> = new Map()
+    authoritative: ReadonlyMap<string, AuthoritativeClassification> = new Map(),
+    mode: 'rules-then-model' | 'model-only' = 'rules-then-model'
   ) => {
     const normalizedText = normalizeLicenseNotice(notice);
     const base = {
@@ -70,7 +71,7 @@ export function createLicenseClassifier(options: ClassifierOptions) {
         rationale: known.rationale,
         samples: [],
       };
-    const rule = matchLicenseRule(notice);
+    const rule = mode === 'model-only' ? null : matchLicenseRule(notice);
     if (rule)
       return {
         ...base,

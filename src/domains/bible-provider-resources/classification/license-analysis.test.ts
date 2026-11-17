@@ -66,7 +66,7 @@ describe('database-source authority isolation', () => {
       source: 'rule',
       rationale: initial.classifications[0].rationale,
       reviewState: 'unreviewed',
-      decisionAt: null,
+      decisionAt: expect.any(String),
       reviewedBy: null,
       humanReviewedAt: null,
       extension: { inert: true },
@@ -83,7 +83,7 @@ describe('database-source authority isolation', () => {
     expect(plan.databaseArtifact?.classifications[0]).toMatchObject({
       reviewState: 'unreviewed',
       reviewedBy: null,
-      decisionAt: null,
+      decisionAt: expect.any(String),
       rationale: initial.classifications[0].rationale,
     });
     expect(

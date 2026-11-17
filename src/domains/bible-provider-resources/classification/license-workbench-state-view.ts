@@ -17,6 +17,11 @@ export function visibleWorkbenchInspection(
       validCacheHits: inspected.preflight.validCacheHits,
       expectedUncachedRequests: inspected.preflight.expectedUncachedRequests,
       maximumAttempts: inspected.preflight.maximumAttempts,
+      savedEvidenceReuse: inspected.preflight.rows.filter(
+        (row) => row.action === 'retain' && row.savedEvidenceReuse
+      ).length,
+      rows: inspected.preflight.rows.filter((row) => row.action !== 'retain'),
+      samples: inspected.preflight.samples,
       cost: inspected.preflight.cost,
     },
   };

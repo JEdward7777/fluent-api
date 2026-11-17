@@ -98,7 +98,7 @@ export function renderSave(setup) {
   }
   agreementLabel.hidden = !preview?.requiresForceAgreement;
   agreement.disabled = Boolean(setup.activeOperationId) || isBlocked();
-  const incompleteImport = Boolean(preview?.incomplete && preview.replace);
+  const hasConflict = Boolean(preview?.conflicts?.length);
   button.disabled =
     submitting ||
     Boolean(setup.activeOperationId) ||
@@ -107,12 +107,12 @@ export function renderSave(setup) {
     hasDraft() ||
     setup.state !== 'previewed' ||
     !preview ||
-    incompleteImport ||
+    hasConflict ||
     (preview?.requiresForceAgreement && !agreement.checked);
   const outcome = setup.saveOutcome;
   if (outcome?.state === 'succeeded') {
     const saved = outcome.result;
-    result.textContent = `Save completed. Operation ${outcome.operationId}. Whole JSON SHA-256 ${saved.wholeFileHash}. ${saved.targets.map((target) => `${target.role} written: ${target.path} (SHA-256 ${target.hash}).`).join(' ')} ${saved.policy ? `Policy changed: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates, ${saved.policy.deletes} deletes. No resource-cache rows were written by Save.` : 'No policy rows were written.'} ${saved.incomplete ? 'JSON remains incomplete and cannot be imported as policy.' : ''}`;
+    result.textContent = `Save completed. Operation ${outcome.operationId}. Whole JSON SHA-256 ${saved.wholeFileHash}. ${saved.targets.map((target) => `${target.role} written: ${target.path} (SHA-256 ${target.hash}).`).join(' ')} ${saved.policy ? `Policy changed: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates, ${saved.policy.deletes} deletes. No resource-cache rows were written by Save.` : 'No policy rows were written.'}`;
   } else if (outcome?.state === 'failed') {
     const recovery = outcome.recovery;
     const recoveryText = recovery
@@ -127,9 +127,8 @@ export function renderSave(setup) {
   } else if (unresolved) {
     result.textContent =
       'Save acknowledgment is unresolved. Reload to check the same operation ID. If the server no longer knows it, inspect actual targets before starting a new process.';
-  } else if (incompleteImport) {
-    result.textContent =
-      'This JSON import is incomplete. Complete attestation and preview again before replacing policy.';
+  } else if (hasConflict) {
+    result.textContent = `Resolve destination conflicts before Save: ${preview.conflicts.join('; ')}`;
   } else if (preview?.requiresForceAgreement) {
     result.textContent = 'Check the separate replacement agreement to enable Save.';
   } else {
