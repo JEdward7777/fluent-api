@@ -411,6 +411,22 @@ describe('local license workbench server', () => {
         rowNote: 'Distinct retained unknown note.',
         automaticDecision: { source: 'rule', status: 'forbidden' },
       });
+      const currentState = (await api('setup')).body;
+      const rerun = {
+        configurationRevision: currentState.configurationRevision,
+        contentRevision: currentState.contentRevision,
+        id: row.id,
+        kind: 'model',
+      };
+      expect((await api('review/rerun', 'POST', rerun)).status).toBe(400);
+      expect(
+        (await api('review/rerun', 'POST', { ...rerun, discardReviewedState: false })).status
+      ).toBe(409);
+      expect((await api('setup')).body.contentRevision).toBe(currentState.contentRevision);
+      expect((await api(`review/${row.id}`)).body).toMatchObject({
+        status: 'unknown',
+        reviewedBy: 'Named reviewer',
+      });
       expect(
         (
           await api('review/edit', 'POST', {

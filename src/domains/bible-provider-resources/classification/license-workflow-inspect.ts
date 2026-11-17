@@ -18,8 +18,6 @@ export async function inspectLicenseWorkflowInputs(input: {
   configurationRevision: number;
 }): Promise<{ inspection: LicenseInspection; database?: LicenseDatabaseAdapter }> {
   const { options, dependencies } = input;
-  if (!dependencies.apiKey.trim() && !dependencies.practice)
-    throw new Error('A nonempty GOOGLE_AI_API_KEY is required before reading any source');
   if (dependencies.practice) {
     if (!isIssuedLicensePractice(dependencies.practice))
       throw new Error('Unissued practice capability');

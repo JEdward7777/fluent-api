@@ -67,7 +67,6 @@ try {
     });
   } else {
     const apiKey = licenseApiKey();
-    if (!apiKey) throw new Error('A nonempty GOOGLE_AI_API_KEY is required');
     const options = parsed.options;
     while (!options.source) {
       const source = (

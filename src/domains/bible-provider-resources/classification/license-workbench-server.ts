@@ -201,6 +201,7 @@ function createLicenseWorkbenchApp(
         contentRevision: z.number().int().nonnegative(),
         id: z.string().regex(/^[a-f0-9]{64}$/),
         kind: z.enum(['rule', 'model']),
+        discardReviewedState: z.boolean(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null));

@@ -2,6 +2,14 @@ import type { LicenseCommandOptions } from './license-command-options';
 
 import { licenseKeyDigest } from './license-eligibility';
 
+export interface LicenseRerunSelection {
+  configurationRevision: number;
+  contentRevision: number;
+  id: string;
+  kind: 'rule' | 'model';
+  discardReviewedState: boolean;
+}
+
 export function selectedLicenseRerunOptions(
   options: LicenseCommandOptions,
   normalizedText: string,

@@ -7,6 +7,7 @@ import type { StoredLicenseClassification } from './license-database.types';
 import type { LicensePractice } from './license-practice';
 import type { WorkbenchDatabase } from './license-workbench-database';
 import type { RecordedOperation, VisibleOperation } from './license-workbench-operation.types';
+import type { LicenseRerunSelection } from './license-workbench-rerun';
 import type { LicenseReviewQuery } from './license-workbench-review';
 import type { operationSchema, setupSchema } from './license-workbench-schema';
 import type {
@@ -132,23 +133,27 @@ export class LicenseWorkbenchSession {
       id
     );
   }
-  async selectRerun(body: {
-    configurationRevision: number;
-    contentRevision: number;
-    id: string;
-    kind: 'rule' | 'model';
-  }) {
+  async selectRerun(body: LicenseRerunSelection) {
     if (this.practiceMode) throw new Error('Practice does not reassess saved evidence');
     if (this.activeOperationId || !this.workflow?.analyzed)
       throw new Error('Finish analysis before selecting a row reassessment');
+    if (!body.discardReviewedState)
+      throw new Error('Explicit discard acknowledgement is required before reassessment');
     if (
       body.configurationRevision !== this.configurationRevision ||
       body.contentRevision !== this.workflow.status.contentRevision
     )
       throw new Error('Stale review revision');
-    const detail = this.reviewDetail(body.id);
-    const options = selectedLicenseRerunOptions(this.options, detail.normalizedText, body.kind);
-    await this.workflow.configure(options, this.workflow.status.configurationRevision, true);
+    const options = selectedLicenseRerunOptions(
+      this.options,
+      this.reviewDetail(body.id).normalizedText,
+      body.kind
+    );
+    await this.workflow.configure(
+      options,
+      this.workflow.status.configurationRevision,
+      body.discardReviewedState
+    );
     this.resetAfterConfiguration(options);
     return this.visible;
   }
