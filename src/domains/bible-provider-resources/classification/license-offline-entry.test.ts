@@ -58,12 +58,30 @@ describe('actual offline developer entry without application environment', () =>
         ],
         { GOOGLE_AI_API_KEY: '' }
       );
-      expect(result.code, result.output).toBe(2);
+      expect(result.code, result.output).toBe(0);
       expect(JSON.parse(await readFile(f.output, 'utf8')).reviewContentHash).toBe(
         f.artifact.reviewContentHash
       );
       expect(result.output).toContain('Production impact is unavailable');
+      expect(result.output).toContain('unknown 1');
       expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
+      const planOnly = await invoke(
+        f.dir,
+        [
+          '--source=json',
+          '--destination=json',
+          '--plan-only',
+          `--input=${f.input}`,
+          `--output=${resolve(f.dir, 'plan-only.json')}`,
+          '--report-formats=none',
+        ],
+        { GOOGLE_AI_API_KEY: '' }
+      );
+      expect(planOnly.code, planOnly.output).toBe(0);
+      expect(planOnly.output).toContain('unknown 1');
+      expect(
+        JSON.parse(await readFile(resolve(f.dir, 'plan-only.json'), 'utf8')).classifications
+      ).toEqual(f.artifact.classifications);
     } finally {
       await f.cleanup();
     }

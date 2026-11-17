@@ -22,8 +22,8 @@ Normal startup reads local .env for GOOGLE_AI_MODEL before browser setup; shell 
 Help and practice do not read .env. Browser source, database, cache, and provider work waits for Inspect/Analyze.
 Source/destination are independent; JSON-to-database imports, database-to-JSON exports.
 Valid mixed-state JSON may bootstrap an empty table. Cross-storage sync preserves destination winners.
-Exit 0: complete/no unknown; 2: successful/unknown retained; 1: operational failure;
-3: unresolved destination conflict, no database rows changed.
+Exit 0: successful save or plan/preview, including retained unknown decisions;
+1: operational failure; 3: unresolved destination conflict, no database rows changed.
 Noninteractive without --yes stops after plans/reports. --yes never opens a browser.`;
 
 export interface LicenseCommandOptions {

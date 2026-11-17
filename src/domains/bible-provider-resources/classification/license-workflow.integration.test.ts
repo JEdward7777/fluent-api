@@ -147,7 +147,7 @@ describe('classification authority and following ordinary sync journey', () => {
         { ...f.options, source: 'database', destination: 'database' },
         { ...f.dependencies, database: async () => adapter }
       );
-      expect(secondExit).toBe(2);
+      expect(secondExit).toBe(0);
       expect(f.dependencies.transport).not.toHaveBeenCalled();
       expect(
         await persistDblBibleCatalog(catalog, { preserveExistingNonUnknowns: false })

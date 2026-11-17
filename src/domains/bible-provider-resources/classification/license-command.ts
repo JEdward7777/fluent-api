@@ -100,8 +100,6 @@ export async function runLicenseCommand(
     let reports = renderLicenseReports(artifact, config);
     await emitReports(reports);
     await io.write(licenseInlineSummary(reports.model));
-    const resultCode = () =>
-      artifact.classifications.some((row) => row.status === 'unknown') ? 2 : 0;
     let write = options.yes;
     if (!options.planOnly && dependencies.interactive && !options.yes) {
       const reviewed = await runLicenseReview({
@@ -214,7 +212,7 @@ export async function runLicenseCommand(
         const html = preview.reports.reports.find((report) => report.format === 'html');
         if (html) await dependencies.openReport?.(html.path);
       }
-      return resultCode();
+      return 0;
     }
     await workflow.save({
       operationId: `cli-${createHash('sha256')
@@ -231,7 +229,7 @@ export async function runLicenseCommand(
     await io.write(
       `Wrote decisions to ${options.destination}${preview.plan.targets.length ? `; JSON: ${preview.plan.targets.map((target) => target.path).join(', ')}` : ''}. Resource caches update on the next ordinary sync.`
     );
-    return resultCode();
+    return 0;
   } catch (error) {
     await io.write(error instanceof Error ? error.message : String(error));
     return 1;
