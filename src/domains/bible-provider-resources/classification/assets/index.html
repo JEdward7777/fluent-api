@@ -94,11 +94,12 @@
             <label>Samples <input name="samples" type="number" min="2" step="1" required /></label>
           </div>
           <p id="database-target" class="notice"></p>
+          <!-- prettier-ignore -->
           <fieldset id="database-settings">
             <legend>Database connection for this session</legend>
             <p>
-              Applies when source or destination uses a database. Test checks the applied connection
-              only. Inspect reads the selected inputs.
+              Applies when source or destination uses a database. Test checks the applied connection only. Inspect reads
+              the selected inputs.
             </p>
             <div class="fields">
               <label
@@ -111,27 +112,14 @@
             </div>
             <div id="session-database-fields" class="fields" hidden>
               <label>Host <input name="databaseHost" autocomplete="off" maxlength="253" /></label>
-              <label
-                >Port <input name="databasePort" type="number" min="1" max="65535" value="5432"
-              /></label>
-              <label
-                >Database <input name="databaseName" autocomplete="off" maxlength="128"
-              /></label>
-              <label
-                >Username <input name="databaseUsername" autocomplete="username" maxlength="128"
-              /></label>
+              <label>Port <input name="databasePort" type="number" min="1" max="65535" value="5432" /></label>
+              <label>Database <input name="databaseName" autocomplete="off" maxlength="128" /></label>
+              <label>Username <input name="databaseUsername" autocomplete="username" maxlength="128" /></label>
               <label
                 >Password
-                <input
-                  name="databasePassword"
-                  type="password"
-                  autocomplete="current-password"
-                  maxlength="1024"
+                <input name="databasePassword" type="password" autocomplete="current-password" maxlength="1024"
               /></label>
-              <label
-                ><input name="databaseClearPassword" type="checkbox" /> Clear retained
-                password</label
-              >
+              <label><input name="databaseClearPassword" type="checkbox" /> Clear retained password</label>
               <label
                 >TLS
                 <select name="databaseTls">
@@ -141,13 +129,13 @@
               </label>
             </div>
             <p id="database-password-note">
-              Password stays in this server session only. After Apply, the field clears. A blank
-              field retains the password only when the other connection fields are unchanged. Check
-              Clear retained password or choose the environment connection to remove it.
+              Password stays in this server session only. After Apply, the field clears. A blank field retains the
+              password only when the other connection fields are unchanged. Check Clear retained password or choose the
+              environment connection to remove it.
             </p>
             <p>
-              Connection settings last for this server session. Your browser may offer to remember
-              the username and password.
+              Connection settings last for this server session. Your browser may offer to remember the username and
+              password.
             </p>
           </fieldset>
           <div class="actions">
