@@ -122,6 +122,14 @@ describe('license classifier', () => {
     expect(transport).toHaveBeenCalledTimes(25);
     expect(transport.mock.calls[0][0].messages[1].content).not.toContain('sample count');
   });
+  it('replays a complete valid cache without a provider credential', async () => {
+    const transport = vi.fn().mockResolvedValue(vote('allowed'));
+    await createLicenseClassifier({ ...options(), transport })(notice);
+    transport.mockClear();
+    const replay = await createLicenseClassifier({ ...options(), apiKey: '', transport })(notice);
+    expect(replay.samples.every((sample) => sample.cacheHit)).toBe(true);
+    expect(transport).not.toHaveBeenCalled();
+  });
   it('refreshes every indexed sample with noCache', async () => {
     const transport = vi.fn().mockResolvedValue(vote('allowed'));
     await createLicenseClassifier({ ...options(), transport })(notice);
@@ -179,10 +187,14 @@ describe('license classifier', () => {
       );
     }
   );
-  it('requires a nonempty key before any classification and supports explicit models', async () => {
-    expect(() => createLicenseClassifier({ ...options(), apiKey: ' ' })).toThrow(
-      'GOOGLE_AI_API_KEY'
-    );
+  it('allows rules without a key and rejects uncached model requests before transport', async () => {
+    const transport = vi.fn().mockResolvedValue(vote('allowed'));
+    const classify = createLicenseClassifier({ ...options(), apiKey: ' ', transport });
+    expect((await classify('All rights reserved.')).source).toBe('rule');
+    await expect(classify(notice, new Map(), 'model-only')).rejects.toThrow('GOOGLE_AI_API_KEY');
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it('supports explicit models', async () => {
     const transport = vi.fn().mockResolvedValue(vote('allowed'));
     const result = await createLicenseClassifier({
       ...options(),

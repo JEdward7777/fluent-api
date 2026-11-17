@@ -48,6 +48,8 @@ export async function analyzeInspectedLicenses(input: {
   });
   if (JSON.stringify(currentPreflight) !== JSON.stringify(inspection.preflight))
     throw new Error('Assessment preflight changed; Inspect again before Analyze');
+  if (currentPreflight.expectedUncachedRequests > 0 && !dependencies.apiKey.trim())
+    throw new Error('A nonempty GOOGLE_AI_API_KEY is required before a model request');
   const classifier = () =>
     createLicenseClassifier({
       apiKey: dependencies.apiKey,

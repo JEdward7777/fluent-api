@@ -37,12 +37,15 @@ export function createLicenseClassifier(options: ClassifierOptions) {
   const match = /^google:([^\s:]+)$/.exec(modelReference);
   if (!match)
     throw new Error(`Unsupported model reference: ${modelReference}. Use google:<model-id>`);
-  if (!options.apiKey.trim()) throw new Error('A nonempty GOOGLE_AI_API_KEY is required');
   const sampleCount = options.sampleCount ?? 3;
   if (!Number.isInteger(sampleCount) || sampleCount < 2)
     throw new Error('Sample count must be an integer of at least two');
   const model = match[1];
-  const transport = options.transport ?? createGoogleTransport(options.apiKey);
+  const transport: LlmTransport = (request) => {
+    if (!options.apiKey.trim())
+      throw new Error('A nonempty GOOGLE_AI_API_KEY is required before a model request');
+    return (options.transport ?? createGoogleTransport(options.apiKey))(request);
+  };
   const cache = createRequestCache(options.cacheDir);
   return async (
     notice: string,
@@ -85,6 +88,20 @@ export function createLicenseClassifier(options: ClassifierOptions) {
       Array.from({ length: sampleCount }, async (_, offset) => {
         const index = offset + 1;
         const request = buildLicenseSampleRequest(notice, 'google', model, index);
+        if (!options.apiKey.trim()) {
+          const cached = options.noCache ? null : await cache.read(request);
+          let validCachedVote = false;
+          if (cached !== null) {
+            try {
+              parseLicenseVote(cached);
+              validCachedVote = true;
+            } catch {
+              // Invalid cache evidence still needs a credential for a fresh request.
+            }
+          }
+          if (!validCachedVote)
+            throw new Error('A nonempty GOOGLE_AI_API_KEY is required before a model request');
+        }
         return {
           index,
           ...(await requestStructuredResponse({

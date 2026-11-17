@@ -17,7 +17,7 @@ export const LICENSE_COMMAND_HELP = `Usage: npm run db:classify:licenses -- --so
   --report-formats=markdown|html|markdown,html|none --report-dir=PATH --open-report
   --preserve-existing-non-unknowns Invocation only: preserve current resource policy in the preview;
     a later ordinary sync may overwrite it. This is not a durable permission override.
-Requires GOOGLE_AI_API_KEY even without inference. JSON-to-JSON needs no database or DBL credentials.
+Uncached model requests require GOOGLE_AI_API_KEY. JSON-to-JSON needs no database, DBL, or model credentials.
 Normal startup reads local .env for GOOGLE_AI_MODEL before browser setup; shell values take precedence.
 Help and practice do not read .env. Browser source, database, cache, and provider work waits for Inspect/Analyze.
 Source/destination are independent; JSON-to-database imports, database-to-JSON exports.

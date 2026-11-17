@@ -9,7 +9,7 @@ export function licenseWorkbenchBrowserError(error: unknown) {
       : 'Write failed; the database commit outcome may be uncertain. Inspect actual file targets and policy before retrying.';
   const message = error instanceof Error ? error.message : '';
   if (message.includes('GOOGLE_AI_API_KEY'))
-    return 'A nonempty GOOGLE_AI_API_KEY is required before reading any source';
+    return 'A nonempty GOOGLE_AI_API_KEY is required before an uncached model request';
   if (message.includes('Inspect inputs before')) return message;
   if (message.includes('Stale license')) return 'Inputs changed; inspect again before continuing';
   if (message.includes('not found'))

@@ -33,16 +33,27 @@ describe('license command source/destination and responsibility boundary', () =>
     expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
     expect(f.messages.join('\n')).toContain('Production impact is unavailable');
   });
-  it('validates the model credential before any file, catalog, report or database access', async () => {
+  it('imports ordinary saved JSON without a provider credential or model request', async () => {
     const f = await fixture();
     expect(
       await runLicenseCommand(
-        { ...f.options, input: '/missing', destination: 'database' },
+        { ...f.options, destination: 'database' },
+        { ...f.dependencies, apiKey: ' ' }
+      )
+    ).toBe(2);
+    expect(f.adapter.apply).toHaveBeenCalledOnce();
+    expect(f.dependencies.transport).not.toHaveBeenCalled();
+  });
+  it('requires the Google credential only after preflight finds uncached model requests', async () => {
+    const f = await fixture();
+    expect(
+      await runLicenseCommand(
+        { ...f.options, source: 'database', destination: 'json' },
         { ...f.dependencies, apiKey: ' ' }
       )
     ).toBe(1);
-    expect(f.dependencies.database).not.toHaveBeenCalled();
     expect(f.messages.join()).toContain('GOOGLE_AI_API_KEY');
+    expect(f.dependencies.transport).not.toHaveBeenCalled();
   });
   it.each(['database', 'both'] as const)(
     'bootstraps an empty table from attested JSON to %s without requiring new reviewer flags',
