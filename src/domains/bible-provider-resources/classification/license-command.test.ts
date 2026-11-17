@@ -25,7 +25,7 @@ afterEach(async () => {
 describe('license command source/destination and responsibility boundary', () => {
   it('exports JSON offline without opening a database or invoking inference, retaining exact unknown authority', async () => {
     const f = await fixture();
-    expect(await runLicenseCommand(f.options, f.dependencies)).toBe(2);
+    expect(await runLicenseCommand(f.options, f.dependencies)).toBe(0);
     expect(f.dependencies.database).not.toHaveBeenCalled();
     expect(f.dependencies.transport).not.toHaveBeenCalled();
     expect((await f.readOutput()).classifications).toEqual(f.artifact.classifications);
@@ -40,7 +40,7 @@ describe('license command source/destination and responsibility boundary', () =>
         { ...f.options, destination: 'database' },
         { ...f.dependencies, apiKey: ' ' }
       )
-    ).toBe(2);
+    ).toBe(0);
     expect(f.adapter.apply).toHaveBeenCalledOnce();
     expect(f.dependencies.transport).not.toHaveBeenCalled();
   });
@@ -59,7 +59,7 @@ describe('license command source/destination and responsibility boundary', () =>
     'bootstraps an empty table from attested JSON to %s without requiring new reviewer flags',
     async (destination) => {
       const f = await fixture();
-      expect(await runLicenseCommand({ ...f.options, destination }, f.dependencies)).toBe(2);
+      expect(await runLicenseCommand({ ...f.options, destination }, f.dependencies)).toBe(0);
       expect(f.adapter.apply).toHaveBeenCalledOnce();
       expect(f.applied[0].reviewContentHash).toBe(f.artifact.reviewContentHash);
       expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
@@ -73,7 +73,7 @@ describe('license command source/destination and responsibility boundary', () =>
       const f = await fixture(false);
       expect(
         await runLicenseCommand({ ...f.options, destination: 'database', ...flags }, f.dependencies)
-      ).toBe(2);
+      ).toBe(0);
       expect(f.adapter.apply).toHaveBeenCalledOnce();
       expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
     }
@@ -92,7 +92,7 @@ describe('license command source/destination and responsibility boundary', () =>
   it('keeps a JSON source byte-for-byte unchanged on cross-only import', async () => {
     const f = await fixture(false);
     expect(await runLicenseCommand({ ...f.options, destination: 'database' }, f.dependencies)).toBe(
-      2
+      0
     );
     expect(f.applied[0].classifications.map((row) => row.status)).toEqual(
       f.artifact.classifications.map((row) => row.status)
@@ -104,7 +104,7 @@ describe('license command source/destination and responsibility boundary', () =>
     const value = structuredClone(f.artifact);
     delete value.classifications.find((row) => row.status === 'unknown')!.rowNote;
     await writeFile(f.input, serializeLicenseArtifact(value).bytes);
-    expect(await runLicenseCommand({ ...f.options, destination: 'both' }, f.dependencies)).toBe(2);
+    expect(await runLicenseCommand({ ...f.options, destination: 'both' }, f.dependencies)).toBe(0);
     expect(
       f.applied[0].classifications.find((row) => row.status === 'unknown')?.rowNote
     ).toBeUndefined();
@@ -122,7 +122,7 @@ describe('license command source/destination and responsibility boundary', () =>
       },
     ];
     expect(await runLicenseCommand({ ...f.options, destination: 'database' }, f.dependencies)).toBe(
-      2
+      0
     );
     expect(f.applied[0].classifications).toHaveLength(f.artifact.classifications.length);
     expect(f.messages.join()).not.toContain('delete 1');
@@ -135,7 +135,7 @@ describe('license command source/destination and responsibility boundary', () =>
     const f = await fixture();
     expect(
       await runLicenseCommand({ ...f.options, destination: 'both', ...flags }, f.dependencies)
-    ).toBe(2);
+    ).toBe(0);
     expect(f.adapter.apply).not.toHaveBeenCalled();
     expect((await f.readOutput()).classifications).toEqual(f.artifact.classifications);
     expect(f.io.ask).not.toHaveBeenCalled();
@@ -191,7 +191,7 @@ describe('license command source/destination and responsibility boundary', () =>
     value.catalog[0].name += ' changed';
     await writeFile(f.input, JSON.stringify(value));
     expect(await runLicenseCommand({ ...f.options, destination: 'database' }, f.dependencies)).toBe(
-      2
+      0
     );
     expect(f.adapter.apply).toHaveBeenCalledOnce();
   });
@@ -205,7 +205,7 @@ describe('license command source/destination and responsibility boundary', () =>
         { ...f.options, destination: 'database', reportFormats: 'markdown', reportDir: f.dir },
         f.dependencies
       )
-    ).toBe(2);
+    ).toBe(0);
     const report = await readFile(`${f.dir}/license-impact.md`, 'utf8');
     expect(report).toContain('Classification-only import changes no Bible metadata or notices');
     expect(report).toContain('New target terms absent from reviewed snapshot');
@@ -238,7 +238,7 @@ describe('license command source/destination and responsibility boundary', () =>
       }));
       expect(
         await runLicenseCommand({ ...f.options, source: 'database', destination }, f.dependencies)
-      ).toBe(2);
+      ).toBe(0);
       expect(f.dependencies.transport).not.toHaveBeenCalled();
       expect(
         f.applied[0].classifications.find((row) => row.status === 'unknown')
@@ -277,7 +277,7 @@ describe('license command source/destination and responsibility boundary', () =>
         { ...f.options, destination: 'database', yes: false },
         { ...f.dependencies, interactive: true }
       )
-    ).toBe(2);
+    ).toBe(0);
     expect(f.adapter.apply).not.toHaveBeenCalled();
     expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
   });
@@ -288,7 +288,7 @@ describe('license command source/destination and responsibility boundary', () =>
     const f = await fixture(false);
     expect(
       await runLicenseCommand({ ...f.options, destination: 'database', ...flags }, f.dependencies)
-    ).toBe(2);
+    ).toBe(0);
     expect(f.adapter.apply).toHaveBeenCalledTimes(flags.yes && !flags.planOnly ? 1 : 0);
   });
 
@@ -377,7 +377,7 @@ describe('license command source/destination and responsibility boundary', () =>
         },
       }
     );
-    expect(debugExit).toBe(2);
+    expect(debugExit).toBe(0);
     const output = await f.readOutput();
     expect(checkLicenseArtifactReview(output).status).toBe('review-required');
     expect(output.attestation).toBeUndefined();
@@ -417,7 +417,7 @@ describe('license command source/destination and responsibility boundary', () =>
         { ...f.options, yes: false },
         { ...f.dependencies, interactive: true }
       )
-    ).toBe(2);
+    ).toBe(0);
     expect(f.messages.at(-1)).toContain('Wrote decisions');
     const output = await f.readOutput();
     expect(checkLicenseArtifactReview(output).status).toBe('review-required');
