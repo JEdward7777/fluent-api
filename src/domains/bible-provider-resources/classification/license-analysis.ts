@@ -45,7 +45,6 @@ export async function analyzeDatabaseLicenses(input: {
       (row) => row.normalizedText === normalizedText
     );
     const storedEvidence = known.get(normalizedText)?.evidence;
-    const prior = storedEvidence ?? basePrior;
     const stored = known.get(normalizedText);
     if (stored) {
       // The database is the source of owned provenance. Missing evidence is absent,
@@ -81,8 +80,9 @@ export async function analyzeDatabaseLicenses(input: {
       continue;
     }
     const proposal = await input.classify(exampleNotice);
-    classifications.push({
-      ...(prior ? structuredClone(prior) : {}),
+    // A prior JSON row may be a stronger destination winner, but it is never DB-source
+    // decision authority. Carry only inert extensions into a newly assessed row.
+    const fresh: LicenseClassification = {
       normalizedText,
       exampleNotice,
       status: proposal.decision,
@@ -90,12 +90,22 @@ export async function analyzeDatabaseLicenses(input: {
       rationale: proposal.rationale,
       samples: proposal.samples,
       ...('rule' in proposal ? { rule: proposal.rule } : {}),
-    });
-    const fresh = classifications.at(-1)!;
-    delete fresh.rowNote;
-    delete fresh.automaticDecision;
-    delete fresh.evidenceContract;
-    if (!('rule' in proposal)) delete fresh.rule;
+      reviewState: proposal.source === 'gemini' ? 'llm_reviewed' : 'unreviewed',
+      decisionAt: null,
+      reviewedBy: null,
+      humanReviewedAt: null,
+    };
+    if (basePrior) {
+      for (const [key, value] of Object.entries(basePrior))
+        if (!Object.hasOwn(licenseClassificationSchema.shape, key))
+          Object.defineProperty(fresh, key, {
+            value: structuredClone(value),
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          });
+    }
+    classifications.push(fresh);
   }
   const classificationRun: LicenseArtifact['classificationRun'] = {
     prompt: LICENSE_CLASSIFICATION_PROMPT,

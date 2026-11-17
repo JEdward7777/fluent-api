@@ -6,7 +6,9 @@ import { llmRequestHash } from '@/lib/llm/request-cache';
 import {
   attestLicenseArtifact,
   checkLicenseArtifactReview,
+  recordHumanLicenseDecision,
   reviseLicenseArtifact,
+  serializeLicenseArtifact,
 } from '../license-artifact';
 import {
   makeLicenseArtifact,
@@ -17,6 +19,7 @@ import { createLicenseClassifier } from '../license-classifier';
 import { buildLicenseSampleRequest } from '../license-model-contract';
 import { analyzeDatabaseLicenses } from './license-analysis';
 import { licenseDatabaseProjection } from './license-database-projection';
+import { planLicenseSaveDestinations } from './license-save-destinations';
 
 function storedRows(artifact: ReturnType<typeof makeLicenseArtifact>) {
   return licenseDatabaseProjection(artifact).map((row) => ({
@@ -29,6 +32,69 @@ function storedRows(artifact: ReturnType<typeof makeLicenseArtifact>) {
     classificationRun: row.rationale.classificationRun,
   }));
 }
+
+describe('database-source authority isolation', () => {
+  it('keeps an old JSON human winner in JSON without assigning its review to a fresh DB decision', async () => {
+    const initial = makeLicenseArtifact();
+    const key = initial.classifications[0].normalizedText;
+    const prior = recordHumanLicenseDecision(
+      initial,
+      key,
+      'forbidden',
+      'JSON reviewer decision',
+      'JSON reviewer',
+      '2026-11-17T12:00:00.000Z'
+    );
+    prior.classifications[0].extension = { inert: true };
+    const transport = vi.fn(async () => {
+      throw new Error('Unexpected model request');
+    });
+    const classify = vi.fn(
+      createLicenseClassifier({ apiKey: 'mock', model: 'google:fixture', transport })
+    );
+    const source = await analyzeDatabaseLicenses({
+      catalog: [initial.catalog[0]],
+      classifications: [],
+      base: prior,
+      classify,
+      model: 'google:fixture',
+      sampleCount: 3,
+    });
+    expect(classify).toHaveBeenCalledOnce();
+    expect(transport).not.toHaveBeenCalled();
+    expect(source.classifications[0]).toMatchObject({
+      source: 'rule',
+      rationale: initial.classifications[0].rationale,
+      reviewState: 'unreviewed',
+      decisionAt: null,
+      reviewedBy: null,
+      humanReviewedAt: null,
+      extension: { inert: true },
+    });
+    expect(source.classifications[0].automaticDecision).toBeUndefined();
+    const plan = planLicenseSaveDestinations({
+      source: 'database',
+      destination: 'both',
+      artifact: source,
+      outputBytes: serializeLicenseArtifact(prior).bytes,
+      databaseRows: [],
+    });
+    expect(plan.conflicts).toEqual([]);
+    expect(plan.databaseArtifact?.classifications[0]).toMatchObject({
+      reviewState: 'unreviewed',
+      reviewedBy: null,
+      decisionAt: null,
+      rationale: initial.classifications[0].rationale,
+    });
+    expect(
+      plan.jsonArtifact?.classifications.find((row) => row.normalizedText === key)
+    ).toMatchObject({
+      reviewState: 'human_reviewed',
+      reviewedBy: 'JSON reviewer',
+      rationale: 'JSON reviewer decision',
+    });
+  });
+});
 
 describe('database refresh and recorded evidence contracts', () => {
   it('preserves historical prompts, models, sample counts and extensions while classifying only new keys with current configuration', async () => {
