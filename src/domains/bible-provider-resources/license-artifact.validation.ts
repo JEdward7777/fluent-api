@@ -12,7 +12,27 @@ function unique(values: string[], label: string) {
 const modelKey = (provider: string, model: string) => JSON.stringify([provider, model]);
 
 function validateEvidence(row: LicenseClassification, artifact: LicenseArtifact) {
+  if (
+    row.reviewState === undefined ||
+    row.decisionAt === undefined ||
+    row.reviewedBy === undefined ||
+    row.humanReviewedAt === undefined
+  )
+    throw new Error('V3 classification review fields are required');
   const proposal = row.source === 'manual' ? row.automaticDecision : row;
+  if (row.reviewState === 'human_reviewed') {
+    if (!row.reviewedBy || !row.humanReviewedAt || row.decisionAt !== row.humanReviewedAt)
+      throw new Error('Human review requires a named reviewer and matching event time');
+  } else if (row.reviewedBy !== null || row.humanReviewedAt !== null)
+    throw new Error('Only human-reviewed rows carry human identity and time');
+  for (const time of [row.decisionAt, row.humanReviewedAt]) {
+    if (time !== null && new Date(time).toISOString() !== time)
+      throw new Error('Decision times must use canonical millisecond UTC precision');
+  }
+  if (row.reviewState === 'llm_reviewed' && proposal?.source !== 'gemini')
+    throw new Error('LLM review requires complete model evidence');
+  // A human can decide before any automatic assessment; no fake proposal is needed.
+  if (!proposal && row.source === 'manual' && row.samples.length === 0 && !row.rule) return;
   if (!proposal) throw new Error('A manual disposition must preserve its previous decision');
   if (row.source !== 'manual' && row.automaticDecision)
     throw new Error('Only manual dispositions carry an automatic decision');

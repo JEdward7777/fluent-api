@@ -12,8 +12,14 @@ import {
 import { validateLicenseArtifactContent } from './license-artifact.validation';
 import { LICENSE_NORMALIZER_VERSION } from './license-normalizer';
 
-type ArtifactInput = Pick<LicenseArtifact, 'classificationRun' | 'catalog' | 'classifications'> &
-  Record<string, unknown>;
+type ArtifactInput = Pick<LicenseArtifact, 'classificationRun' | 'catalog'> & {
+  classifications: Array<
+    Omit<LicenseClassification, 'reviewState' | 'decisionAt' | 'reviewedBy' | 'humanReviewedAt'> &
+      Partial<
+        Pick<LicenseClassification, 'reviewState' | 'decisionAt' | 'reviewedBy' | 'humanReviewedAt'>
+      >
+  >;
+} & Record<string, unknown>;
 
 function reviewableContent(value: unknown) {
   const checked = checkLicenseArtifactReview(value);
@@ -25,6 +31,13 @@ function reviewableContent(value: unknown) {
 export function createLicenseArtifact(input: ArtifactInput): LicenseArtifact {
   const value: Record<string, unknown> = {
     ...structuredClone(input),
+    classifications: input.classifications.map((row) => ({
+      ...structuredClone(row),
+      reviewState: row.reviewState ?? (row.source === 'gemini' ? 'llm_reviewed' : 'unreviewed'),
+      decisionAt: row.decisionAt ?? null,
+      reviewedBy: row.reviewedBy ?? null,
+      humanReviewedAt: row.humanReviewedAt ?? null,
+    })),
     schemaVersion: LICENSE_ARTIFACT_SCHEMA_VERSION,
     hashDomainVersion: LICENSE_REVIEW_HASH_DOMAIN_VERSION,
     normalizerVersion: LICENSE_NORMALIZER_VERSION,
@@ -98,6 +111,10 @@ export function reviseLicenseArtifact(
         row.samples = [];
         delete row.rule;
         delete row.automaticDecision;
+        row.reviewState = 'unreviewed';
+        row.decisionAt = null;
+        row.reviewedBy = null;
+        row.humanReviewedAt = null;
       }
     }
   }
@@ -162,6 +179,35 @@ export function overrideLicenseClassification(
     if (status === 'unknown') row.rowNote = unknownNote ?? reason;
   });
   return { artifact, warning };
+}
+
+/** A named human decision is a separate event, including same-status confirmation. */
+export function recordHumanLicenseDecision(
+  value: unknown,
+  normalizedText: string,
+  status: LicenseClassification['status'],
+  rationale: string,
+  reviewedBy: string,
+  decisionAt: string
+): LicenseArtifact {
+  if (!rationale.trim() || !reviewedBy.trim())
+    throw new Error('Human review requires a rationale and named reviewer');
+  return reviseLicenseArtifact(value, (draft) => {
+    const row = draft.classifications.find(
+      (candidate) => candidate.normalizedText === normalizedText
+    );
+    if (!row) throw new Error('No exact normalized classification exists');
+    if (row.source !== 'manual')
+      row.automaticDecision = { source: row.source, status: row.status, rationale: row.rationale };
+    if (row.status !== status) delete row.rowNote;
+    row.status = status;
+    row.source = 'manual';
+    row.rationale = rationale;
+    row.reviewState = 'human_reviewed';
+    row.decisionAt = decisionAt;
+    row.reviewedBy = reviewedBy;
+    row.humanReviewedAt = decisionAt;
+  });
 }
 
 /** Whole-file SHA-256 is computed over final bytes and returned separately, never embedded. */

@@ -4,11 +4,12 @@ import { resourceProviderEnum } from '@/db/schema';
 import { ttsLicenseStatusSchema } from '@/domains/bibles/bibles.types';
 import { jsonValueSchema, llmRequestSchema } from '@/lib/llm/request-cache';
 
+import { computeLicenseReviewHash } from './license-artifact.hash';
 import { licenseVoteSchema } from './license-model-contract';
 import { LICENSE_NORMALIZER_VERSION } from './license-normalizer';
 
-export const LICENSE_ARTIFACT_SCHEMA_VERSION = 2;
-export const LICENSE_REVIEW_HASH_DOMAIN_VERSION = 2;
+export const LICENSE_ARTIFACT_SCHEMA_VERSION = 3;
+export const LICENSE_REVIEW_HASH_DOMAIN_VERSION = 3;
 export const LICENSE_CLASSIFICATIONS_PATH =
   'docs/features/tts-license-ingestion/reference/license-classifications.json';
 const text = z.string().refine((value) => value.trim().length > 0, 'Must not be blank');
@@ -64,7 +65,7 @@ const evidenceContract = z
   })
   .passthrough();
 
-export const licenseClassificationSchema = z
+const legacyClassificationSchema = z
   .object({
     normalizedText: z.string(),
     exampleNotice: z.string(),
@@ -79,40 +80,60 @@ export const licenseClassificationSchema = z
   })
   .passthrough();
 
+export const licenseClassificationSchema = legacyClassificationSchema.extend({
+  reviewState: z.enum(['unreviewed', 'llm_reviewed', 'human_reviewed']).optional(),
+  decisionAt: z.string().datetime({ offset: true }).nullable().optional(),
+  reviewedBy: text.nullable().optional(),
+  humanReviewedAt: z.string().datetime({ offset: true }).nullable().optional(),
+});
+
+const artifactShape = {
+  normalizerVersion: z.literal(LICENSE_NORMALIZER_VERSION),
+  classificationRun: evidenceContract.extend({
+    createdAt: z.string().datetime().optional(),
+    snapshotAt: z.string().datetime().optional(),
+    acquiredAt: z.string().datetime().optional(),
+  }),
+  catalog: z.array(
+    z
+      .object({
+        provider: z.enum(resourceProviderEnum.enumValues),
+        externalId: text,
+        bibleId: z.number().int().positive().nullable(),
+        name: text,
+        abbreviation: text,
+        rawNotice: z.string().nullable(),
+      })
+      .passthrough()
+  ),
+  reviewContentHash: digest,
+  reviewState: z.literal('incomplete').optional(),
+  attestation: z
+    .object({
+      reviewedBy: text,
+      reviewReason: text,
+      reviewedAt: z.string().datetime(),
+      reviewContentHash: digest,
+    })
+    .strict()
+    .optional(),
+};
+
 export const licenseArtifactSchema = z
   .object({
     schemaVersion: z.literal(LICENSE_ARTIFACT_SCHEMA_VERSION),
     hashDomainVersion: z.literal(LICENSE_REVIEW_HASH_DOMAIN_VERSION),
-    normalizerVersion: z.literal(LICENSE_NORMALIZER_VERSION),
-    classificationRun: evidenceContract.extend({
-      createdAt: z.string().datetime().optional(),
-      snapshotAt: z.string().datetime().optional(),
-      acquiredAt: z.string().datetime().optional(),
-    }),
-    catalog: z.array(
-      z
-        .object({
-          provider: z.enum(resourceProviderEnum.enumValues),
-          externalId: text,
-          bibleId: z.number().int().positive().nullable(),
-          name: text,
-          abbreviation: text,
-          rawNotice: z.string().nullable(),
-        })
-        .passthrough()
-    ),
+    ...artifactShape,
     classifications: z.array(licenseClassificationSchema),
-    reviewContentHash: digest,
-    reviewState: z.literal('incomplete').optional(),
-    attestation: z
-      .object({
-        reviewedBy: text,
-        reviewReason: text,
-        reviewedAt: z.string().datetime(),
-        reviewContentHash: digest,
-      })
-      .strict()
-      .optional(),
+  })
+  .passthrough();
+
+const legacyArtifactSchema = z
+  .object({
+    schemaVersion: z.literal(2),
+    hashDomainVersion: z.literal(2),
+    ...artifactShape,
+    classifications: z.array(legacyClassificationSchema),
   })
   .passthrough();
 
@@ -125,6 +146,37 @@ export function parseLicenseArtifact(value: unknown): LicenseArtifact {
   // __proto__ keys, but a JSON document may legitimately own that inert data key.
   // No schema coercions/defaults/transforms are permitted for owned artifact fields.
   jsonValueSchema.parse(value);
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'schemaVersion' in value &&
+    value.schemaVersion === 2
+  ) {
+    legacyArtifactSchema.parse(value);
+    // V2 whole-file attestations and reviewed_at do not identify per-row human decisions.
+    // Retain their evidence and extension bytes in memory; only v3 output gets a new binding.
+    const legacy = structuredClone(value) as z.infer<typeof legacyArtifactSchema>;
+    const upgraded = {
+      ...legacy,
+      schemaVersion: 3,
+      hashDomainVersion: 3,
+      classifications: legacy.classifications.map((row) => ({
+        ...row,
+        reviewState:
+          row.source === 'gemini' || row.automaticDecision?.source === 'gemini'
+            ? ('llm_reviewed' as const)
+            : ('unreviewed' as const),
+        decisionAt: null,
+        reviewedBy: null,
+        humanReviewedAt: null,
+      })),
+      reviewState: 'incomplete' as const,
+    };
+    delete upgraded.attestation;
+    const artifact = upgraded as LicenseArtifact;
+    artifact.reviewContentHash = computeLicenseReviewHash(artifact);
+    return artifact;
+  }
   licenseArtifactSchema.parse(value);
   return structuredClone(value) as LicenseArtifact;
 }
