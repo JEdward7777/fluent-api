@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { catalogue_watermark } from '../schema';
+import { catalogue_watermark, licenseReviewStateEnum } from '../schema';
 
 const migrationDir = join(dirname(fileURLToPath(import.meta.url)), '../migrations');
 
@@ -72,7 +72,11 @@ export async function createTestSchema(
   await installNextCatalogueWatermarkFunction(client);
   const statements = await generateMigration(
     generateDrizzleJson({}),
-    generateDrizzleJson({ ...tables, catalogue_watermark })
+    generateDrizzleJson({
+      ...tables,
+      catalogue_watermark,
+      ...('license_classifications' in tables ? { licenseReviewStateEnum } : {}),
+    })
   );
   await client.exec(statements.join('\n'));
   await seedCatalogueWatermarkSingleton(client);

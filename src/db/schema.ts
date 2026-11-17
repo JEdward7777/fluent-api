@@ -33,6 +33,11 @@ export const ttsLicenseStatusEnum = pgEnum('tts_license_status', [
   'forbidden',
   'unknown',
 ]);
+export const licenseReviewStateEnum = pgEnum('license_review_state', [
+  'unreviewed',
+  'llm_reviewed',
+  'human_reviewed',
+]);
 export const projectStatusEnum = pgEnum('project_status', [
   'not_started',
   'in_progress',
@@ -230,6 +235,10 @@ export const license_classifications = pgTable('license_classifications', {
   rationale: jsonb('rationale').$type<Json>(),
   classifiedBy: text('classified_by'),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  reviewState: licenseReviewStateEnum('review_state').notNull().default('unreviewed'),
+  decisionAt: timestamp('decision_at', { withTimezone: true }),
+  reviewedBy: text('reviewed_by'),
+  humanReviewedAt: timestamp('human_reviewed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
