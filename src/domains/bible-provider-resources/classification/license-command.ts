@@ -77,14 +77,7 @@ export async function runLicenseCommand(
       formats: options.reportFormats,
       outputDir: options.reportDir,
       openReport: options.openReport,
-      database: snapshot
-        ? {
-            ...snapshot.context,
-            ...(options.destination !== 'json'
-              ? { classificationTable: { existing: snapshot.classifications, replace: true } }
-              : {}),
-          }
-        : undefined,
+      database: snapshot?.context,
       preserveExistingNonUnknowns: options.preserveExistingNonUnknowns,
     };
     const emitReports = async (reports: ReturnType<typeof renderLicenseReports>) => {

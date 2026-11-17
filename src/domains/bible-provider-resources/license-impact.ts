@@ -1,9 +1,7 @@
 import type { TtsLicenseStatus } from '@/domains/bibles/bibles.types';
 
-import type { StoredLicenseClassification } from './classification/license-database.types';
 import type { LicenseArtifact } from './license-artifact.schemas';
 
-import { planLicenseDatabaseChanges } from './classification/license-database-projection';
 import { normalizeLicenseNotice } from './license-normalizer';
 
 export interface DatabaseLicenseResource {
@@ -20,7 +18,9 @@ export interface LicenseDatabaseContext {
   resources: DatabaseLicenseResource[];
   /** Classification import forecasts current target rows, never catalog acquisition writes. */
   projection?: 'classification-only';
-  classificationTable?: { existing: StoredLicenseClassification[]; replace: boolean };
+  classificationTable?: {
+    changes: { deletedKeys: string[]; insertedKeys: string[]; changedKeys: string[] };
+  };
 }
 
 /** Invocation-scoped preservation never changes the authoritative derived decision. */
@@ -128,9 +128,7 @@ export function computeLicenseImpact(
           disclaimer:
             'Production impact is unavailable because no database context was supplied. This is an artifact-only report.',
         },
-    classificationChanges: database?.classificationTable?.replace
-      ? planLicenseDatabaseChanges(artifact, database.classificationTable.existing)
-      : null,
+    classificationChanges: database?.classificationTable?.changes ?? null,
     preserveExistingNonUnknowns,
     preservationWarning: preserveExistingNonUnknowns
       ? 'Preservation applies to this invocation only. It may retain stale status drift; every disagreement is listed. A later ordinary sync derives status again.'

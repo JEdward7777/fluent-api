@@ -33,7 +33,7 @@ export function renderLicenseMarkdown(model: LicenseReportModel): string {
   if (impact.classificationChanges) {
     const changes = impact.classificationChanges;
     rows.push(
-      '## WARNING: whole-table classification replacement',
+      '## Planned scoped classification writes',
       '',
       `Deletes ${changes.deletedKeys.length}; inserts ${changes.insertedKeys.length}; changes ${changes.changedKeys.length} (status, rationale, producer or recorded evidence).`,
       ...changes.deletedKeys.map((key) => `- Delete: ${text(key)}`),
