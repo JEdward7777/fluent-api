@@ -9,6 +9,10 @@ export interface StoredLicenseClassification {
   rationale: string;
   classifiedBy: string | null;
   reviewedAt: string | null;
+  reviewState?: LicenseClassification['reviewState'];
+  decisionAt?: string | null;
+  reviewedBy?: string | null;
+  humanReviewedAt?: string | null;
   storedRationale?: JsonValue;
   evidence?: LicenseClassification;
   classificationRun?: LicenseArtifact['classificationRun'];

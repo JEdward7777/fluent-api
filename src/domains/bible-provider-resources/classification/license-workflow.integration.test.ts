@@ -143,12 +143,11 @@ describe('classification authority and following ordinary sync journey', () => {
           )
         );
       f.dependencies.transport.mockClear();
-      expect(
-        await runLicenseCommand(
-          { ...f.options, source: 'database', destination: 'database' },
-          { ...f.dependencies, database: async () => adapter }
-        )
-      ).toBe(2);
+      const secondExit = await runLicenseCommand(
+        { ...f.options, source: 'database', destination: 'database' },
+        { ...f.dependencies, database: async () => adapter }
+      );
+      expect(secondExit).toBe(2);
       expect(f.dependencies.transport).not.toHaveBeenCalled();
       expect(
         await persistDblBibleCatalog(catalog, { preserveExistingNonUnknowns: false })
@@ -206,7 +205,7 @@ describe('classification authority and following ordinary sync journey', () => {
       'forbidden',
     ]);
   });
-  it('whole-set replacement deletes absent rows, skips unchanged writes, preserves timestamps and rolls back every row on publish failure', async () => {
+  it('scoped overwrite retains absent rows, skips unchanged writes, preserves timestamps and rolls back on publish failure', async () => {
     const adapter = createLicenseDatabaseAdapter();
     const artifact = attestLicenseArtifact(makeLicenseArtifact(), REVIEWER);
     await adapter.apply(artifact, true, undefined, true);
@@ -237,9 +236,7 @@ describe('classification authority and following ordinary sync journey', () => {
     ).rejects.toThrow('atomic file replacement failed');
     expect(await rows()).toEqual(first);
     await adapter.apply(shortened, true, undefined, true);
-    expect((await rows()).map((row) => row.normalizedText)).toEqual([
-      shortened.classifications[0].normalizedText,
-    ]);
+    expect(await rows()).toEqual(first);
   });
   it('loads only corresponding text catalog resources, retaining null text notices but excluding recording-only rows', async () => {
     await persistDblBibleCatalog(catalog, 'allowed');
@@ -332,10 +329,13 @@ describe('classification authority and following ordinary sync journey', () => {
     expect(classify).not.toHaveBeenCalled();
     const before = (await rows()).find((row) => row.normalizedText === key);
     await adapter.apply(refreshed, false);
-    expect((await rows()).find((row) => row.normalizedText === key)).toEqual(before);
+    const after = (await rows()).find((row) => row.normalizedText === key)!;
+    expect(after.status).toBe(before!.status);
+    expect(after.reviewState).toBe('unreviewed');
+    expect(after.decisionAt).toBeNull();
   });
 
-  it('rechecks initialization authorization inside apply, leaving a newly nonempty table and staged JSON untouched without force', async () => {
+  it('rejects stale empty-table previews under the DB lock, including with force set', async () => {
     const f = await makeCommandFixture();
     try {
       const adapter = createLicenseDatabaseAdapter();
@@ -357,15 +357,15 @@ describe('classification authority and following ordinary sync journey', () => {
       expect(await rows()).toEqual(before);
       expect(await licenseFileIo.read(f.output)).toBeNull();
       expect(await licenseFileIo.read(f.input)).toBe(f.sourceBytes);
-      expect(f.messages.join()).toContain('--force is required');
+      expect(f.messages.join()).toContain('policy changed since preview');
       expect(
         await runLicenseCommand(
           { ...f.options, destination: 'both', force: true },
           { ...f.dependencies, database: async () => staleLoader }
         )
-      ).toBe(2);
+      ).toBe(1);
       expect((await rows()).some((row) => row.normalizedText === 'added since initial read')).toBe(
-        false
+        true
       );
     } finally {
       await f.cleanup();

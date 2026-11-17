@@ -5,10 +5,10 @@ import { selectLicenseReportFormats } from '../license-report-formats';
 
 export const LICENSE_COMMAND_HELP = `Usage: npm run db:classify:licenses -- --source=json|database --destination=json|database|both
   --input=PATH --output=PATH (default: ${LICENSE_CLASSIFICATIONS_PATH})
-  --yes Accept automatic maintenance decisions without prompts (never implies --force).
-  --plan-only Produce plans/reports without database writes.
-  --force Replace the entire classification table from JSON, deleting absent keys.
-  --reviewer=NAME --review-reason=REASON Attest the exact JSON revision with --yes.
+  --yes Save the previewed destination decisions without prompts.
+  --plan-only Produce plans/reports and JSON preview when selected; no database writes.
+  --force Deprecated compatibility flag; does not change save behavior.
+  --reviewer=NAME --review-reason=REASON Retired bulk flags; use a named per-row decision.
   --no-cache --cache-dir=PATH --sample-count=INTEGER (>=2, default 3)
   --model=google:<id> (overrides GOOGLE_AI_MODEL; default google:gemini-3.8-flash)
   --report-formats=markdown|html|markdown,html|none --report-dir=PATH --open-report
@@ -18,9 +18,9 @@ Requires GOOGLE_AI_API_KEY even without inference. JSON-to-JSON needs no databas
 Normal startup reads local .env for GOOGLE_AI_MODEL before browser setup; shell values take precedence.
 Help and practice do not read .env. Browser source, database, cache, and provider work waits for Inspect/Analyze.
 Source/destination are independent; JSON-to-database imports, database-to-JSON exports.
-An empty table bootstraps only from attested JSON. --force never bypasses review.
+Valid mixed-state JSON may bootstrap an empty table. Cross-storage sync preserves destination winners.
 Exit 0: complete/no unknown; 2: successful/unknown retained; 1: operational failure;
-3: review responsibility missing, no database rows changed.
+3: unresolved destination conflict, no database rows changed.
 Noninteractive without --yes stops after plans/reports. --yes never opens a browser.`;
 
 export interface LicenseCommandOptions {

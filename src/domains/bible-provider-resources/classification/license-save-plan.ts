@@ -4,17 +4,19 @@ import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseReportBundle } from '../license-reports';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseSnapshot } from './license-database.types';
+import type { DestinationDecisionPlan } from './license-save-destinations';
 
-import { checkLicenseArtifactReview, serializeLicenseArtifact } from '../license-artifact';
+import { serializeLicenseArtifact } from '../license-artifact';
 import { renderLicenseReports } from '../license-reports';
+import { planLicenseSaveDestinations } from './license-save-destinations';
 
 export interface LicenseSaveTarget {
   path: string;
   previous: string | null;
-  role: 'output' | 'signed-source';
+  role: 'output';
 }
 
-export interface LicenseSavePlan {
+export interface LicenseSavePlan extends DestinationDecisionPlan {
   targets: LicenseSaveTarget[];
   expectedFiles: { path: string; bytes: string | null }[];
   replace: boolean;
@@ -24,7 +26,7 @@ export interface LicenseSavePlan {
   reports: LicenseReportBundle;
 }
 
-/** Build the exact publication set and its original bytes from the inspected snapshot. */
+/** Preview exact independent destination outputs from the inspected snapshots. */
 export function buildLicenseSavePlan(input: {
   options: LicenseCommandOptions;
   artifact: LicenseArtifact;
@@ -33,9 +35,17 @@ export function buildLicenseSavePlan(input: {
   outputBytes: string | null;
   database?: LicenseDatabaseSnapshot;
 }): LicenseSavePlan {
-  const { options, artifact, originalSourceArtifact, inputBytes, outputBytes, database } = input;
-  const replace = options.source === 'json' && options.destination !== 'json';
-  const reports = renderLicenseReports(artifact, {
+  const { options, artifact, inputBytes, outputBytes, database } = input;
+  if (!options.source || !options.destination) throw new Error('Select source and destination');
+  const destinations = planLicenseSaveDestinations({
+    source: options.source,
+    destination: options.destination,
+    artifact,
+    outputBytes,
+    databaseRows: database?.classifications,
+  });
+  const reportingArtifact = destinations.databaseForecast ?? destinations.jsonArtifact ?? artifact;
+  const reports = renderLicenseReports(reportingArtifact, {
     formats: options.reportFormats,
     outputDir: options.reportDir,
     interactive: false,
@@ -43,39 +53,32 @@ export function buildLicenseSavePlan(input: {
     database: database
       ? {
           ...database.context,
-          ...(replace
+          ...(options.destination !== 'json'
             ? { classificationTable: { existing: database.classifications, replace: true } }
             : {}),
         }
       : undefined,
     preserveExistingNonUnknowns: options.preserveExistingNonUnknowns,
   });
-  const targets: LicenseSaveTarget[] = [];
-  if (options.destination !== 'database')
-    targets.push({ path: resolve(options.output), previous: outputBytes, role: 'output' });
-  const signedSource =
-    replace &&
-    originalSourceArtifact !== undefined &&
-    checkLicenseArtifactReview(artifact).status === 'ready' &&
-    (originalSourceArtifact.reviewContentHash !== artifact.reviewContentHash ||
-      originalSourceArtifact.reviewState !== artifact.reviewState ||
-      JSON.stringify(originalSourceArtifact.attestation) !== JSON.stringify(artifact.attestation));
-  if (signedSource && !targets.some((target) => target.path === resolve(options.input)))
-    targets.push({ path: resolve(options.input), previous: inputBytes, role: 'signed-source' });
+  const targets: LicenseSaveTarget[] =
+    options.destination === 'database'
+      ? []
+      : [{ path: resolve(options.output), previous: outputBytes, role: 'output' }];
   const expectedFiles = [
     ...(options.source === 'json' ? [{ path: resolve(options.input), bytes: inputBytes }] : []),
     ...(resolve(options.output) !== resolve(options.input) || options.source !== 'json'
       ? [{ path: resolve(options.output), bytes: outputBytes }]
       : []),
   ];
-  const { wholeFileHash } = serializeLicenseArtifact(artifact);
+  const output = serializeLicenseArtifact(destinations.jsonArtifact ?? artifact);
   return {
+    ...destinations,
     targets,
     expectedFiles,
-    replace,
-    requiresForceAgreement: replace && !!database?.classifications.length,
-    wholeFileHash,
-    reviewContentHash: artifact.reviewContentHash,
+    replace: options.source === 'database' && options.destination !== 'json',
+    requiresForceAgreement: false,
+    wholeFileHash: output.wholeFileHash,
+    reviewContentHash: (destinations.jsonArtifact ?? artifact).reviewContentHash,
     reports,
   };
 }

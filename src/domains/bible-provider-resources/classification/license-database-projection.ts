@@ -1,3 +1,5 @@
+import type { JsonValue } from '@/lib/llm/canonical-json';
+
 import { hashCanonicalJson } from '@/lib/llm/canonical-json';
 
 import type { LicenseArtifact, LicenseClassification } from '../license-artifact.schemas';
@@ -68,6 +70,10 @@ function ownedLicenseClassification(
     ...(row.rule ? { rule: row.rule } : {}),
     ...(row.automaticDecision ? { automaticDecision: row.automaticDecision } : {}),
     ...(row.rowNote ? { rowNote: row.rowNote } : {}),
+    reviewState: row.reviewState ?? 'unreviewed',
+    decisionAt: row.decisionAt ?? null,
+    reviewedBy: row.reviewedBy ?? null,
+    humanReviewedAt: row.humanReviewedAt ?? null,
   });
 }
 
@@ -94,7 +100,11 @@ export function licenseDatabaseProjection(artifact: LicenseArtifact) {
                   .sort()
                   .join(',')
               : 'table',
-      reviewedAt: artifact.attestation ? new Date(artifact.attestation.reviewedAt) : null,
+      reviewedAt: null,
+      reviewState: row.reviewState ?? 'unreviewed',
+      decisionAt: row.decisionAt ? new Date(row.decisionAt) : null,
+      reviewedBy: row.reviewedBy ?? null,
+      humanReviewedAt: row.humanReviewedAt ? new Date(row.humanReviewedAt) : null,
     };
   });
 }
@@ -119,17 +129,44 @@ export function selectLicenseMaintenanceRows(
     status: LicenseClassification['status'];
     rationale: unknown;
     storedRationale?: unknown;
+    reviewState?: LicenseClassification['reviewState'];
+    decisionAt?: string | Date | null;
+    reviewedBy?: string | null;
+    humanReviewedAt?: string | Date | null;
+    classifiedBy?: string | null;
   }[]
 ) {
   const before = new Map(existing.map((row) => [row.normalizedText, row]));
   const sources = new Map(artifact.classifications.map((row) => [row.normalizedText, row.source]));
   return licenseDatabaseProjection(artifact).filter((row) => {
     const old = before.get(row.normalizedText);
+    if (!old) return true;
+    // A legacy table row with no evidence is already authoritative. Preserve its
+    // producer and timestamps unless the decision or owned metadata actually changed.
+    const priorDecisionAt =
+      old.decisionAt instanceof Date ? old.decisionAt.toISOString() : (old.decisionAt ?? null);
+    const priorHumanAt =
+      old.humanReviewedAt instanceof Date
+        ? old.humanReviewedAt.toISOString()
+        : (old.humanReviewedAt ?? null);
+    const unchangedLegacy =
+      sources.get(row.normalizedText) === 'table' &&
+      old.status === row.status &&
+      licenseRationaleText(old.storedRationale ?? old.rationale) === row.rationale.text &&
+      (old.reviewState ?? 'unreviewed') === row.reviewState &&
+      priorDecisionAt === (row.decisionAt?.toISOString() ?? null) &&
+      (old.reviewedBy ?? null) === row.reviewedBy &&
+      priorHumanAt === (row.humanReviewedAt?.toISOString() ?? null);
     return (
-      sources.get(row.normalizedText) !== 'table' ||
-      !old ||
-      old.status !== row.status ||
-      licenseRationaleText(old.storedRationale ?? old.rationale) !== row.rationale.text
+      !unchangedLegacy &&
+      (old.status !== row.status ||
+        old.classifiedBy !== row.classifiedBy ||
+        (old.reviewState ?? 'unreviewed') !== row.reviewState ||
+        priorDecisionAt !== (row.decisionAt?.toISOString() ?? null) ||
+        (old.reviewedBy ?? null) !== row.reviewedBy ||
+        priorHumanAt !== (row.humanReviewedAt?.toISOString() ?? null) ||
+        hashCanonicalJson((old.storedRationale ?? old.rationale) as JsonValue) !==
+          hashCanonicalJson(row.rationale))
     );
   });
 }
@@ -150,7 +187,11 @@ export function planLicenseMaintenanceChanges(
         const old = before.get(row.normalizedText);
         return (
           old &&
-          (old.status !== row.status ||
+          (old.reviewState !== row.reviewState ||
+            old.decisionAt !== (row.decisionAt?.toISOString() ?? null) ||
+            old.reviewedBy !== row.reviewedBy ||
+            old.humanReviewedAt !== (row.humanReviewedAt?.toISOString() ?? null) ||
+            old.status !== row.status ||
             old.classifiedBy !== row.classifiedBy ||
             hashCanonicalJson(old.storedRationale ?? old.rationale) !==
               hashCanonicalJson(row.rationale))
@@ -168,11 +209,8 @@ export function planLicenseDatabaseChanges(
 ) {
   const before = new Map(existing.map((row) => [row.normalizedText, row]));
   const proposed = licenseDatabaseProjection(artifact);
-  const after = new Set(proposed.map((row) => row.normalizedText));
   return {
-    deletedKeys: existing
-      .filter((row) => !after.has(row.normalizedText))
-      .map((row) => row.normalizedText),
+    deletedKeys: [] as string[],
     insertedKeys: proposed
       .filter((row) => !before.has(row.normalizedText))
       .map((row) => row.normalizedText),
@@ -181,7 +219,11 @@ export function planLicenseDatabaseChanges(
         const old = before.get(row.normalizedText);
         return (
           old &&
-          (old.status !== row.status ||
+          (old.reviewState !== row.reviewState ||
+            old.decisionAt !== (row.decisionAt?.toISOString() ?? null) ||
+            old.reviewedBy !== row.reviewedBy ||
+            old.humanReviewedAt !== (row.humanReviewedAt?.toISOString() ?? null) ||
+            old.status !== row.status ||
             old.classifiedBy !== row.classifiedBy ||
             hashCanonicalJson(old.storedRationale ?? old.rationale) !==
               hashCanonicalJson(row.rationale))

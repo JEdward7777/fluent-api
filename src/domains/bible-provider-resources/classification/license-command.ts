@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 
 import type { LlmTransport } from '@/lib/llm/structured-request';
 
@@ -8,13 +8,11 @@ import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type { LicenseFileIo } from './license-write';
 
-import { checkLicenseArtifactReview } from '../license-artifact';
 import { licenseInlineSummary } from '../license-report-model';
 import { renderLicenseReports } from '../license-reports';
 import { runLicenseReview } from '../license-review';
 import { freezeReviewValue } from '../license-review-revision';
-import { planLicenseDatabaseChanges } from './license-database-projection';
-import { LicenseBootstrapRequiredError, LicenseWorkflow } from './license-workflow';
+import { LicenseWorkflow } from './license-workflow';
 import { licenseFileIo, writeLicenseDestinations } from './license-write';
 
 interface CommandDependencies {
@@ -34,7 +32,6 @@ export async function runLicenseCommand(
   dependencies: CommandDependencies
 ): Promise<number> {
   const { io } = dependencies;
-  let database: LicenseDatabaseAdapter | undefined;
   let workflow: LicenseWorkflow | undefined;
   try {
     if (!dependencies.apiKey.trim())
@@ -42,6 +39,10 @@ export async function runLicenseCommand(
     const options = freezeReviewValue(input);
     if (!options.source || !options.destination)
       throw new Error('Select both source and destination before analysis');
+    if (options.reviewer || options.reviewReason)
+      throw new Error(
+        '--reviewer and --review-reason cannot attest a batch; use a named per-row human decision'
+      );
     const fs = dependencies.fs ?? licenseFileIo;
     workflow = new LicenseWorkflow(options, {
       apiKey: dependencies.apiKey,
@@ -54,26 +55,16 @@ export async function runLicenseCommand(
           )),
       transport: dependencies.transport,
       now: dependencies.now,
-      legacySkipFreshness: true,
     });
     const inspection = await workflow.inspect(workflow.status.configurationRevision);
-    database = workflow.databaseAdapter;
     const snapshot = inspection.database;
-    const { inputBytes, outputBytes } = inspection;
+    const { inputBytes } = inspection;
     const analysis = await workflow.startAnalysis(workflow.status.configurationRevision);
     let { artifact } = analysis;
-    const { originalSourceArtifact } = analysis;
     if (inputBytes !== null)
       await io.write(
         `Untouched JSON source SHA-256: ${createHash('sha256').update(inputBytes).digest('hex')}`
       );
-    const replace = options.source === 'json' && options.destination !== 'json';
-    if (replace) {
-      const changes = planLicenseDatabaseChanges(artifact, snapshot!.classifications);
-      await io.write(
-        `WARNING: whole-table license_classifications replacement: delete ${changes.deletedKeys.length}, insert ${changes.insertedKeys.length}, change ${changes.changedKeys.length} (status, rationale, producer or recorded evidence). No Bible/resource caches are written; the next ordinary sync derives them.`
-      );
-    }
     if (options.preserveExistingNonUnknowns)
       await io.write(
         'Preservation is a forecast only here. To preserve resource caches for one sync, run: npm run db:sync:dbl -- --preserve-existing-non-unknowns. A later ordinary sync may overwrite them.'
@@ -89,7 +80,7 @@ export async function runLicenseCommand(
       database: snapshot
         ? {
             ...snapshot.context,
-            ...(replace
+            ...(options.destination !== 'json'
               ? { classificationTable: { existing: snapshot.classifications, replace: true } }
               : {}),
           }
@@ -106,14 +97,6 @@ export async function runLicenseCommand(
     let reports = renderLicenseReports(artifact, config);
     await emitReports(reports);
     await io.write(licenseInlineSummary(reports.model));
-    if (replace && snapshot!.classifications.length && !options.force)
-      throw new Error(
-        'JSON import into a nonempty table requires --force; --yes does not imply --force'
-      );
-    if (options.openReport) {
-      const html = reports.reports.find((report) => report.format === 'html')!;
-      await dependencies.openReport?.(html.path);
-    }
     const resultCode = () =>
       artifact.classifications.some((row) => row.status === 'unknown') ? 2 : 0;
     let write = options.yes;
@@ -137,12 +120,12 @@ export async function runLicenseCommand(
               workflow!.status.contentRevision
             )
           ).reports,
-        attest: (metadata, reviewHash) =>
+        attest: (metadata, _reviewHash) =>
           workflow!.attest(
             metadata,
             workflow!.status.configurationRevision,
             workflow!.status.contentRevision,
-            reviewHash
+            workflow!.analyzed!.artifact.reviewContentHash
           ).artifact,
       });
       artifact = reviewed.artifact;
@@ -150,77 +133,52 @@ export async function runLicenseCommand(
       if (reviewed.action === 'review-required') return 3;
       write = reviewed.writeIntent;
     }
-    if (options.yes && options.reviewer?.trim() && options.reviewReason?.trim()) {
-      // Unknowns require genuine row notes; unattended signing never invents them.
-      if (!artifact.classifications.some((row) => row.status === 'unknown' && !row.rowNote))
-        artifact = workflow.attest(
-          {
-            reviewedBy: options.reviewer,
-            reviewReason: options.reviewReason,
-            reviewedAt: dependencies.now?.() ?? new Date().toISOString(),
-          },
-          workflow.status.configurationRevision,
-          workflow.status.contentRevision,
-          (
-            await workflow.preview(
-              workflow.status.configurationRevision,
-              workflow.status.contentRevision
-            )
-          ).reports.reviewContentHash
-        ).artifact;
-    }
-    reports = renderLicenseReports(artifact, config);
-    await emitReports(reports);
-    await io.write(
-      `Planned JSON SHA-256: ${reports.wholeFileHash}; review hash: ${artifact.reviewContentHash}`
+    const preview = await workflow.preview(
+      workflow.status.configurationRevision,
+      workflow.status.contentRevision
     );
-    // Plan-only and noninteractive previews may emit a visibly incomplete work artifact.
-    // Cross-only valid imports never rewrite their source merely to produce a preview.
-    const jsonDestination = options.destination !== 'database';
-    if (replace && checkLicenseArtifactReview(artifact).status !== 'ready') {
-      await io.write(
-        'Review required; no database rows changed. Supply --yes --reviewer=NAME --review-reason=REASON for this exact revision, and add a human row note for every retained unknown. --force never bypasses review.'
-      );
+    await emitReports(preview.reports);
+    await io.write(
+      `Planned JSON SHA-256: ${preview.plan.wholeFileHash}; review hash: ${preview.plan.reviewContentHash}`
+    );
+    if (preview.plan.conflicts.length) {
+      await io.write(`Save conflicts: ${preview.plan.conflicts.join('; ')}`);
       return 3;
     }
     if (options.planOnly || !write) {
-      if (jsonDestination && (!dependencies.interactive || options.planOnly))
+      if (preview.plan.jsonArtifact)
         await writeLicenseDestinations({
-          artifact,
-          files: [{ path: options.output, previous: outputBytes }],
+          artifact: preview.plan.jsonArtifact,
+          files: preview.plan.targets.map(({ path, previous }) => ({ path, previous })),
           replace: false,
           fs,
+          expectedFiles: preview.plan.expectedFiles,
         });
+      if (options.openReport) {
+        const html = preview.reports.reports.find((report) => report.format === 'html');
+        if (html) await dependencies.openReport?.(html.path);
+      }
       return resultCode();
     }
-    const files: { path: string; previous: string | null }[] = jsonDestination
-      ? [{ path: options.output, previous: outputBytes }]
-      : [];
-    // Signing an imported JSON is the explicit cross-only no-rewrite exception.
-    const signedSource =
-      originalSourceArtifact !== undefined &&
-      checkLicenseArtifactReview(artifact).status === 'ready' &&
-      (originalSourceArtifact.reviewContentHash !== artifact.reviewContentHash ||
-        originalSourceArtifact.reviewState !== artifact.reviewState ||
-        JSON.stringify(originalSourceArtifact.attestation) !==
-          JSON.stringify(artifact.attestation));
-    if (signedSource && !files.some((file) => resolve(file.path) === resolve(options.input)))
-      files.push({ path: options.input, previous: inputBytes });
-    await writeLicenseDestinations({
-      artifact,
-      files,
-      database: options.destination !== 'json' ? database : undefined,
-      replace,
-      force: options.force,
-      fs,
+    await workflow.save({
+      operationId: `cli-${createHash('sha256')
+        .update(JSON.stringify([options.input, options.output, preview.plan.wholeFileHash]))
+        .digest('hex')}`,
+      configurationRevision: workflow.status.configurationRevision,
+      contentRevision: workflow.status.contentRevision,
+      agreeToReplace: false,
     });
+    if (options.openReport) {
+      const html = preview.reports.reports.find((report) => report.format === 'html');
+      if (html) await dependencies.openReport?.(html.path);
+    }
     await io.write(
-      `Wrote decisions to ${options.destination}${files.length ? `; JSON: ${files.map((file) => file.path).join(', ')}` : ''}. Resource caches update on the next ordinary sync.`
+      `Wrote decisions to ${options.destination}${preview.plan.targets.length ? `; JSON: ${preview.plan.targets.map((target) => target.path).join(', ')}` : ''}. Resource caches update on the next ordinary sync.`
     );
     return resultCode();
   } catch (error) {
     await io.write(error instanceof Error ? error.message : String(error));
-    return error instanceof LicenseBootstrapRequiredError ? 3 : 1;
+    return 1;
   } finally {
     await workflow?.close();
   }

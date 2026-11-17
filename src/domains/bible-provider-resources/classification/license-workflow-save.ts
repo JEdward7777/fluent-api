@@ -42,6 +42,8 @@ export async function writePreviewedLicenseSave(input: {
   fs?: LicenseFileIo;
 }): Promise<LicenseSaveResult> {
   const { request, preview, inspection, analysis, options, database, fs } = input;
+  if (preview.plan.conflicts.length)
+    throw new Error(`Save conflicts: ${preview.plan.conflicts.join('; ')}`);
   try {
     await requireFreshLicenseSources(inspection, options, fs ?? licenseFileIo, database);
   } catch (error) {
@@ -49,11 +51,12 @@ export async function writePreviewedLicenseSave(input: {
     throw new LicenseSavePreflightError(error);
   }
   await writeLicenseDestinations({
-    artifact: analysis.artifact,
+    artifact: preview.plan.databaseArtifact ?? analysis.artifact,
+    fileArtifact: preview.plan.jsonArtifact,
     files: preview.plan.targets.map(({ path, previous }) => ({ path, previous })),
     database: options.destination !== 'json' ? database : undefined,
     replace: preview.plan.replace,
-    force: preview.plan.requiresForceAgreement && request.agreeToReplace,
+    force: false,
     fs,
     expectedFiles: preview.plan.expectedFiles,
     expectedPolicy:

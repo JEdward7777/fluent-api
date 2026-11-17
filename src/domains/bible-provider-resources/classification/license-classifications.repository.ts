@@ -1,4 +1,4 @@
-import { and, eq, notInArray, or, sql } from 'drizzle-orm';
+import { and, eq, or, sql } from 'drizzle-orm';
 
 import type { DbTransaction } from '@/lib/types';
 
@@ -84,7 +84,13 @@ export async function loadClassificationSnapshot(
       (run.success || (!evidence.data.samples.length && !evidence.data.rule)) &&
       evidence.data.status === row.status &&
       evidence.data.rationale === text &&
-      evidence.data.normalizedText === row.normalizedText;
+      evidence.data.normalizedText === row.normalizedText &&
+      (evidence.data.reviewState === undefined ||
+        (evidence.data.reviewState === row.reviewState &&
+          (evidence.data.decisionAt ?? null) === (row.decisionAt?.toISOString() ?? null) &&
+          (evidence.data.reviewedBy ?? null) === row.reviewedBy &&
+          (evidence.data.humanReviewedAt ?? null) ===
+            (row.humanReviewedAt?.toISOString() ?? null)));
     if (metadata.evidence !== undefined && !usableEvidence)
       logger.warn({
         normalizedText: row.normalizedText,
@@ -92,10 +98,21 @@ export async function loadClassificationSnapshot(
         message:
           'Stored provenance does not match the current database decision; retaining exact table authority without stale evidence',
       });
+    const evidenceRow = usableEvidence
+      ? {
+          ...(structuredClone(metadata.evidence) as LicenseClassification),
+          reviewState:
+            evidence.data.reviewState ??
+            (evidence.data.source === 'gemini' ? 'llm_reviewed' : 'unreviewed'),
+          decisionAt: evidence.data.decisionAt ?? null,
+          reviewedBy: evidence.data.reviewedBy ?? null,
+          humanReviewedAt: evidence.data.humanReviewedAt ?? null,
+        }
+      : null;
     return {
       ...(usableEvidence
         ? {
-            evidence: structuredClone(metadata.evidence) as LicenseClassification,
+            evidence: structuredClone(evidenceRow) as LicenseClassification,
             ...(run.success
               ? {
                   classificationRun: structuredClone(
@@ -111,6 +128,10 @@ export async function loadClassificationSnapshot(
       rationale: text || 'No recorded rationale',
       classifiedBy: row.classifiedBy,
       reviewedAt: row.reviewedAt?.toISOString() ?? null,
+      reviewState: row.reviewState,
+      decisionAt: row.decisionAt?.toISOString() ?? null,
+      reviewedBy: row.reviewedBy,
+      humanReviewedAt: row.humanReviewedAt?.toISOString() ?? null,
     };
   });
   return {
@@ -129,7 +150,7 @@ export async function applyClassifications(
   artifact: LicenseArtifact,
   replace: boolean,
   beforeCommit?: () => Promise<void>,
-  force = false,
+  _force = false,
   expectedPolicy?: StoredLicenseClassification[],
   database?: LicenseDb
 ) {
@@ -154,6 +175,10 @@ export async function applyClassifications(
             row.status === prior.status &&
             row.classifiedBy === prior.classifiedBy &&
             row.reviewedAt?.toISOString() === (prior.reviewedAt ?? undefined) &&
+            row.reviewState === (prior.reviewState ?? 'unreviewed') &&
+            (row.decisionAt?.toISOString() ?? null) === (prior.decisionAt ?? null) &&
+            row.reviewedBy === (prior.reviewedBy ?? null) &&
+            (row.humanReviewedAt?.toISOString() ?? null) === (prior.humanReviewedAt ?? null) &&
             hashCanonicalJson(row.rationale) ===
               hashCanonicalJson(
                 prior.storedRationale === undefined ? prior.rationale : prior.storedRationale
@@ -162,21 +187,10 @@ export async function applyClassifications(
         });
       if (!matches) throw new LicensePolicyDriftError();
     }
-    if (replace && existing.size && !force)
-      throw new Error(
-        'The classification table is now nonempty; --force is required before replacement'
-      );
-    // A legacy table row may have no evidence to export. Maintenance must not invent
-    // replacement provenance or churn its timestamps for an unchanged authoritative decision.
+    // Both overwrite and sync are scoped upserts. The plan supplies only selected keys.
     const rows = replace
       ? proposed
       : selectLicenseMaintenanceRows(artifact, [...existing.values()]);
-    if (replace) {
-      const keys = proposed.map((row) => row.normalizedText);
-      await tx
-        .delete(license_classifications)
-        .where(keys.length ? notInArray(license_classifications.normalizedText, keys) : undefined);
-    }
     // Bounded batches reduce parameter pressure; the transaction preserves all-or-nothing writes.
     for (let offset = 0; offset < rows.length; offset += 100) {
       await tx
@@ -188,12 +202,19 @@ export async function applyClassifications(
             status: sql`excluded.status`,
             rationale: sql`excluded.rationale`,
             classifiedBy: sql`excluded.classified_by`,
-            reviewedAt: sql`excluded.reviewed_at`,
+            reviewState: sql`excluded.review_state`,
+            decisionAt: sql`excluded.decision_at`,
+            reviewedBy: sql`excluded.reviewed_by`,
+            humanReviewedAt: sql`excluded.human_reviewed_at`,
           },
           setWhere: or(
             sql`${license_classifications.status} IS DISTINCT FROM excluded.status`,
             sql`${license_classifications.rationale} IS DISTINCT FROM excluded.rationale`,
-            sql`${license_classifications.classifiedBy} IS DISTINCT FROM excluded.classified_by`
+            sql`${license_classifications.classifiedBy} IS DISTINCT FROM excluded.classified_by`,
+            sql`${license_classifications.reviewState} IS DISTINCT FROM excluded.review_state`,
+            sql`${license_classifications.decisionAt} IS DISTINCT FROM excluded.decision_at`,
+            sql`${license_classifications.reviewedBy} IS DISTINCT FROM excluded.reviewed_by`,
+            sql`${license_classifications.humanReviewedAt} IS DISTINCT FROM excluded.human_reviewed_at`
           ),
         });
     }
