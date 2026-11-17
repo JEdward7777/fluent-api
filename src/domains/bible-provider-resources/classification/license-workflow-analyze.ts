@@ -4,7 +4,8 @@ import type { LicenseInspection, LicenseWorkflowDependencies } from './license-w
 
 import { createLicenseClassifier } from '../license-classifier';
 import { freezeLicenseRevision } from '../license-review-revision';
-import { analyzeDatabaseLicenses } from './license-analysis';
+import { analyzeDatabaseLicenses, analyzeJsonLicenses } from './license-analysis';
+import { inspectLicensePreflight } from './license-preflight';
 import {
   parseLicenseArtifactBytes,
   requireFreshLicenseInspection,
@@ -30,25 +31,58 @@ export async function analyzeInspectedLicenses(input: {
     options.source === 'database' && inspection.outputBytes !== null
       ? parseLicenseArtifactBytes(inspection.outputBytes)
       : undefined;
+  const jsonSource =
+    options.source === 'json' ? parseLicenseArtifactBytes(inspection.inputBytes!) : undefined;
+  const currentPreflight = await inspectLicensePreflight({
+    database: options.source === 'database' ? inspection.database : undefined,
+    jsonClassifications: jsonSource?.classifications,
+    jsonNotices: jsonSource?.catalog.flatMap((row) =>
+      row.rawNotice?.trim() ? [row.rawNotice] : []
+    ),
+    rerunRule: options.rerunRule,
+    rerunModel: options.rerunModel,
+    model: options.model,
+    sampleCount: options.sampleCount,
+    cacheDir: options.cacheDir,
+    noCache: options.noCache,
+  });
+  if (JSON.stringify(currentPreflight) !== JSON.stringify(inspection.preflight))
+    throw new Error('Assessment preflight changed; Inspect again before Analyze');
+  const classifier = () =>
+    createLicenseClassifier({
+      apiKey: dependencies.apiKey,
+      model: options.model,
+      sampleCount: options.sampleCount,
+      cacheDir: options.cacheDir,
+      noCache: options.noCache,
+      transport: dependencies.transport,
+    });
   const artifact =
     options.source === 'json'
-      ? parseLicenseArtifactBytes(inspection.inputBytes!)
+      ? inspection.preflight.rows.every(
+          (row) => row.action === 'retain' || (row.action === 'rule' && !row.ruleMatches)
+        )
+        ? jsonSource!
+        : await analyzeJsonLicenses({
+            artifact: jsonSource!,
+            eligibility: inspection.preflight.rows,
+            classify: classifier(),
+            model: options.model,
+            sampleCount: options.sampleCount,
+            now: dependencies.now,
+            shouldStop: input.shouldStop,
+          })
       : await analyzeDatabaseLicenses({
           catalog: inspection.database!.context.resources.map(
             ({ ttsLicenseStatus: _status, ...row }) => row
           ),
           classifications: inspection.database!.classifications,
           base,
-          classify: createLicenseClassifier({
-            apiKey: dependencies.apiKey,
-            model: options.model,
-            sampleCount: options.sampleCount,
-            cacheDir: options.cacheDir,
-            noCache: options.noCache,
-            transport: dependencies.transport,
-          }),
+          classify: classifier(),
           model: options.model,
           sampleCount: options.sampleCount,
+          eligibility: inspection.preflight.rows,
+          now: dependencies.now,
           shouldStop: input.shouldStop,
         });
   return freezeLicenseRevision(artifact);

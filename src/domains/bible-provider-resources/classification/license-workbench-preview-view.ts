@@ -5,7 +5,6 @@ import type { StoredLicenseClassification } from './license-database.types';
 import type { LicenseWorkflow } from './license-workflow';
 
 import { checkLicenseArtifactReview } from '../license-artifact';
-import { planLicenseMaintenanceChanges } from './license-database-projection';
 
 /** Publish only reviewable preview facts, never target prior bytes or credentials. */
 export function licenseWorkbenchPreviewView(input: {
@@ -20,10 +19,7 @@ export function licenseWorkbenchPreviewView(input: {
   if (!preview) return null;
   const impact = preview.reports.model.impact;
   const review = workflow?.analyzed ? checkLicenseArtifactReview(workflow.analyzed.artifact) : null;
-  const maintenance =
-    !preview.plan.replace && workflow?.analyzed && policyBaseline
-      ? planLicenseMaintenanceChanges(workflow.analyzed.artifact, policyBaseline)
-      : null;
+  void policyBaseline;
   return {
     configurationRevision,
     contentRevision: preview.contentRevision,
@@ -41,22 +37,24 @@ export function licenseWorkbenchPreviewView(input: {
     output: preview.plan.targets[0]?.path,
     replace: preview.plan.replace,
     requiresForceAgreement: preview.plan.requiresForceAgreement,
+    conflicts: preview.plan.conflicts,
+    json: preview.plan.jsonArtifact
+      ? { operation: options.source === 'json' ? 'overwrite' : 'sync', ...preview.plan.jsonChanges }
+      : null,
+    database: preview.plan.databaseArtifact
+      ? {
+          operation: options.source === 'database' ? 'overwrite' : 'sync',
+          ...preview.plan.databaseChanges,
+        }
+      : null,
     policy:
       options.destination === 'json'
         ? null
-        : preview.plan.replace
-          ? {
-              inserts: impact?.classificationChanges?.insertedKeys ?? [],
-              updates: impact?.classificationChanges?.changedKeys ?? [],
-              deletes: impact?.classificationChanges?.deletedKeys ?? [],
-            }
-          : maintenance
-            ? {
-                inserts: maintenance.insertedKeys,
-                updates: maintenance.changedKeys,
-                deletes: maintenance.deletedKeys,
-              }
-            : null,
+        : {
+            inserts: preview.plan.databaseChanges.inserted,
+            updates: preview.plan.databaseChanges.updated,
+            deletes: [],
+          },
     forecast: impact
       ? {
           context: impact.context,

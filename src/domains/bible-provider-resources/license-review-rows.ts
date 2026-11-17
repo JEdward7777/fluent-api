@@ -4,7 +4,7 @@ import type { LicenseReviewIo } from './license-review.types';
 
 import {
   licenseOverrideWarning,
-  overrideLicenseClassification,
+  recordHumanLicenseDecision,
   reviseLicenseArtifact,
 } from './license-artifact';
 import { computeLicenseImpact } from './license-impact';
@@ -23,9 +23,11 @@ export async function reviewLicenseRows(
           normalizedText: string;
           status: LicenseArtifact['classifications'][number]['status'];
           reason: string;
+          reviewedBy: string;
         }
       | { kind: 'unknown-note'; normalizedText: string; note: string }
-  ) => LicenseArtifact
+  ) => LicenseArtifact,
+  reassess?: (key: string, kind: 'rule' | 'model') => Promise<LicenseArtifact | null>
 ) {
   let artifact = value;
   let query = '';
@@ -52,7 +54,7 @@ export async function reviewLicenseRows(
         return (status === 'all' || row.status === status) && content.includes(query.toLowerCase());
       });
     await io.write(
-      `${visible.length} classifications shown.\n${visible.map((row, index) => `${index + 1}. ${row.status}: ${JSON.stringify(row.normalizedText)}`).join('\n')}`
+      `${visible.length} classifications shown.\n${visible.map((row, index) => `${index + 1}. ${row.status} [${row.reviewState ?? 'unreviewed'}]: ${JSON.stringify(row.normalizedText)}`).join('\n')}`
     );
     const command = (
       await io.ask(
@@ -82,7 +84,7 @@ export async function reviewLicenseRows(
       continue;
     }
     await io.write(
-      `Selected ${JSON.stringify(row.normalizedText)}. Current ${row.status}: ${row.rationale}`
+      `Selected ${JSON.stringify(row.normalizedText)}. Current ${row.status} [${row.reviewState ?? 'unreviewed'}; event ${row.decisionAt ?? 'unknown'}; reviewer ${row.reviewedBy ?? 'none'}]: ${row.rationale}`
     );
     const affected = impact.rows.filter((bible) => bible.normalizedText === row.normalizedText);
     const notices = [
@@ -113,14 +115,23 @@ export async function reviewLicenseRows(
         ...(row.rowNote ? [`Human row note: ${row.rowNote}`] : []),
       ].join('\n')
     );
-    const decision = (await io.ask('Decision allowed/forbidden/unknown, or Enter to keep: '))
+    const decision = (
+      await io.ask('Decision allowed/forbidden/unknown, /rule, /model, or Enter to keep: ')
+    )
       .trim()
       .toLowerCase();
+    if (decision === '/rule' || decision === '/model') {
+      if (!reassess) {
+        await io.write('Reassessment is unavailable in this review session.');
+        continue;
+      }
+      const refreshed = await reassess(row.normalizedText, decision === '/rule' ? 'rule' : 'model');
+      if (refreshed) artifact = refreshed;
+      continue;
+    }
     if (!decision || decision === 'keep') {
-      if (row.status === 'unknown' && !row.rowNote) {
-        const note = await io.ask(
-          'Human note required to complete JSON while retaining unknown (Enter leaves unreviewed): '
-        );
+      if (row.status === 'unknown') {
+        const note = await io.ask('Optional unknown note (Enter keeps it unchanged): ');
         if (note.trim())
           artifact = edit
             ? edit({ kind: 'unknown-note', normalizedText: row.normalizedText, note })
@@ -131,7 +142,6 @@ export async function reviewLicenseRows(
                   )!.rowNote = note;
                 })
               );
-        else await io.write('Unknown remains unreviewed; JSON cannot be marked complete.');
       }
       continue;
     }
@@ -150,16 +160,28 @@ export async function reviewLicenseRows(
       await io.write('No reason supplied; the row was not changed.');
       continue;
     }
+    const reviewedBy = await io.ask('Name of person making this row decision (required): ');
+    if (!reviewedBy.trim()) {
+      await io.write('No reviewer name supplied; the row was not changed.');
+      continue;
+    }
     artifact = edit
       ? edit({
           kind: 'disposition',
           normalizedText: row.normalizedText,
           status: selectedStatus,
           reason,
+          reviewedBy,
         })
       : freezeLicenseRevision(
-          overrideLicenseClassification(artifact, row.normalizedText, selectedStatus, reason)
-            .artifact
+          recordHumanLicenseDecision(
+            artifact,
+            row.normalizedText,
+            selectedStatus,
+            reason,
+            reviewedBy,
+            new Date().toISOString()
+          )
         );
   }
 }

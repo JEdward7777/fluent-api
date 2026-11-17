@@ -52,12 +52,12 @@ describe('versioned license artifact lifecycle', () => {
   ])('requires valid named attestation metadata %j', (metadata) => {
     expect(() => attestLicenseArtifact(makeLicenseArtifact(), metadata)).toThrow();
   });
-  it('retains authoritative table unknowns but requires a human note to complete them', () => {
+  it('retains authoritative table unknowns and permits an optional assertion without a note', () => {
     const artifact = makeLicenseArtifact();
     delete artifact.classifications[2].rowNote;
     artifact.reviewContentHash = computeLicenseReviewHash(artifact);
     expect(checkLicenseArtifactReview(artifact)).toMatchObject({ status: 'review-required' });
-    expect(() => attestLicenseArtifact(artifact, REVIEWER)).toThrow('human row note');
+    expect(attestLicenseArtifact(artifact, REVIEWER).classifications[2].rowNote).toBeUndefined();
     const noted = reviseLicenseArtifact(artifact, (draft) => {
       draft.classifications[2].rowNote = 'The named reviewer retains unknown.';
     });

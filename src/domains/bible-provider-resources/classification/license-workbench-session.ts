@@ -9,7 +9,11 @@ import type { WorkbenchDatabase } from './license-workbench-database';
 import type { RecordedOperation, VisibleOperation } from './license-workbench-operation.types';
 import type { LicenseReviewQuery } from './license-workbench-review';
 import type { operationSchema, setupSchema } from './license-workbench-schema';
-import type { LicenseInspection, LicenseReviewEdit } from './license-workflow.types';
+import type {
+  LicenseInspection,
+  LicenseReviewEdit,
+  LicenseWorkflowDependencies,
+} from './license-workflow.types';
 
 import { licenseApiKey } from './license-api-key';
 import { createLicensePractice } from './license-practice';
@@ -17,23 +21,18 @@ import {
   ownedWorkbenchDatabase,
   selectWorkbenchDatabase,
   testWorkbenchDatabase,
-  visibleWorkbenchDatabase,
   workbenchDatabaseIdentity,
 } from './license-workbench-database';
 import { licenseWorkbenchBrowserError } from './license-workbench-error';
-import { licenseWorkbenchPreviewView } from './license-workbench-preview-view';
 import { LicenseWorkbenchReports } from './license-workbench-reports';
+import { selectedLicenseRerunOptions } from './license-workbench-rerun';
 import {
   licenseWorkbenchReviewDetail,
   licenseWorkbenchReviewList,
 } from './license-workbench-review-view';
-import {
-  visibleWorkbenchAnalysis,
-  visibleWorkbenchInspection,
-} from './license-workbench-state-view';
+import { visibleLicenseWorkbench } from './license-workbench-visible';
 import { LicenseWorkflow } from './license-workflow';
 import { LicenseWriteUncertainError } from './license-write';
-
 export class LicenseWorkbenchSession {
   private options: LicenseCommandOptions;
   private readonly launchId = randomUUID();
@@ -56,8 +55,24 @@ export class LicenseWorkbenchSession {
   private readonly practiceMode: boolean;
   private selectedPracticePath: string | null;
   private readonly reports = new LicenseWorkbenchReports();
-
-  constructor(options: LicenseCommandOptions, practiceMode = false) {
+  private resetAfterConfiguration(options: LicenseCommandOptions) {
+    this.configurationRevision++;
+    this.options = options;
+    this.inspected = undefined;
+    this.sourceHash = undefined;
+    this.policyBaseline = undefined;
+    this.latestOperationId = undefined;
+    this.latestSaveOperationId = undefined;
+    this.reports.clear();
+  }
+  constructor(
+    options: LicenseCommandOptions,
+    practiceMode = false,
+    private readonly injected?: Pick<
+      LicenseWorkflowDependencies,
+      'apiKey' | 'database' | 'transport' | 'fs'
+    >
+  ) {
     this.options = { ...options };
     this.practiceMode = practiceMode;
     this.selectedPracticePath = practiceMode && options.input !== '' ? options.input : null;
@@ -77,63 +92,30 @@ export class LicenseWorkbenchSession {
       this.databaseTarget = 'Offline practice: no database connection or provider requests';
     else this.databaseTarget = workbenchDatabaseIdentity(this.databaseConnection);
   }
-
   get visible() {
-    const status = this.workflow?.status;
-    const { options } = this;
-    const inspected =
-      status && !['configuring', 'error', 'closed'].includes(status.state)
-        ? this.inspected
-        : undefined;
-    const preview = licenseWorkbenchPreviewView({
+    return visibleLicenseWorkbench({
+      options: this.options,
       workflow: this.workflow,
-      options,
-      configurationRevision: this.configurationRevision,
-      policyBaseline: this.policyBaseline,
-      practiceMode: this.practiceMode,
-    });
-    return {
-      step: 'Choose inputs',
       launchId: this.launchId,
-      practice: this.practiceMode,
-      scratch: this.practice?.scratch ?? null,
-      originalHash: this.practice?.originalHash ?? null,
-      selectedSource: this.selectedPracticePath,
-      state: status?.state ?? 'configuring',
+      practiceMode: this.practiceMode,
+      practice: this.practice,
+      selectedPracticePath: this.selectedPracticePath,
       configurationRevision: this.configurationRevision,
-      contentRevision: status?.contentRevision ?? 0,
-      readyForInspect: Boolean(options.source && options.destination),
-      source: options.source ?? null,
-      destination: options.destination ?? null,
-      input: this.practiceMode ? (this.selectedPracticePath ?? 'Bundled example') : options.input,
-      output: this.practiceMode
-        ? (this.practice?.options.output ?? 'Allocated after Inspect')
-        : options.output,
-      sampleCount: options.sampleCount,
-      model: options.model,
-      force: options.force,
-      noCache: options.noCache,
-      cacheDir: options.cacheDir ?? null,
-      reportFormats: options.reportFormats,
-      reportDir: options.reportDir ?? null,
-      preserveExistingNonUnknowns: options.preserveExistingNonUnknowns,
+      inspected: this.inspected,
+      sourceHash: this.sourceHash,
+      policyBaseline: this.policyBaseline,
       databaseTarget: this.databaseTarget,
-      databaseConnection: visibleWorkbenchDatabase(this.databaseConnection),
+      databaseConnection: this.databaseConnection,
       databaseTest: this.databaseTest,
       testingDatabase: this.testingDatabase,
-      inspected: visibleWorkbenchInspection(inspected, this.sourceHash),
-      analysis: visibleWorkbenchAnalysis(this.workflow?.analyzed),
-      preview,
       saveOutcome: this.latestSaveOperationId ? this.operation(this.latestSaveOperationId) : null,
-      activeOperationId: this.activeOperationId ?? null,
+      activeOperationId: this.activeOperationId,
       latestOperation: this.latestOperationId ? this.operation(this.latestOperationId) : null,
-    };
+    });
   }
-
   operation(id: string) {
     return structuredClone(this.operations.get(id)?.snapshot ?? null);
   }
-
   listReview(query: LicenseReviewQuery) {
     return licenseWorkbenchReviewList(
       this.workflow,
@@ -142,7 +124,6 @@ export class LicenseWorkbenchSession {
       query
     );
   }
-
   reviewDetail(id: string) {
     return licenseWorkbenchReviewDetail(
       this.workflow,
@@ -151,7 +132,26 @@ export class LicenseWorkbenchSession {
       id
     );
   }
-
+  async selectRerun(body: {
+    configurationRevision: number;
+    contentRevision: number;
+    id: string;
+    kind: 'rule' | 'model';
+  }) {
+    if (this.practiceMode) throw new Error('Practice does not reassess saved evidence');
+    if (this.activeOperationId || !this.workflow?.analyzed)
+      throw new Error('Finish analysis before selecting a row reassessment');
+    if (
+      body.configurationRevision !== this.configurationRevision ||
+      body.contentRevision !== this.workflow.status.contentRevision
+    )
+      throw new Error('Stale review revision');
+    const detail = this.reviewDetail(body.id);
+    const options = selectedLicenseRerunOptions(this.options, detail.normalizedText, body.kind);
+    await this.workflow.configure(options, this.workflow.status.configurationRevision, true);
+    this.resetAfterConfiguration(options);
+    return this.visible;
+  }
   async configure(body: z.infer<typeof setupSchema>) {
     if (body.configurationRevision !== this.visible.configurationRevision)
       throw new Error('Configuration changed; reload setup before applying');
@@ -189,13 +189,7 @@ export class LicenseWorkbenchSession {
       this.workflow = undefined;
       this.practice = undefined;
       this.selectedPracticePath = body.input === 'Bundled example' ? null : body.input.trim();
-      this.configurationRevision++;
-      this.inspected = undefined;
-      this.sourceHash = undefined;
-      this.policyBaseline = undefined;
-      this.reports.clear();
-      this.latestOperationId = undefined;
-      this.latestSaveOperationId = undefined;
+      this.resetAfterConfiguration(this.options);
       return this.visible;
     }
     const options: LicenseCommandOptions = {
@@ -224,20 +218,12 @@ export class LicenseWorkbenchSession {
         body.discardReviewedState
       );
     }
-    this.configurationRevision++;
-    this.reports.clear();
-    this.options = options;
+    this.resetAfterConfiguration(options);
     this.databaseConnection = nextConnection;
     this.databaseTarget = workbenchDatabaseIdentity(nextConnection);
     this.databaseTest = 'untested';
-    this.inspected = undefined;
-    this.sourceHash = undefined;
-    this.policyBaseline = undefined;
-    this.latestOperationId = undefined;
-    this.latestSaveOperationId = undefined;
     return this.visible;
   }
-
   async testDatabase(configurationRevision: number) {
     if (this.closed) throw new Error('Session is closed');
     if (configurationRevision !== this.configurationRevision)
@@ -262,7 +248,6 @@ export class LicenseWorkbenchSession {
     }
     return this.visible;
   }
-
   start(kind: VisibleOperation['kind'], body: z.infer<typeof operationSchema>) {
     const fingerprint = JSON.stringify([kind, body.configurationRevision]);
     const prior = this.operations.get(body.operationId);
@@ -281,8 +266,11 @@ export class LicenseWorkbenchSession {
       throw new Error('Choose both source and destination');
     if (kind === 'inspect' && !this.workflow && !this.practiceMode) {
       this.workflow = new LicenseWorkflow(this.options, {
-        apiKey: licenseApiKey(),
-        database: async () => ownedWorkbenchDatabase(this.databaseConnection),
+        apiKey: this.injected?.apiKey ?? licenseApiKey(),
+        database:
+          this.injected?.database ?? (async () => ownedWorkbenchDatabase(this.databaseConnection)),
+        transport: this.injected?.transport,
+        fs: this.injected?.fs,
       });
     }
     if (!this.workflow && kind !== 'inspect')
@@ -334,12 +322,10 @@ export class LicenseWorkbenchSession {
     );
     return { ...operation };
   }
-
   stop() {
     if (!this.workflow) throw new Error('No analysis is running');
     return this.workflow.requestStopAnalysis();
   }
-
   editReview(body: {
     configurationRevision: number;
     contentRevision: number;
@@ -366,11 +352,9 @@ export class LicenseWorkbenchSession {
       body.contentRevision
     );
   }
-
   async previewPractice(configurationRevision: number, contentRevision: number) {
     return this.preview(configurationRevision, contentRevision, true);
   }
-
   async preview(configurationRevision: number, contentRevision: number, practice = false) {
     if (this.practiceMode !== practice || !this.workflow)
       throw new Error('Preview is unavailable in this mode');
@@ -379,7 +363,6 @@ export class LicenseWorkbenchSession {
       throw new Error('Stale configuration revision');
     return this.workflow.preview(this.workflow.status.configurationRevision, contentRevision);
   }
-
   attest(body: {
     configurationRevision: number;
     contentRevision: number;
@@ -403,7 +386,6 @@ export class LicenseWorkbenchSession {
       body.reviewContentHash
     );
   }
-
   async inspectReport(body: {
     configurationRevision: number;
     contentRevision: number;

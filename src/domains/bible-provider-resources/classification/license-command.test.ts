@@ -211,6 +211,8 @@ describe('license command source/destination and responsibility boundary', () =>
     expect(output.classifications.some((row) => row.source === 'gemini')).toBe(true);
     expect(f.adapter.apply).not.toHaveBeenCalled();
     expect(f.dependencies.transport).toHaveBeenCalledTimes(6);
+    expect(f.messages.join('\n')).toContain('Database remains unchanged');
+    expect(f.messages.join('\n')).toContain('JSON sync:');
   });
   it.each(['database', 'both'] as const)(
     'permits initialized database-sourced yes maintenance to %s with authoritative unknown and no invented human notes',
@@ -335,7 +337,7 @@ describe('license command source/destination and responsibility boundary', () =>
     expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
   });
 
-  it('writes an interactive attested JSON output and independent DB payload without inference', async () => {
+  it('writes an interactive mixed-state JSON output and independent DB payload without inference', async () => {
     const f = await fixture(false);
     f.io.ask
       .mockResolvedValueOnce('W')
@@ -366,8 +368,8 @@ describe('license command source/destination and responsibility boundary', () =>
     );
     expect(debugExit).toBe(2);
     const output = await f.readOutput();
-    expect(checkLicenseArtifactReview(output).status).toBe('ready');
-    expect(output.attestation?.reviewedBy).toBe('Explicit reviewer');
+    expect(checkLicenseArtifactReview(output).status).toBe('review-required');
+    expect(output.attestation).toBeUndefined();
     expect(f.applied[0].classifications.map((row) => row.status)).toEqual(
       output.classifications.map((row) => row.status)
     );
@@ -379,7 +381,7 @@ describe('license command source/destination and responsibility boundary', () =>
     }
     expect(f.dependencies.transport).not.toHaveBeenCalled();
   });
-  it('can attest after an interactive edit is reverted to the same bytes without republishing reports', async () => {
+  it('records a named same-status human decision in interactive review', async () => {
     const f = await fixture(false);
     const key = f.artifact.classifications[0].normalizedText;
     f.artifact = overrideLicenseClassification(
@@ -395,14 +397,9 @@ describe('license command source/destination and responsibility boundary', () =>
       .mockResolvedValueOnce('1')
       .mockResolvedValueOnce('forbidden')
       .mockResolvedValueOnce('Different human rationale.')
-      .mockResolvedValueOnce('1')
-      .mockResolvedValueOnce('forbidden')
-      .mockResolvedValueOnce('Original human rationale.')
+      .mockResolvedValueOnce('Explicit reviewer')
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('W')
-      .mockResolvedValueOnce('yes')
-      .mockResolvedValueOnce('Explicit reviewer')
-      .mockResolvedValueOnce('Checked reverted exact revision')
       .mockResolvedValueOnce('yes');
     expect(
       await runLicenseCommand(
@@ -412,9 +409,13 @@ describe('license command source/destination and responsibility boundary', () =>
     ).toBe(2);
     expect(f.messages.at(-1)).toContain('Wrote decisions');
     const output = await f.readOutput();
-    expect(checkLicenseArtifactReview(output).status).toBe('ready');
-    expect(output.attestation?.reviewedBy).toBe('Explicit reviewer');
-    expect(output.classifications[0].rationale).toBe('Original human rationale.');
+    expect(checkLicenseArtifactReview(output).status).toBe('review-required');
+    expect(output.classifications[0]).toMatchObject({
+      status: 'forbidden',
+      reviewState: 'human_reviewed',
+      reviewedBy: 'Explicit reviewer',
+      rationale: 'Different human rationale.',
+    });
     expect(f.dependencies.transport).not.toHaveBeenCalled();
   });
   it('rejects bulk reattestation flags and leaves an attested source untouched', async () => {

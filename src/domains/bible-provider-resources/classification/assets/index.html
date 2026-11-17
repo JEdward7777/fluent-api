@@ -157,7 +157,7 @@
               >
               <label>Report directory <input name="reportDir" placeholder="Default" /></label>
               <label><input type="checkbox" name="noCache" /> Ignore cached requests</label>
-              <label><input type="checkbox" name="force" /> Allow table replacement</label>
+              <input type="checkbox" name="force" hidden />
               <label><input type="checkbox" name="preserve" /> Preserve status</label>
             </div>
           </details>
@@ -173,7 +173,7 @@
           <p id="cli-connection-note">
             Use these settings in terminal review. The CLI uses its environment database connection.
           </p>
-          <p>For a database source, CLI plan-only may call Gemini and write cache or reports.</p>
+          <p>For database sources, CLI plan-only may request uncached samples shown at Inspect.</p>
           <p>It may write JSON too, while leaving policy untouched.</p>
           <pre id="cli-command"></pre>
         </details>
@@ -183,7 +183,7 @@
           ><button id="stop" type="button" hidden>Stop after current key</button>
         </div>
         <p id="inspect-help">Inspect reads selected files, database and request cache as needed.</p>
-        <p id="analysis-help">Analysis may call Gemini and write cache.</p>
+        <p id="analysis-help">Analysis follows the inspected request plan.</p>
         <div id="inspection" hidden></div>
         <section id="review" hidden aria-labelledby="review-heading">
           <h2 id="review-heading">Review classification evidence</h2>
@@ -222,6 +222,7 @@
                     <th>Affected Bibles</th>
                     <th>Source</th>
                     <th>Decision</th>
+                    <th>Review state</th>
                     <th>Saved model votes</th>
                   </tr>
                 </thead>
@@ -250,9 +251,9 @@
           <button id="normal-preview-button" type="button">Preview current revision</button>
           <div id="preview-result" role="status"></div>
           <form id="attestation" hidden>
-            <h3>Attest this exact review</h3>
-            <p>Sign only evidence you personally reviewed. Retained unknowns need human notes.</p>
-            <p>Attestation changes JSON bytes. Preview again afterward.</p>
+            <h3>Optional whole-file assertion</h3>
+            <p>This assertion is optional and separate from named row decisions.</p>
+            <p>The assertion changes JSON bytes. Preview again afterward.</p>
             <label>Reviewer name <input name="reviewedBy" required maxlength="200" /></label>
             <label>Reason <textarea name="reviewReason" required></textarea></label>
             <label><input name="responsibility" type="checkbox" required /> I reviewed.</label>
@@ -278,12 +279,12 @@
           </div>
           <div id="normal-save" hidden>
             <h3>Save this preview</h3>
-            <p>Save publishes reviewed JSON and policy changes. Save cannot be canceled.</p>
+            <p>Save writes the independent JSON and policy results shown above.</p>
             <label id="save-replacement" hidden>
               <input id="save-replacement-agreement" type="checkbox" />
               <span>I agree to replace policy.</span>
             </label>
-            <button id="normal-save-button" type="button" disabled>Save reviewed changes</button>
+            <button id="normal-save-button" type="button" disabled>Save previewed decisions</button>
             <p id="save-result" role="status"></p>
           </div>
         </section>
@@ -291,10 +292,12 @@
       <section aria-labelledby="operations-heading">
         <h2 id="operations-heading">What the selections mean</h2>
         <ul>
-          <li><strong>JSON → JSON:</strong> review saved evidence without new inference.</li>
-          <li><strong>Database → JSON:</strong> analyze notices and prepare a candidate file.</li>
-          <li><strong>JSON → database:</strong> import reviewed policy.</li>
-          <li><strong>Database → database:</strong> maintain existing authoritative decisions.</li>
+          <li><strong>JSON → JSON:</strong> overwrite JSON from the current draft.</li>
+          <li><strong>Database → JSON:</strong> sync JSON; database stays unchanged.</li>
+          <li><strong>JSON → database:</strong> sync by rank; retain omissions.</li>
+          <li><strong>Database → database:</strong> overwrite selected rows; retain omissions.</li>
+          <li><strong>JSON → both:</strong> overwrite JSON and independently sync the database.</li>
+          <li><strong>Database → both:</strong> sync JSON and overwrite selected database rows.</li>
         </ul>
         <p id="alternatives-note">Both writes file and database targets.</p>
       </section>

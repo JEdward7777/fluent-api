@@ -7,15 +7,6 @@ import { checkLicenseArtifactReview } from '../license-artifact';
 import { LicenseInspectionStaleError, requireFreshLicenseSources } from './license-freshness';
 import { inspectLicensePreflight } from './license-preflight';
 
-export class LicenseBootstrapRequiredError extends Error {
-  constructor() {
-    super(
-      'Review required: an empty classification table bootstraps only from attested JSON. Export database-to-JSON, review it, then import that JSON.'
-    );
-    this.name = 'LicenseBootstrapRequiredError';
-  }
-}
-
 export function parseLicenseArtifactBytes(bytes: string) {
   const checked = checkLicenseArtifactReview(JSON.parse(bytes));
   if (checked.status === 'invalid') throw new Error(checked.reason);
@@ -35,7 +26,12 @@ export async function requireFreshLicenseInspection(
   if (checked?.status === 'invalid') throw new Error(checked.reason);
   const preflight = await inspectLicensePreflight({
     database: options.source === 'database' ? fresh.database : undefined,
-    jsonClassificationKeys: checked?.artifact.classifications.map((row) => row.normalizedText),
+    jsonClassifications: checked?.artifact.classifications,
+    jsonNotices: checked?.artifact.catalog.flatMap((row) =>
+      row.rawNotice?.trim() ? [row.rawNotice] : []
+    ),
+    rerunRule: options.rerunRule,
+    rerunModel: options.rerunModel,
     model: options.model,
     sampleCount: options.sampleCount,
     cacheDir: options.cacheDir,

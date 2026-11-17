@@ -8,8 +8,8 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed }) {
   document.getElementById('guide-analyze-effect').textContent = next.practice
     ? ' It uses saved JSON evidence without a model request.'
     : next.source === 'json'
-      ? ' It uses saved JSON evidence without a model request or policy write.'
-      : ' It may call Gemini and write request cache, but does not save policy or artifacts.';
+      ? ` It uses saved JSON evidence${next.inspected?.preflight.modelKeys ? ` and may make ${next.inspected.preflight.expectedUncachedRequests} previewed model requests` : ' without a model request'}; it does not publish policy.`
+      : ' It may call the configured model and write request cache when Inspect shows uncached requests; it does not save policy or artifacts.';
   document.getElementById('guide-preview-effect').textContent = next.practice
     ? ' It shows the exact incomplete scratch JSON without changing the source.'
     : ' It checks and shows the exact changes without saving them.';
@@ -18,7 +18,7 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed }) {
     : 'Click Preview current revision.';
   document.getElementById('guide-save-action').textContent = next.practice
     ? 'Click Save incomplete scratch JSON.'
-    : 'Click Save reviewed changes.';
+    : 'Click Save previewed decisions.';
   document.getElementById('guide-save-effect').textContent = next.practice
     ? ' It writes only incomplete JSON to private scratch; it does not update the source or database.'
     : ' It writes the exact previewed JSON and any selected policy changes after required agreements.';
@@ -55,15 +55,13 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed }) {
     message = next.practice
       ? 'Done: Incomplete JSON was saved to private scratch. See its path below.'
       : 'Done: Save completed. See the written paths and policy result below.';
-  } else if (next.state === 'previewed' && next.preview?.incomplete && next.preview?.replace) {
-    step = 'preview';
-    message =
-      'Next: Complete the review attestation below, then preview the changed revision again.';
   } else if (next.state === 'previewed') {
     step = 'save';
     message = next.practice
       ? 'Next: Click Save incomplete scratch JSON to write only the private scratch copy.'
-      : 'Next: Check any required replacement agreement, then click Save reviewed changes.';
+      : next.preview?.conflicts?.length
+        ? 'Next: Resolve the listed destination conflicts with an explicit row decision, then preview again.'
+        : 'Next: Click Save previewed decisions.';
   } else if (next.analysis) {
     step = 'review';
     message = next.practice

@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 import type { LicenseCommandOptions } from './license-command-options';
+import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
 import { operationSchema, setupSchema } from './license-workbench-schema';
 import { LicenseWorkbenchSession } from './license-workbench-session';
@@ -24,6 +25,7 @@ const assets = new Map([
   ['/guide.js', ['guide.js', 'text/javascript; charset=utf-8']],
   ['/help.js', ['help.js', 'text/javascript; charset=utf-8']],
   ['/review.js', ['review.js', 'text/javascript; charset=utf-8']],
+  ['/review-rerun.js', ['review-rerun.js', 'text/javascript; charset=utf-8']],
   ['/save.js', ['save.js', 'text/javascript; charset=utf-8']],
   ['/preview-text.js', ['preview-text.js', 'text/javascript; charset=utf-8']],
 ] as const);
@@ -170,6 +172,7 @@ function createLicenseWorkbenchApp(
               normalizedText: z.string(),
               status: z.enum(['allowed', 'forbidden', 'unknown']),
               reason: z.string().trim().min(1),
+              reviewedBy: z.string().trim().min(1).max(200),
               unknownNote: z.string().trim().min(1).optional(),
             })
             .strict(),
@@ -189,6 +192,23 @@ function createLicenseWorkbenchApp(
       return c.json({ setup: session.visible, warning: result.warning });
     } catch (error) {
       return c.text(error instanceof Error ? error.message : 'Edit failed', 409);
+    }
+  });
+  app.post('/api/review/rerun', async (c) => {
+    const parsed = z
+      .object({
+        configurationRevision: z.number().int().positive(),
+        contentRevision: z.number().int().nonnegative(),
+        id: z.string().regex(/^[a-f0-9]{64}$/),
+        kind: z.enum(['rule', 'model']),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid reassessment selection', 400);
+    try {
+      return c.json(await session.selectRerun(parsed.data));
+    } catch (error) {
+      return c.text(error instanceof Error ? error.message : 'Reassessment unavailable', 409);
     }
   });
   app.post('/api/practice/preview', async (c) => {
@@ -316,7 +336,8 @@ export async function startLicenseWorkbenchServer(
   options: LicenseCommandOptions,
   requestedPort: number,
   practice = false,
-  localProxyUrl?: string
+  localProxyUrl?: string,
+  injected?: Pick<LicenseWorkflowDependencies, 'apiKey' | 'database' | 'transport' | 'fs'>
 ) {
   if (localProxyUrl) {
     const proxy = new URL(localProxyUrl);
@@ -335,7 +356,7 @@ export async function startLicenseWorkbenchServer(
       throw new Error('Invalid loopback CodeServer proxy URL');
   }
   const token = randomBytes(32).toString('base64url');
-  const session = new LicenseWorkbenchSession(options, practice);
+  const session = new LicenseWorkbenchSession(options, practice, injected);
   let selectedPort = requestedPort;
   const listen = () =>
     new Promise<Server>((resolve, reject) => {

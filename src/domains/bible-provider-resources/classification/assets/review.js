@@ -1,3 +1,5 @@
+import { reviewRerunActions } from './review-rerun.js';
+
 const section = document.getElementById('review');
 const form = document.getElementById('review-filter');
 const rows = document.getElementById('review-rows');
@@ -6,6 +8,7 @@ const detail = document.getElementById('review-detail');
 const pager = document.getElementById('review-pager');
 let request;
 let submitEdit;
+let selectRerun;
 let onDraftChange = () => {};
 let currentSetup;
 let selectedId = null;
@@ -91,6 +94,10 @@ async function loadRows() {
         node('td', item.status),
         node(
           'td',
+          `${item.reviewState ?? 'unreviewed'}${item.reviewedBy ? ` — ${item.reviewedBy}` : ''}`
+        ),
+        node(
+          'td',
           item.sampleCount
             ? `${item.votes.allowed} allowed / ${item.votes.forbidden} forbidden / ${item.votes.unknown} unknown`
             : 'No model votes'
@@ -100,7 +107,7 @@ async function loadRows() {
         .slice(1)
         .map((cell, index) => [
           cell,
-          ['Affected Bibles', 'Source', 'Decision', 'Saved model votes'][index],
+          ['Affected Bibles', 'Source', 'Decision', 'Review state', 'Saved model votes'][index],
         ]))
         cell.dataset.label = label;
       rows.append(tr);
@@ -122,7 +129,7 @@ function reviewEditor(item) {
   const heading = node('h4', 'Human review');
   const help = node(
     'p',
-    'Choose a decision and give your rationale. An unknown note can also be updated separately. Saving an edit invalidates any prior preview and attestation.'
+    'Name the person making this row decision and give a rationale. Confirming the current status is a new human review event. An unknown note is optional and can be updated separately. Saving an edit invalidates the prior preview.'
   );
   const decision = node('select');
   decision.name = 'status';
@@ -134,6 +141,12 @@ function reviewEditor(item) {
   reason.rows = 3;
   reason.value = item.source === 'manual' ? item.rationale : '';
   const initialReason = reason.value;
+  const reviewer = node('input');
+  reviewer.name = 'reviewedBy';
+  reviewer.type = 'text';
+  reviewer.required = false;
+  reviewer.maxLength = 200;
+  reviewer.value = item.reviewedBy ?? '';
   const note = node('textarea');
   note.name = 'note';
   note.rows = 3;
@@ -143,6 +156,10 @@ function reviewEditor(item) {
   decisionLabel.append(decision);
   const reasonLabel = node('label', 'Reason for decision');
   reasonLabel.append(reason);
+  const reviewerLabel = node('label', 'Human reviewer name');
+  reviewerLabel.title =
+    'Name the person who makes this decision. The server records its event time.';
+  reviewerLabel.append(reviewer);
   const noteLabel = node(
     'label',
     'Human note for retained unknown (leave blank to use the reason)'
@@ -172,6 +189,7 @@ function reviewEditor(item) {
     heading,
     help,
     decisionLabel,
+    reviewerLabel,
     reasonLabel,
     warning,
     agreement,
@@ -233,6 +251,7 @@ function reviewEditor(item) {
             normalizedText: item.normalizedText,
             status: decision.value,
             reason: reason.value,
+            reviewedBy: reviewer.value,
             ...(decision.value === 'unknown' && note.value.trim()
               ? { unknownNote: note.value }
               : {}),
@@ -249,8 +268,8 @@ function reviewEditor(item) {
       });
       setDraftDirty(false);
       editMessage = result.warning
-        ? `Review edit applied. ${result.warning} Preview and attestation require renewal.`
-        : 'Review edit applied. Preview and attestation require renewal.';
+        ? `Review edit applied. ${result.warning} Preview again before Save.`
+        : 'Review edit applied. Preview again before Save.';
       if (result.setup.contentRevision === item.contentRevision) {
         error.textContent = 'No content changed; the existing preview remains current.';
         editMessage = '';
@@ -310,6 +329,10 @@ async function openDetail(id) {
       field('Stable row ID', item.id),
       field('Normalized key', item.normalizedText),
       field('Decision', item.status),
+      field('Review state', item.reviewState ?? 'unreviewed'),
+      field('Decision event', item.decisionAt ?? 'Unknown legacy time'),
+      field('Human reviewer', item.reviewedBy ?? 'None'),
+      field('Human review event', item.humanReviewedAt ?? 'None'),
       field('Source', item.source),
       field('Rationale', item.rationale),
       field('Content revision', item.contentRevision),
@@ -323,6 +346,22 @@ async function openDetail(id) {
       facts,
       reviewEditor(item)
     );
+    if (!currentSetup.practice) {
+      detail.append(
+        node('h4', 'Explicit reassessment'),
+        reviewRerunActions(item, {
+          selectRerun,
+          hasDraft: () => editDirty,
+          isBusy: () =>
+            externalBusy ||
+            Boolean(currentSetup.activeOperationId) ||
+            !['reviewing', 'previewed'].includes(currentSetup.state),
+          showError: (message) => {
+            summary.textContent = message;
+          },
+        })
+      );
+    }
     const variants = node('div');
     for (const [index, variant] of item.variants.entries())
       variants.append(block(`Original notice variant ${index + 1}`, variant));
@@ -386,9 +425,10 @@ async function openDetail(id) {
   }
 }
 
-export function initReview(fetchReview, sendEdit, draftChanged) {
+export function initReview(fetchReview, sendEdit, draftChanged, onRerun = async () => {}) {
   request = fetchReview;
   submitEdit = sendEdit;
+  selectRerun = onRerun;
   onDraftChange = draftChanged;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -413,11 +453,15 @@ export function initReview(fetchReview, sendEdit, draftChanged) {
 export function setReviewBusy(busy) {
   externalBusy = busy;
   updateEditorControls();
+  for (const button of detail.querySelectorAll('[data-rerun]')) button.disabled = busy;
 }
 
 export function updateReview(setup) {
   currentSetup = setup;
   updateEditorControls();
+  for (const button of detail.querySelectorAll('[data-rerun]'))
+    button.disabled =
+      Boolean(setup.activeOperationId) || !['reviewing', 'previewed'].includes(setup.state);
   section.hidden = !setup.analysis;
   if (!setup.analysis) {
     viewEpoch++;

@@ -77,12 +77,16 @@ export async function inspectLicenseWorkflowInputs(input: {
   const samePath = resolve(options.output) === resolve(options.input);
   const outputBytes =
     samePath && options.source === 'json' ? inputBytes : await fs.read(options.output);
+  const jsonArtifact =
+    options.source === 'json' ? parseLicenseArtifactBytes(inputBytes!) : undefined;
   const preflight = await inspectLicensePreflight({
     database: options.source === 'database' ? snapshot : undefined,
-    jsonClassificationKeys:
-      options.source === 'json'
-        ? parseLicenseArtifactBytes(inputBytes!).classifications.map((row) => row.normalizedText)
-        : undefined,
+    jsonClassifications: jsonArtifact?.classifications,
+    jsonNotices: jsonArtifact?.catalog.flatMap((row) =>
+      row.rawNotice?.trim() ? [row.rawNotice] : []
+    ),
+    rerunRule: options.rerunRule,
+    rerunModel: options.rerunModel,
     model: options.model,
     sampleCount: options.sampleCount,
     cacheDir: options.cacheDir,

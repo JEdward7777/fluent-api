@@ -9,7 +9,10 @@ export const LICENSE_COMMAND_HELP = `Usage: npm run db:classify:licenses -- --so
   --plan-only Produce plans/reports and JSON preview when selected; no database writes.
   --force Deprecated compatibility flag; does not change save behavior.
   --reviewer=NAME --review-reason=REASON Retired bulk flags; use a named per-row decision.
+  Interactive review offers optional [A] whole-file assertion; it never promotes rows or gates Save.
   --no-cache --cache-dir=PATH --sample-count=INTEGER (>=2, default 3)
+  --rerun-rule=KEY_SHA256 Repeat to reevaluate selected rows with current rules.
+  --rerun-model=KEY_SHA256 Repeat to request a new assessment for selected rows.
   --model=google:<id> (overrides GOOGLE_AI_MODEL; default google:gemini-3.8-flash)
   --report-formats=markdown|html|markdown,html|none --report-dir=PATH --open-report
   --preserve-existing-non-unknowns Invocation only: preserve current resource policy in the preview;
@@ -41,6 +44,8 @@ export interface LicenseCommandOptions {
   reportDir?: string;
   openReport: boolean;
   preserveExistingNonUnknowns: boolean;
+  rerunRule?: string[];
+  rerunModel?: string[];
 }
 
 export function parseLicenseCommandOptions(
@@ -68,6 +73,8 @@ export function parseLicenseCommandOptions(
       'report-dir': { type: 'string' },
       'open-report': { type: 'boolean' },
       'preserve-existing-non-unknowns': { type: 'boolean' },
+      'rerun-rule': { type: 'string', multiple: true },
+      'rerun-model': { type: 'string', multiple: true },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -111,7 +118,12 @@ export function parseLicenseCommandOptions(
     reportDir: values['report-dir'],
     openReport: values['open-report'] ?? false,
     preserveExistingNonUnknowns: values['preserve-existing-non-unknowns'] ?? false,
+    rerunRule: values['rerun-rule'] ?? [],
+    rerunModel: values['rerun-model'] ?? [],
   };
+  for (const digest of [...(options.rerunRule ?? []), ...(options.rerunModel ?? [])])
+    if (!/^[a-f0-9]{64}$/.test(digest))
+      throw new Error('Rerun keys must be lowercase SHA-256 digests of normalized license keys');
   for (const path of [options.input, options.output, options.cacheDir, options.reportDir])
     if (path !== undefined && !path.trim()) throw new Error('Paths must not be blank');
   selectLicenseReportFormats(options.reportFormats, {

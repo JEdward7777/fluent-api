@@ -1,24 +1,42 @@
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseReviewEdit } from './license-workflow.types';
 
-import { overrideLicenseClassification, reviseLicenseArtifact } from '../license-artifact';
+import {
+  licenseOverrideWarning,
+  recordHumanLicenseDecision,
+  reviseLicenseArtifact,
+} from '../license-artifact';
 import { freezeLicenseRevision } from '../license-review-revision';
 
-export function applyLicenseReviewEdit(before: LicenseArtifact, edit: LicenseReviewEdit) {
+export function applyLicenseReviewEdit(
+  before: LicenseArtifact,
+  edit: LicenseReviewEdit,
+  now: () => string = () => new Date().toISOString()
+) {
   let revised: LicenseArtifact;
   let warning: string | null = null;
   if (edit.kind === 'disposition') {
-    const result = overrideLicenseClassification(
+    const prior = before.classifications.find((row) => row.normalizedText === edit.normalizedText);
+    if (!prior) throw new Error('No exact normalized classification exists');
+    warning = licenseOverrideWarning(prior, edit.status);
+    revised = recordHumanLicenseDecision(
       before,
       edit.normalizedText,
       edit.status,
       edit.reason,
-      edit.unknownNote
+      edit.reviewedBy ?? '',
+      now()
     );
-    revised = result.artifact;
-    warning = result.warning;
+    if (edit.unknownNote !== undefined) {
+      if (edit.status !== 'unknown' || !edit.unknownNote.trim())
+        throw new Error('A human note must be nonempty and requires unknown status');
+      revised = reviseLicenseArtifact(revised, (draft) => {
+        draft.classifications.find((row) => row.normalizedText === edit.normalizedText)!.rowNote =
+          edit.unknownNote;
+      });
+    }
   } else {
-    if (!edit.note.trim()) throw new Error('A retained unknown requires a nonempty human note');
+    if (!edit.note.trim()) throw new Error('A human note must be nonempty');
     const row = before.classifications.find(
       (candidate) => candidate.normalizedText === edit.normalizedText
     );

@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto';
 
 import { createRequestCache } from '@/lib/llm/request-cache';
 
+import type { LicenseClassification } from '../license-artifact.schemas';
 import type { LicenseDatabaseSnapshot } from './license-database.types';
+import type { LicenseEligibilityRow } from './license-eligibility';
 
 import { buildLicenseSampleRequest, parseLicenseVote } from '../license-model-contract';
-import { normalizeLicenseNotice } from '../license-normalizer';
-import { matchLicenseRule } from '../license-rules';
+import { planLicenseEligibility } from './license-eligibility';
 
 export interface LicensePreflightSample {
   normalizedText: string;
@@ -30,12 +31,17 @@ export interface LicensePreflight {
   cacheReadEnabled: boolean;
   cost: { status: 'unavailable'; reason: string };
   samples: LicensePreflightSample[];
+  rows: LicenseEligibilityRow[];
 }
 
 /** Mirrors analysis precedence and the structured-request cache validation without transport calls. */
 export async function inspectLicensePreflight(input: {
   database?: LicenseDatabaseSnapshot;
   jsonClassificationKeys?: string[];
+  jsonClassifications?: LicenseClassification[];
+  jsonNotices?: string[];
+  rerunRule?: string[];
+  rerunModel?: string[];
   model: string;
   sampleCount: number;
   cacheDir?: string;
@@ -46,29 +52,49 @@ export async function inspectLicensePreflight(input: {
   let ruleHits = 0;
   let modelKeys = 0;
   const cache = input.noCache ? undefined : createRequestCache(input.cacheDir);
-  const examples = new Map<string, string>();
-  if (input.database) {
-    for (const row of input.database.context.resources) {
-      if (!row.rawNotice?.trim()) continue;
-      const key = normalizeLicenseNotice(row.rawNotice);
-      if (!examples.has(key)) examples.set(key, row.rawNotice);
+  const stored = new Map<string, LicenseClassification>();
+  for (const row of input.database?.classifications ?? [])
+    if (row.evidence) stored.set(row.normalizedText, row.evidence);
+    else
+      stored.set(row.normalizedText, {
+        normalizedText: row.normalizedText,
+        exampleNotice: row.normalizedText,
+        status: row.status,
+        source: 'table',
+        rationale: row.rationale,
+        samples: [],
+        reviewState: row.reviewState,
+        decisionAt: row.decisionAt,
+        reviewedBy: row.reviewedBy,
+        humanReviewedAt: row.humanReviewedAt,
+      });
+  for (const row of input.jsonClassifications ?? []) stored.set(row.normalizedText, row);
+  const notices = input.database
+    ? input.database.context.resources.flatMap((row) =>
+        row.rawNotice?.trim() ? [row.rawNotice] : []
+      )
+    : (input.jsonNotices ?? input.jsonClassificationKeys ?? []);
+  const rows = planLicenseEligibility({
+    notices,
+    stored,
+    ruleDigests: input.rerunRule ?? [],
+    modelDigests: input.rerunModel ?? [],
+    source: input.database ? 'database' : 'json',
+  });
+  for (const row of rows) {
+    if (row.action === 'retain') {
+      tableHits++;
+      continue;
     }
-    for (const row of input.database.classifications)
-      if (!examples.has(row.normalizedText)) examples.set(row.normalizedText, row.normalizedText);
-    const known = new Set(input.database.classifications.map((row) => row.normalizedText));
-    for (const [key, notice] of [...examples].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-      if (known.has(key)) {
-        tableHits++;
-        continue;
-      }
-      if (matchLicenseRule(notice)) {
-        ruleHits++;
-        continue;
-      }
+    if (row.action === 'rule' && row.ruleMatches) {
+      ruleHits++;
+      continue;
+    }
+    if (row.action === 'model') {
       modelKeys++;
       for (let index = 1; index <= input.sampleCount; index++) {
         const request = buildLicenseSampleRequest(
-          notice,
+          row.exampleNotice,
           'google',
           input.model.replace(/^google:/, ''),
           index
@@ -84,7 +110,7 @@ export async function inspectLicensePreflight(input: {
           }
         }
         samples.push({
-          normalizedText: key,
+          normalizedText: row.normalizedText,
           index,
           validCacheHit,
           expectedRequests: validCacheHit ? 0 : 1,
@@ -96,15 +122,13 @@ export async function inspectLicensePreflight(input: {
         });
       }
     }
-  } else {
-    for (const key of input.jsonClassificationKeys ?? []) examples.set(key, key);
   }
   const validCacheHits = samples.filter((sample) => sample.validCacheHit).length;
   const expectedUncachedRequests = samples.length - validCacheHits;
   return {
     source: input.database ? 'database' : 'json',
-    distinctKeys: examples.size,
-    historicalClassificationKeys: input.database ? 0 : examples.size,
+    distinctKeys: rows.length,
+    historicalClassificationKeys: input.database ? 0 : stored.size,
     tableHits,
     ruleHits,
     modelKeys,
@@ -118,5 +142,6 @@ export async function inspectLicensePreflight(input: {
         'No locally verified model pricing or output and thinking token estimate is available.',
     },
     samples,
+    rows,
   };
 }

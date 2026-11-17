@@ -67,6 +67,12 @@ initReview(
       renderSave(setup);
       renderGuide(setup);
     }
+  },
+  async (body) => {
+    const next = await request('review/rerun', 'POST', body);
+    render(next, true);
+    status.textContent =
+      'Row reassessment selected. Inspect to review exact rule and model request estimates before Analyze.';
   }
 );
 function render(next, populate = false) {
@@ -112,13 +118,13 @@ function render(next, populate = false) {
     : 'What the selections mean';
   document.getElementById('alternatives-note').textContent = next.practice
     ? 'Practice uses saved JSON → scratch JSON. Database targets require a separate normal workbench launch.'
-    : 'Both writes file and database targets. Ordinary sync propagates policy later. A nonempty table needs force and reviewed attestation before replacement.';
+    : 'Both previews JSON and database destinations independently. Cross-storage sync preserves stronger destination decisions and omitted rows.';
   document.getElementById('inspect-help').textContent = next.practice
     ? 'Inspect reads the selected saved JSON or bundled example and copies it into a new private scratch directory. No model or database is used.'
     : 'Inspect reads selected files, database and request cache as needed.';
   document.getElementById('analysis-help').textContent = next.practice
     ? 'Practice analysis uses saved JSON evidence without model requests.'
-    : 'Analysis may call Gemini and write cache; it does not publish policy or artifacts.';
+    : `Analysis uses the inspected eligibility plan${next.inspected?.preflight.modelKeys ? ` and may make ${next.inspected.preflight.expectedUncachedRequests} uncached model requests` : ' without model requests'}; it does not publish policy or artifacts.`;
   if (next.practice) {
     for (const key of ['output', 'cacheDir', 'reportDir', 'reportFormats'])
       form.elements[key].value = next[key] ?? '';
@@ -206,7 +212,7 @@ function render(next, populate = false) {
   inspection.hidden = !next.inspected;
   if (next.inspected) {
     const preflight = next.inspected.preflight;
-    inspection.textContent = `Inspected ${next.inspected.inspectedAt}. ${preflight.distinctKeys} distinct keys; ${preflight.tableHits} table hits; ${preflight.ruleHits} rule hits; ${preflight.modelKeys} model keys. ${preflight.validCacheHits} valid cache hits; ${preflight.expectedUncachedRequests} expected requests, up to ${preflight.maximumAttempts} attempts. Cost unavailable: ${preflight.cost.reason}`;
+    inspection.textContent = `Inspected ${next.inspected.inspectedAt}. ${preflight.distinctKeys} distinct keys; ${preflight.tableHits} saved decisions (${preflight.savedEvidenceReuse} complete saved model assessments reused); ${preflight.ruleHits} rule matches; ${preflight.modelKeys} model keys. ${preflight.validCacheHits} valid cache hits; ${preflight.expectedUncachedRequests} expected uncached requests, up to ${preflight.maximumAttempts} attempts. ${preflight.rows.map((row) => `${row.normalizedText}: ${row.action} (${row.reason}${row.ruleMatches ? '; rule match' : '; rule nonmatch'})`).join(' | ')} Cost unavailable: ${preflight.cost.reason}`;
   }
   if (next.state === 'uncertain')
     status.textContent =

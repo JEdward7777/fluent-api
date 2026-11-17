@@ -6,7 +6,7 @@ const help = [
   ],
   [
     '#setup [name="destination"]',
-    'Choose where a reviewed result would be saved: a JSON file, the configured database, or both. Practice saves incomplete scratch JSON only.',
+    'Choose the JSON file, database, or both as independent destinations. Practice saves scratch JSON only.',
   ],
   [
     '#setup [name="databaseMode"]',
@@ -47,11 +47,11 @@ const help = [
   ],
   [
     '#setup [name="model"]',
-    'Gemini provider and model ID used only when analysis needs new model inference. Saved evidence and practice do not call the model.',
+    'Model used for new database keys or explicitly selected row reassessment. Inspect shows requests before Analyze.',
   ],
   [
     '#setup [name="samples"]',
-    'Number of model votes requested for each key that needs new inference. Saved evidence and practice make no model requests.',
+    'Number of model votes for each selected model key. Inspect shows valid cache hits and uncached requests.',
   ],
   [
     '#setup [name="cacheDir"]',
@@ -68,10 +68,6 @@ const help = [
   [
     '#setup [name="noCache"]',
     'Request fresh model results instead of using cached requests when new inference is needed. Practice makes no model requests.',
-  ],
-  [
-    '#setup [name="force"]',
-    'Permit replacement of an existing destination database table after the required preview and Save agreement.',
   ],
   [
     '#setup [name="preserve"]',
@@ -117,15 +113,19 @@ const help = [
   ],
   [
     '.review-editor [name="status"]',
-    'Choose the human classification decision for this notice. Applying it invalidates the previous preview and attestation.',
+    'Choose a named human decision for this notice. Confirming the same status records a new human review event.',
   ],
   [
     '.review-editor [name="reason"]',
     'Give the rationale for a human decision, including why any automatic all-rights-reserved decision is overridden.',
   ],
   [
+    '.review-editor [name="reviewedBy"]',
+    'Name the person who makes this exact row decision. Its event time is recorded by the server.',
+  ],
+  [
     '.review-editor [name="note"]',
-    'Explain why an unknown classification is retained. Leave blank to use the decision reason when applying an unknown decision.',
+    'Optional note for an unknown classification. Updating only this note leaves the review event unchanged.',
   ],
   [
     '.review-editor input[type="checkbox"]',

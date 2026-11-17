@@ -35,7 +35,7 @@ describe('license workflow inspection and analysis', () => {
       source: 'json',
       distinctKeys: 3,
       historicalClassificationKeys: 3,
-      tableHits: 0,
+      tableHits: 3,
       ruleHits: 0,
       modelKeys: 0,
       expectedUncachedRequests: 0,
@@ -259,6 +259,7 @@ describe('license workflow inspection and analysis', () => {
         normalizedText: key,
         status: 'allowed',
         reason: 'Checked source terms.',
+        reviewedBy: 'Named reviewer',
       },
       1,
       1

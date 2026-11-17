@@ -133,8 +133,6 @@ export function attestLicenseArtifact(
   metadata: Omit<NonNullable<LicenseArtifact['attestation']>, 'reviewContentHash'>
 ): LicenseArtifact {
   const artifact = reviewableContent(value);
-  if (artifact.classifications.some((row) => row.status === 'unknown' && !row.rowNote))
-    throw new Error('Every retained unknown classification requires a human row note');
   artifact.attestation = licenseArtifactSchema.shape.attestation
     .unwrap()
     .parse({ ...metadata, reviewContentHash: artifact.reviewContentHash });

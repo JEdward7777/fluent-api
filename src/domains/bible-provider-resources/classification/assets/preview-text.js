@@ -8,14 +8,13 @@ export function licenseWorkbenchPreviewLines(next) {
       (target) =>
         `${target.role}: ${target.path} (${target.existed ? `will replace SHA-256 ${target.previousHash}` : 'new file'}).`
     ),
-    preview.replace
-      ? 'JSON import replaces the whole classification table. It changes no resource-cache rows now.'
-      : next.destination === 'json'
-        ? 'This Save writes JSON only; it does not import policy.'
-        : 'Database maintenance writes changed classification rows only.',
-    preview.requiresForceAgreement
-      ? 'The target policy table is nonempty. Force must be selected in setup, and separate replacement agreement is required at Save.'
-      : '',
+    preview.json
+      ? `JSON ${preview.json.operation}: ${preview.json.inserted.length} inserts, ${preview.json.updated.length} updates, ${preview.json.preserved.length} preserved, ${preview.json.unchanged.length} unchanged.`
+      : 'No JSON write selected.',
+    preview.database
+      ? `Database ${preview.database.operation}: ${preview.database.inserted.length} inserts, ${preview.database.updated.length} updates, ${preview.database.preserved.length} preserved, ${preview.database.unchanged.length} unchanged; no deletes or resource-cache writes.`
+      : 'Database remains unchanged.',
+    ...(preview.conflicts ?? []).map((conflict) => `Save conflict: ${conflict}`),
     preview.policy
       ? `Policy diff: ${preview.policy.inserts.length} inserts, ${preview.policy.updates.length} updates, ${preview.policy.deletes.length} deletes.`
       : 'No immediate policy diff in this JSON-only Save.',
@@ -31,7 +30,7 @@ export function licenseWorkbenchPreviewLines(next) {
       : '',
     preview.forecast?.preservationWarning ?? '',
     preview.incomplete
-      ? `JSON is incomplete. ${preview.review?.reasons.join(' ') ?? ''} ${preview.replace ? 'It cannot replace policy until attested.' : next.destination === 'json' ? 'It can be saved as JSON.' : 'Maintenance can write changed classification rows; this JSON remains incomplete.'}`
-      : 'Review is attested. The exact hash above is bound to this preview.',
+      ? 'The optional whole-file assertion is absent or no longer bound to this content. Validated mixed-state decisions can still be saved.'
+      : 'A separate whole-file assertion remains bound to this content.',
   ];
 }
