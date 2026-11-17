@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import * as schema from '@/db/schema';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
 
+import { recordHumanLicenseDecision } from '../license-artifact';
 import { createLicenseDatabaseAdapter } from './license-classifications.service';
 import { makeCommandFixture } from './license-command.test-fixtures';
 import { LicenseWorkflow } from './license-workflow';
@@ -57,6 +58,92 @@ describe('save through actual classification adapter', () => {
       expect(rows).toHaveLength(f.artifact.classifications.length);
       expect(rows.some((row) => row.status === 'unknown')).toBe(true);
       expect(rows.every((row) => row.reviewedBy === null)).toBe(true);
+      expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
+      await workflow.close();
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it('replays a second identical JSON-to-DB workflow Save with zero DB delta rows', async () => {
+    const f = await makeCommandFixture(false);
+    try {
+      const adapter = createLicenseDatabaseAdapter();
+      const options = { ...f.options, destination: 'database' as const };
+      const dependencies = { ...f.dependencies, database: async () => adapter };
+      const first = new LicenseWorkflow(options, dependencies);
+      await first.inspect(1);
+      await first.startAnalysis(1);
+      await first.preview(1, 1);
+      await first.save({
+        operationId: 'first-import',
+        configurationRevision: 1,
+        contentRevision: 1,
+        agreeToReplace: false,
+      });
+      await first.close();
+      const before = await database.select().from(schema.license_classifications);
+      const replay = new LicenseWorkflow(options, dependencies);
+      await replay.inspect(1);
+      await replay.startAnalysis(1);
+      const preview = await replay.preview(1, 1);
+      expect(preview.plan.conflicts).toEqual([]);
+      expect(preview.plan.databaseChanges.unchanged).toHaveLength(
+        f.artifact.classifications.length
+      );
+      expect(preview.plan.databaseArtifact?.classifications).toHaveLength(0);
+      await replay.save({
+        operationId: 'repeat-import',
+        configurationRevision: 1,
+        contentRevision: 1,
+        agreeToReplace: false,
+      });
+      expect(await database.select().from(schema.license_classifications)).toEqual(before);
+      expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
+      await replay.close();
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it('saves a partial JSON-to-DB delta while preserving a stronger DB row', async () => {
+    const f = await makeCommandFixture(false);
+    try {
+      const adapter = createLicenseDatabaseAdapter();
+      const key = f.artifact.classifications[1].normalizedText;
+      const human = recordHumanLicenseDecision(
+        f.artifact,
+        key,
+        'allowed',
+        'Confirmed by database reviewer',
+        'DB reviewer',
+        '2026-11-17T12:00:00.000Z'
+      );
+      await adapter.apply(human, true);
+      const missingKey = f.artifact.classifications[2].normalizedText;
+      await database
+        .delete(schema.license_classifications)
+        .where(eq(schema.license_classifications.normalizedText, missingKey));
+      const workflow = new LicenseWorkflow(
+        { ...f.options, destination: 'database' },
+        { ...f.dependencies, database: async () => adapter }
+      );
+      await workflow.inspect(1);
+      await workflow.startAnalysis(1);
+      const preview = await workflow.preview(1, 1);
+      expect(preview.plan.conflicts).toEqual([]);
+      expect(preview.plan.databaseChanges.preserved).toContain(key);
+      expect(preview.plan.databaseChanges.inserted).toContain(missingKey);
+      expect(preview.plan.databaseArtifact?.classifications).toHaveLength(1);
+      await workflow.save({
+        operationId: 'partial-import',
+        configurationRevision: 1,
+        contentRevision: 1,
+        agreeToReplace: false,
+      });
+      const rows = (await adapter.load()).classifications;
+      expect(rows.find((row) => row.normalizedText === key)?.reviewedBy).toBe('DB reviewer');
+      expect(rows.some((row) => row.normalizedText === missingKey)).toBe(true);
       expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
       await workflow.close();
     } finally {
