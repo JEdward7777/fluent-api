@@ -4,7 +4,7 @@ import { resourceProviderEnum } from '@/db/schema';
 import { ttsLicenseStatusSchema } from '@/domains/bibles/bibles.types';
 import { jsonValueSchema, llmRequestSchema } from '@/lib/llm/request-cache';
 
-import { computeLicenseReviewHash } from './license-artifact.hash';
+import { computeLegacyLicenseReviewHash, computeLicenseReviewHash } from './license-artifact.hash';
 import { licenseVoteSchema } from './license-model-contract';
 import { LICENSE_NORMALIZER_VERSION } from './license-normalizer';
 
@@ -117,6 +117,17 @@ const artifactShape = {
     })
     .strict()
     .optional(),
+  historicalAttestation: z
+    .object({
+      schemaVersion: z.literal(2),
+      hashDomainVersion: z.literal(2),
+      reviewedBy: text,
+      reviewReason: text,
+      reviewedAt: z.string().datetime(),
+      reviewContentHash: digest,
+    })
+    .strict()
+    .optional(),
 };
 
 export const licenseArtifactSchema = z
@@ -139,6 +150,7 @@ const legacyArtifactSchema = z
 
 export type LicenseArtifact = z.infer<typeof licenseArtifactSchema>;
 export type LicenseClassification = z.infer<typeof licenseClassificationSchema>;
+export type LegacyLicenseArtifact = z.infer<typeof legacyArtifactSchema>;
 
 /** JSON-only validation and a deep clone also detach passthrough extension values. */
 export function parseLicenseArtifact(value: unknown): LicenseArtifact {
@@ -156,6 +168,13 @@ export function parseLicenseArtifact(value: unknown): LicenseArtifact {
     // V2 whole-file attestations and reviewed_at do not identify per-row human decisions.
     // Retain their evidence and extension bytes in memory; only v3 output gets a new binding.
     const legacy = structuredClone(value) as z.infer<typeof legacyArtifactSchema>;
+    if (computeLegacyLicenseReviewHash(legacy) !== legacy.reviewContentHash)
+      throw new Error('Legacy v2 review content hash mismatch');
+    if (
+      legacy.attestation?.reviewContentHash !== undefined &&
+      legacy.attestation.reviewContentHash !== legacy.reviewContentHash
+    )
+      throw new Error('Legacy v2 attestation is bound to another revision');
     const upgraded = {
       ...legacy,
       schemaVersion: 3,
@@ -171,6 +190,15 @@ export function parseLicenseArtifact(value: unknown): LicenseArtifact {
         humanReviewedAt: null,
       })),
       reviewState: 'incomplete' as const,
+      ...(legacy.attestation
+        ? {
+            historicalAttestation: {
+              schemaVersion: 2 as const,
+              hashDomainVersion: 2 as const,
+              ...legacy.attestation,
+            },
+          }
+        : {}),
     };
     delete upgraded.attestation;
     const artifact = upgraded as LicenseArtifact;
