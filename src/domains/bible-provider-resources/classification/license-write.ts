@@ -80,8 +80,13 @@ export async function writeLicenseDestinations(options: {
   expectedPolicy?: StoredLicenseClassification[];
 }) {
   const fs = options.fs ?? licenseFileIo;
-  const { bytes } = serializeLicenseArtifact(options.fileArtifact ?? options.artifact);
-  if (checkLicenseArtifactReview(JSON.parse(bytes)).status === 'invalid')
+  // A DB delta contains only selected keys and is not a standalone JSON artifact.
+  // Validate/serialize only an actual JSON destination, whose complete rows and
+  // catalog were built and checked in the destination plan.
+  const bytes = options.files.length
+    ? serializeLicenseArtifact(options.fileArtifact ?? options.artifact).bytes
+    : '';
+  if (options.files.length && checkLicenseArtifactReview(JSON.parse(bytes)).status === 'invalid')
     throw new Error('Invalid staged JSON');
   const expected = options.expectedFiles;
   if (expected) {
