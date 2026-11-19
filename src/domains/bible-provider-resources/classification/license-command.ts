@@ -95,6 +95,7 @@ export async function runLicenseCommand(
       preserveExistingNonUnknowns: options.preserveExistingNonUnknowns,
     };
     const emitReports = async (reports: ReturnType<typeof renderLicenseReports>) => {
+      dependencies.signal?.throwIfAborted();
       for (const report of reports.reports) {
         await fs.mkdir(dirname(report.path));
         await fs.write(report.path, report.bytes);
@@ -179,7 +180,6 @@ export async function runLicenseCommand(
       workflow.status.configurationRevision,
       workflow.status.contentRevision
     );
-    dependencies.signal?.throwIfAborted();
     await emitReports(preview.reports);
     const changes = (label: string, operation: string, value: typeof preview.plan.jsonChanges) =>
       `${label} ${operation}: ${value.inserted.length} inserts, ${value.updated.length} updates, ${value.preserved.length} preserved, ${value.unchanged.length} unchanged`;

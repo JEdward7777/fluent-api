@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LlmTransportError } from '@/lib/llm/structured-request';
@@ -32,6 +32,27 @@ describe('license command source/destination and responsibility boundary', () =>
     expect(checkLicenseArtifactReview(await f.readOutput()).status).toBe('ready');
     expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
     expect(f.messages.join('\n')).toContain('Production impact is unavailable');
+  });
+  it('stops before starting report or JSON writes when terminal analysis is interrupted', async () => {
+    const f = await fixture();
+    const stop = new AbortController();
+    f.dependencies.transport.mockImplementation(async () => {
+      stop.abort();
+      return '{"rationale":"Synthetic result.","decision":"allowed"}';
+    });
+    const result = await runLicenseCommand(
+      {
+        ...f.options,
+        source: 'database',
+        reportDir: f.dir,
+        reportFormats: 'html',
+      },
+      { ...f.dependencies, signal: stop.signal }
+    );
+    expect(result).toBe(1);
+    expect(f.dependencies.transport).toHaveBeenCalled();
+    expect(await readdir(f.dir)).not.toContain('license-impact.html');
+    await expect(f.readOutput()).rejects.toMatchObject({ code: 'ENOENT' });
   });
   it('imports ordinary saved JSON without a provider credential or model request', async () => {
     const f = await fixture();
