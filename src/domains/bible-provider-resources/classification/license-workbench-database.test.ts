@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { parseLicenseCommandOptions } from './license-command-options';
 import {
+  ownedWorkbenchDatabase,
   selectWorkbenchDatabase,
   visibleWorkbenchDatabase,
   workbenchDatabaseIdentity,
   workbenchDatabaseUrl,
 } from './license-workbench-database';
+import { licenseWorkbenchBrowserError } from './license-workbench-error';
 import { LicenseWorkbenchSession } from './license-workbench-session';
 
 const parsed = parseLicenseCommandOptions(['--source=json', '--destination=json'], true);
@@ -98,6 +100,19 @@ describe('session database connection', () => {
     expect(url.searchParams.get('sslmode')).toBe('verify-full');
     expect(workbenchDatabaseIdentity(selected)).not.toContain(secret);
     expect(JSON.stringify(visibleWorkbenchDatabase(selected))).not.toContain(secret);
+  });
+
+  it('reports an unreachable inspection without exposing database credentials or SQL', async () => {
+    const adapter = await ownedWorkbenchDatabase(connection);
+    try {
+      await expect(adapter.load()).rejects.toThrow(/^Database inspection failed/);
+      const message = await adapter.load().catch(licenseWorkbenchBrowserError);
+      expect(message).toBe(
+        'Database inspection failed. Check the selected host, credentials, TLS setting and schema.'
+      );
+    } finally {
+      await adapter.close?.();
+    }
   });
 
   it('tests applied settings only, gives generic failures and rejects stale revisions', async () => {

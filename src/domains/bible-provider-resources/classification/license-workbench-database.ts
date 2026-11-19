@@ -102,10 +102,36 @@ export async function testWorkbenchDatabase(connection: WorkbenchDatabase): Prom
   }
 }
 
+export class LicenseWorkbenchDatabaseInspectionError extends Error {
+  constructor(cause: unknown) {
+    super(
+      'Database inspection failed. Check the selected host, credentials, TLS setting and schema.',
+      {
+        cause,
+      }
+    );
+    this.name = 'LicenseWorkbenchDatabaseInspectionError';
+  }
+}
+
 export async function ownedWorkbenchDatabase(connection: WorkbenchDatabase) {
   const { createOwnedLicenseDatabaseAdapter } = await import('./license-classifications.service');
-  return createOwnedLicenseDatabaseAdapter(
-    workbenchDatabaseUrl(connection),
-    connection.mode === 'session' ? () => connection.password : undefined
-  );
+  try {
+    const adapter = createOwnedLicenseDatabaseAdapter(
+      workbenchDatabaseUrl(connection),
+      connection.mode === 'session' ? () => connection.password : undefined
+    );
+    return {
+      ...adapter,
+      async load() {
+        try {
+          return await adapter.load();
+        } catch (error) {
+          throw new LicenseWorkbenchDatabaseInspectionError(error);
+        }
+      },
+    };
+  } catch (error) {
+    throw new LicenseWorkbenchDatabaseInspectionError(error);
+  }
 }
