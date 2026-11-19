@@ -16,6 +16,10 @@ printf '%s\\0' podman "$@" END >> "$LAUNCH_LOG"
 shift
 case "$1" in
   --version) printf 'podman version %s\\n' "$MOCK_PODMAN_VERSION" ;;
+  container)
+    [[ "$*" == "container mount --help" ]] || exit 99
+    printf '%s\\n' "$MOCK_PODMAN_MOUNT_HELP"
+    ;;
   network) printf '%s\\n' "$MOCK_NETWORK_DRIVER" ;;
   build) exit "$MOCK_BUILD_EXIT" ;;
   run) exit "$MOCK_RUN_EXIT" ;;
@@ -61,6 +65,7 @@ async function launcherFixture() {
           LAUNCH_LOG: log,
           HOME: root,
           MOCK_PODMAN_VERSION: '5.3.0',
+          MOCK_PODMAN_MOUNT_HELP: '  podman container mount [options] [CONTAINER...]',
           MOCK_NETWORK_DRIVER: 'bridge',
           MOCK_HOST_UID: '1234',
           MOCK_HOST_OS: 'Linux',
@@ -89,8 +94,9 @@ launcherTest(
       CONTAINER_CONNECTION: 'missing-remote-connection',
     });
     expect(launched.status).toBe(0);
-    const [version, build, run] = launched.calls;
+    const [version, nativeHelp, build, run] = launched.calls;
     expect(version).toEqual(['podman', '--remote=false', '--version']);
+    expect(nativeHelp).toEqual(['podman', '--remote=false', 'container', 'mount', '--help']);
     expect(build).toEqual([
       'podman',
       '--remote=false',
@@ -167,7 +173,7 @@ launcherTest(
       }
     );
     expect(launched.status).toBe(0);
-    expect(launched.calls[1]).toEqual([
+    expect(launched.calls[2]).toEqual([
       'podman',
       '--remote=false',
       'network',
@@ -201,7 +207,7 @@ launcherTest(
     const fixture = await launcherFixture();
     const launched = await fixture.launch(['--runtime=podman'], { MOCK_HOST_UID: '0' });
     expect(launched.stderr).toContain('report directory writable by UID 1000 and GID 1000');
-    expect(launched.calls).toHaveLength(1);
+    expect(launched.calls).toHaveLength(2);
   }
 );
 
@@ -212,18 +218,18 @@ launcherTest(
     for (const network of ['host', 'container:fluent-db', 'pasta', 'slirp4netns', 'none']) {
       const launched = await fixture.launch(['--runtime=podman', `--network=${network}`]);
       expect(launched.stderr).toContain('Select an existing bridge network');
-      expect(launched.calls).toHaveLength(1);
+      expect(launched.calls).toHaveLength(2);
     }
     const wrongDriver = await fixture.launch(['--runtime=podman', '--network=macvlan-db'], {
       MOCK_NETWORK_DRIVER: 'macvlan',
     });
     expect(wrongDriver.status).toBe(1);
-    expect(wrongDriver.calls).toHaveLength(2);
+    expect(wrongDriver.calls).toHaveLength(3);
     const colonPath = await fixture.launch(['--runtime=podman'], {
       LICENSE_REVIEWER_REPORT_DIR: join(fixture.root, 'path:colon'),
     });
     expect(colonPath.stderr).toContain('cannot contain a colon');
-    expect(colonPath.calls).toHaveLength(1);
+    expect(colonPath.calls).toHaveLength(2);
   }
 );
 
@@ -233,11 +239,11 @@ launcherTest(
     const fixture = await launcherFixture();
     const failedBuild = await fixture.launch([], { MOCK_BUILD_EXIT: '2' });
     expect(failedBuild.status).toBe(2);
-    expect(failedBuild.calls).toHaveLength(2);
+    expect(failedBuild.calls).toHaveLength(3);
     const failedRun = await fixture.launch([], { MOCK_RUN_EXIT: '125' });
     expect(failedRun.status).toBe(125);
-    expect(failedRun.calls).toHaveLength(3);
-    expect(failedRun.calls[2]).toContain('127.0.0.1:8766:8766');
+    expect(failedRun.calls).toHaveLength(4);
+    expect(failedRun.calls[3]).toContain('127.0.0.1:8766:8766');
   }
 );
 
@@ -280,5 +286,15 @@ launcherTest(
     const desktop = await fixture.launch([], { MOCK_HOST_OS: 'Darwin' });
     expect(desktop.status).toBe(0);
     expect(desktop.calls.map((call) => call[0])).toEqual(['docker', 'docker', 'docker']);
+    const remote = await fixture.launch(['--runtime=podman'], {
+      MOCK_PODMAN_MOUNT_HELP: 'Manage containers',
+    });
+    expect(remote.status).toBe(1);
+    expect(remote.calls).toHaveLength(2);
+    const automaticRemote = await fixture.launch([], {
+      MOCK_PODMAN_MOUNT_HELP: 'Manage containers',
+    });
+    expect(automaticRemote.status).toBe(0);
+    expect(automaticRemote.calls.at(-1)?.[0]).toBe('docker');
   }
 );

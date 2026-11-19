@@ -60,7 +60,12 @@ podman_supported() {
   version="$("${podman_engine[@]}" --version 2>/dev/null)" || return 1
   [[ "$version" =~ ^podman[[:space:]]version[[:space:]]([0-9]+)\.([0-9]+)(\.|$) ]] || return 1
   local major="${BASH_REMATCH[1]}" minor="${BASH_REMATCH[2]}"
-  ((10#$major > 5 || (10#$major == 5 && 10#$minor >= 3)))
+  ((10#$major > 5 || (10#$major == 5 && 10#$minor >= 3))) || return 1
+
+  # The mount help command is local-only. The version string also exists on remote clients.
+  local mount_help
+  mount_help="$(LC_ALL=C "${podman_engine[@]}" container mount --help 2>/dev/null)" || return 1
+  [[ "$mount_help" == *'podman container mount'* ]]
 }
 
 case "$reviewer_runtime" in
