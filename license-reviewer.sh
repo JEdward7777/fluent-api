@@ -82,6 +82,10 @@ case "$reviewer_runtime" in
   *) echo 'Select --runtime=auto, --runtime=docker, or --runtime=podman.' >&2; exit 1 ;;
 esac
 
+if [[ "$reviewer_runtime" == podman ]]; then
+  printf '%s\n' 'Warning: Podman support is implemented but has not been tested with a real Podman runtime.' >&2
+fi
+
 if [[ "$reviewer_runtime" == docker ]]; then
   if ! docker compose version >/dev/null 2>&1; then
     echo 'Install native Linux Podman 5.3+ or Docker with Compose 2.24+.' >&2
