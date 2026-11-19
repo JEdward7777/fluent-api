@@ -53,7 +53,7 @@ if [[ ! "$reviewer_port" =~ ^[1-9][0-9]{0,4}$ ]] || ((reviewer_port > 65535)); t
   echo '--port must be an integer from 1 to 65535.' >&2
   exit 1
 fi
-podman_engine=(podman --remote=false)
+podman_engine=(env -u CONTAINER_HOST -u CONTAINER_CONNECTION podman --remote=false)
 podman_supported() {
   [[ "$(uname -s)" == Linux ]] && command -v podman >/dev/null 2>&1 || return 1
   local version
@@ -97,12 +97,14 @@ fi
 
 network="${LICENSE_REVIEWER_NETWORK:-}"
 if [[ -n "$network" && "$network" != bridge ]]; then
-  case "$network" in
-    host|none|private|pasta|slirp4netns|default)
-      echo 'Select an existing bridge network by name.' >&2
-      exit 1
-      ;;
-  esac
+  if [[ "$reviewer_runtime" == podman ]]; then
+    case "$network" in
+      host|none|private|pasta|slirp4netns|default)
+        echo 'Select an existing bridge network by name.' >&2
+        exit 1
+        ;;
+    esac
+  fi
   if [[ ! "$network" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] ||
     [[ "$("${network_engine[@]}" network inspect --format '{{.Driver}}' -- "$network" 2>/dev/null)" != bridge ]]; then
     echo 'Select an existing bridge network by name.' >&2
@@ -135,7 +137,7 @@ if [[ "$reviewer_runtime" == podman ]]; then
 fi
 
 reports_path="${LICENSE_REVIEWER_REPORT_DIR:-./.temp/license-reports}"
-if [[ "${userns:-}" == host && ! -d "$reports_path" ]]; then
+if [[ "$reviewer_runtime" == podman && "$userns" == host && ! -d "$reports_path" ]]; then
   printf 'Create the rootful Podman report directory writable by UID %s and GID %s: %s\n' \
     "$reviewer_uid" "$reviewer_gid" "$reports_path" >&2
   exit 1

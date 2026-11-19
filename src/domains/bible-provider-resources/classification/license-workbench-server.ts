@@ -10,8 +10,8 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
-import type { LicenseReviewerContainer } from './license-reviewer-container';
 import type { LicenseCommandOptions } from './license-command-options';
+import type { LicenseReviewerContainer } from './license-reviewer-container';
 import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
 import { LICENSE_REPORT_HTML_CSP } from '../license-report-html';

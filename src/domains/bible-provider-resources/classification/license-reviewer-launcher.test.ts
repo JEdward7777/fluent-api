@@ -12,7 +12,7 @@ afterEach(async () => {
 
 const podman = `#!/usr/bin/env bash
 printf '%s\\0' podman "$@" END >> "$LAUNCH_LOG"
-[[ "$1" == --remote=false ]] || exit 99
+[[ "$1" == --remote=false && -z "$CONTAINER_HOST" && -z "$CONTAINER_CONNECTION" ]] || exit 99
 shift
 case "$1" in
   --version) printf 'podman version %s\\n' "$MOCK_PODMAN_VERSION" ;;
@@ -86,6 +86,7 @@ launcherTest(
     const launched = await fixture.launch(['--port', '8767', '--', '--source=json'], {
       DATABASE_URL: 'postgres://fixture:secret@invalid/fixture',
       CONTAINER_HOST: 'ssh://would-select-a-remote-engine',
+      CONTAINER_CONNECTION: 'missing-remote-connection',
     });
     expect(launched.status).toBe(0);
     const [version, build, run] = launched.calls;
@@ -154,7 +155,7 @@ launcherTest(
     const fixture = await launcherFixture();
     const reports = join(fixture.root, 'private report dir');
     const externalJson = join(fixture.root, 'custom JSON');
-    await mkdir(externalJson);
+    await Promise.all([mkdir(externalJson), mkdir(reports)]);
     const launched = await fixture.launch(
       ['--runtime=podman', '--ui=cli', '--network=review-db', '--', '--yes'],
       {
@@ -191,6 +192,16 @@ launcherTest(
     expect(run).not.toContain('--publish');
     expect(run).not.toContain('--env-file');
     expect(run.join(' ')).not.toContain(':U');
+  }
+);
+
+launcherTest(
+  'gives rootful ownership guidance before creating an unwritable report directory',
+  async () => {
+    const fixture = await launcherFixture();
+    const launched = await fixture.launch(['--runtime=podman'], { MOCK_HOST_UID: '0' });
+    expect(launched.stderr).toContain('report directory writable by UID 1000 and GID 1000');
+    expect(launched.calls).toHaveLength(1);
   }
 );
 
@@ -258,6 +269,9 @@ launcherTest(
     const forced = await fixture.launch(['--runtime=docker', '--ui=cli']);
     expect(forced.calls.map((call) => call[0])).toEqual(['docker', 'docker']);
     expect(forced.calls.at(-1)).not.toContain('--service-ports');
+    const dockerBridge = await fixture.launch(['--runtime=docker', '--network=private']);
+    expect(dockerBridge.status).toBe(0);
+    expect(dockerBridge.calls[2]).toContain('private');
     const unsupported = await fixture.launch(['--runtime=podman'], {
       MOCK_PODMAN_VERSION: '5.2.0',
     });
