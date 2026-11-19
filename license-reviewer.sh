@@ -15,6 +15,8 @@ the reviewer. The printed URL includes the browser session token.
 JSON defaults to docs/features/tts-license-ingestion/reference. Reports default
 to .temp/license-reports. LICENSE_REVIEWER_JSON_DIR and LICENSE_REVIEWER_REPORT_DIR
 override the host paths. The model cache persists in a named runtime volume.
+Rootful Podman requires existing JSON and report directories writable by the
+configured non-root UID/GID (LICENSE_REVIEWER_UID and LICENSE_REVIEWER_GID).
 
 Pass --network for an existing bridge network and use the database service name.
 For a host database use host.docker.internal (Docker) or host.containers.internal
@@ -115,22 +117,6 @@ if [[ "$reviewer_runtime" == docker && "$(uname -s)" == Linux && "$(id -u)" != 0
   export LICENSE_REVIEWER_UID="${LICENSE_REVIEWER_UID:-$(id -u)}"
   export LICENSE_REVIEWER_GID="${LICENSE_REVIEWER_GID:-$(id -g)}"
 fi
-reports_path="${LICENSE_REVIEWER_REPORT_DIR:-./.temp/license-reports}"
-mkdir -p "$reports_path"
-export LICENSE_REVIEWER_REPORT_DIR="$(cd "$reports_path" && pwd -P)"
-export LICENSE_REVIEWER_HOST_REPORTS="$LICENSE_REVIEWER_REPORT_DIR"
-if [[ "${OS:-}" == Windows_NT ]] && command -v cygpath >/dev/null 2>&1; then
-  export LICENSE_REVIEWER_REPORT_DIR="$(cygpath -am "$LICENSE_REVIEWER_REPORT_DIR")"
-  export LICENSE_REVIEWER_HOST_REPORTS="$LICENSE_REVIEWER_REPORT_DIR"
-  if [[ -n "${LICENSE_REVIEWER_JSON_DIR:-}" ]]; then
-    export LICENSE_REVIEWER_JSON_DIR="$(cygpath -am "$LICENSE_REVIEWER_JSON_DIR")"
-  fi
-  if [[ -n "${LICENSE_REVIEWER_ENV_FILE:-}" ]]; then
-    export LICENSE_REVIEWER_ENV_FILE="$(cygpath -am "$LICENSE_REVIEWER_ENV_FILE")"
-  fi
-  export MSYS2_ARG_CONV_EXCL='*'
-fi
-
 if [[ "$reviewer_runtime" == podman ]]; then
   reviewer_uid="${LICENSE_REVIEWER_UID:-1000}"
   reviewer_gid="${LICENSE_REVIEWER_GID:-1000}"
@@ -146,8 +132,32 @@ if [[ "$reviewer_runtime" == podman ]]; then
     network="${network:-pasta}"
   fi
 
+fi
+
+reports_path="${LICENSE_REVIEWER_REPORT_DIR:-./.temp/license-reports}"
+if [[ "${userns:-}" == host && ! -d "$reports_path" ]]; then
+  printf 'Create the rootful Podman report directory writable by UID %s and GID %s: %s\n' \
+    "$reviewer_uid" "$reviewer_gid" "$reports_path" >&2
+  exit 1
+fi
+mkdir -p -- "$reports_path"
+export LICENSE_REVIEWER_REPORT_DIR="$(cd -- "$reports_path" && pwd -P)"
+export LICENSE_REVIEWER_HOST_REPORTS="$LICENSE_REVIEWER_REPORT_DIR"
+if [[ "${OS:-}" == Windows_NT ]] && command -v cygpath >/dev/null 2>&1; then
+  export LICENSE_REVIEWER_REPORT_DIR="$(cygpath -am "$LICENSE_REVIEWER_REPORT_DIR")"
+  export LICENSE_REVIEWER_HOST_REPORTS="$LICENSE_REVIEWER_REPORT_DIR"
+  if [[ -n "${LICENSE_REVIEWER_JSON_DIR:-}" ]]; then
+    export LICENSE_REVIEWER_JSON_DIR="$(cygpath -am "$LICENSE_REVIEWER_JSON_DIR")"
+  fi
+  if [[ -n "${LICENSE_REVIEWER_ENV_FILE:-}" ]]; then
+    export LICENSE_REVIEWER_ENV_FILE="$(cygpath -am "$LICENSE_REVIEWER_ENV_FILE")"
+  fi
+  export MSYS2_ARG_CONV_EXCL='*'
+fi
+
+if [[ "$reviewer_runtime" == podman ]]; then
   json_target=docs/features/tts-license-ingestion/reference
-  json_dir="$(cd "${LICENSE_REVIEWER_JSON_DIR:-$json_target}" && pwd -P)"
+  json_dir="$(cd -- "${LICENSE_REVIEWER_JSON_DIR:-$json_target}" && pwd -P)"
   if [[ "$json_dir" == *:* || "$LICENSE_REVIEWER_REPORT_DIR" == *:* ]]; then
     echo 'Podman JSON and report directory paths cannot contain a colon.' >&2
     exit 1
