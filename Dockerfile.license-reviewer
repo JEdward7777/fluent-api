@@ -1,0 +1,24 @@
+FROM node:24.14.1-alpine3.23@sha256:8510330d3eb72c804231a834b1a8ebb55cb3796c3e4431297a24d246b8add4d5 AS base
+WORKDIR /app
+
+FROM base AS packages
+COPY package.json package-lock.json ./
+RUN npm pkg delete scripts.prepare
+
+FROM packages AS build
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts --legacy-peer-deps --no-audit --no-fund
+COPY tsconfig.json ./
+COPY scripts ./scripts
+COPY src ./src
+RUN npm run build
+
+FROM packages AS runtime-deps
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --ignore-scripts --legacy-peer-deps --no-audit --no-fund
+
+FROM base
+RUN apk add --no-cache su-exec
+COPY --from=runtime-deps /app/package.json ./
+COPY --from=runtime-deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY scripts/license-reviewer-entrypoint.sh /usr/local/bin/license-reviewer
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/license-reviewer"]

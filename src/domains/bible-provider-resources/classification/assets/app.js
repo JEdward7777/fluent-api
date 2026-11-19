@@ -41,7 +41,7 @@ const previewFlags = () => ({ dirty, practiceBusy, sessionUnconfirmed });
 const renderExactPreview = (next) => updateExactPreview(next, previewFlags());
 const syncPracticeDraftControls = () => updatePracticeDraftControls(setup, previewFlags());
 
-async function request(path, method = 'GET', body) {
+async function request(path, method = 'GET', body, responseType = 'json') {
   const response = await fetch(`./api/${path}`, {
     method,
     headers: {
@@ -51,7 +51,7 @@ async function request(path, method = 'GET', body) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   if (!response.ok) throw new Error(await response.text());
-  return response.json();
+  return responseType === 'blob' ? response.blob() : response.json();
 }
 initReview(
   request,
@@ -444,7 +444,7 @@ attestation.addEventListener('submit', (event) => {
     responsibility: true,
   });
 });
-initReportControls(request, () => setup, recoverActionFailure);
+initReportControls(request, () => setup, recoverActionFailure, token);
 document.getElementById('practice-preview').addEventListener('click', () => {
   void practiceAction('practice/preview', {
     configurationRevision: setup.configurationRevision,

@@ -276,6 +276,10 @@
               ><input id="report-overwrite" type="checkbox" /> Overwrite this report.</label
             >
             <button id="report-write" type="button" disabled>Export inspected report</button>
+            <div id="report-actions" hidden>
+              <button id="report-open" type="button">Open report</button>
+              <button id="report-download" type="button">Download report</button>
+            </div>
           </div>
           <div id="normal-save" hidden>
             <h3>Save this preview</h3>
@@ -302,5 +306,10 @@
         <p id="alternatives-note">Both writes file and database targets.</p>
       </section>
     </main>
+    <dialog id="report-dialog" aria-label="Exported report">
+      <button id="report-close" type="button" autofocus>Close report</button>
+      <!-- prettier-ignore -->
+      <iframe name="license-report-frame" title="Exported license report" sandbox="allow-scripts"></iframe>
+    </dialog>
   </body>
 </html>

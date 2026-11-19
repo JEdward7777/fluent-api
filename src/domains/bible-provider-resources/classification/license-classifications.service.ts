@@ -32,7 +32,7 @@ export function createOwnedLicenseDatabaseAdapter(
   });
   const database = drizzle(client, { schema });
   return {
-    load: () => repo.loadClassificationSnapshot(database),
+    load: () => repo.loadClassificationSnapshot(database, console),
     apply: (artifact, replace, beforeCommit, force, expectedPolicy) =>
       repo.applyClassifications(artifact, replace, beforeCommit, force, expectedPolicy, database),
     close: () => client.end({ timeout: 5 }),

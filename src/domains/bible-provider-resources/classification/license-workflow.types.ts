@@ -85,6 +85,7 @@ export interface LicenseReportExportResult {
   contentRevision: number;
   path: string;
   format: LicenseReportExportRequest['format'];
+  bytes: string;
 }
 
 export interface LicenseSaveResult {

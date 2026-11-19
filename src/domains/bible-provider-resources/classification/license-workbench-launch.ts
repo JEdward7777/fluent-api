@@ -21,10 +21,10 @@ Use --ui=web in non-terminal practice. Practice rejects CLI automation and real-
 JSON→JSON reviews saved evidence; database→JSON exports a candidate; JSON→database
 imports reviewed policy (nonempty replacement needs --force); database→database maintains
 policy. --destination=both writes both targets with the existing compensation protocol.
-The local server binds 127.0.0.1. For a container, choose --port=8766 and forward
-container 127.0.0.1:8766 to local 127.0.0.1:8766 using an IDE Ports panel or SSH
-local tunnel. Do not use a public forwarded domain. Ctrl+C stops new work and waits for
-active writes; forced process death can leave an uncertain commit requiring target inspection.
+The local server binds 127.0.0.1. For Docker use ./license-reviewer.sh --help.
+Remote Docker hosts need an SSH local tunnel using the same port. Ctrl+C stops new
+work and waits for active writes; forced process death can leave an uncertain commit
+requiring target inspection.
 Examples:
   npm run db:classify:licenses -- --ui=web --source=json
   npm run db:classify:licenses -- --ui=cli --source=json --destination=json

@@ -11,7 +11,19 @@ const reportFormat = document.getElementById('report-format');
 const reportTarget = document.getElementById('report-target');
 const reportWrite = document.getElementById('report-write');
 const reportOverwrite = document.getElementById('report-overwrite');
+const reportActions = document.getElementById('report-actions');
+const reportDialog = document.getElementById('report-dialog');
+const reportDownload = document.getElementById('report-download');
 let reportPlan = null;
+let exportedReport = null;
+let suggestedPath = '';
+
+function suggestReportPath(directory) {
+  if (!directory || (reportPath.value && reportPath.value !== suggestedPath)) return;
+  const extension = reportFormat.value === 'html' ? 'html' : 'md';
+  suggestedPath = `${directory.replace(/\/$/, '')}/license-impact.${extension}`;
+  reportPath.value = suggestedPath;
+}
 
 function clearReportPlan() {
   reportPlan = null;
@@ -36,6 +48,7 @@ export function renderExactPreview(next, { dirty, practiceBusy, sessionUnconfirm
   for (const element of attestation.elements)
     element.disabled = blocked || practiceBusy || Boolean(next.activeOperationId);
   const preview = next.preview;
+  if (preview) suggestReportPath(next.reportDir);
   if (
     reportPlan &&
     (reportPlan.contentRevision !== next.contentRevision ||
@@ -92,9 +105,55 @@ export function syncPracticeDraftControls(setup, { dirty, practiceBusy, sessionU
       : 'Preview the exact edited revision before saving.';
 }
 
-export function initReportControls(request, getSetup, recoverActionFailure) {
-  for (const control of [reportPath, reportFormat])
-    control.addEventListener('input', clearReportPlan);
+export function initReportControls(request, getSetup, recoverActionFailure, token) {
+  reportPath.addEventListener('input', clearReportPlan);
+  reportFormat.addEventListener('input', () => {
+    suggestReportPath(getSetup()?.reportDir);
+    clearReportPlan();
+  });
+  document.getElementById('report-close').addEventListener('click', () => reportDialog.close());
+  document.getElementById('report-open').addEventListener('click', () => {
+    if (!exportedReport) return;
+    const form = document.createElement('form');
+    form.action = './report-view';
+    form.method = 'POST';
+    form.target = 'license-report-frame';
+    form.hidden = true;
+    for (const [name, value] of Object.entries({ token, id: exportedReport.operationId })) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.append(input);
+    }
+    reportDialog.showModal();
+    document.body.append(form);
+    form.requestSubmit();
+    form.remove();
+  });
+  reportDownload.addEventListener('click', async () => {
+    if (!exportedReport) return;
+    const { operationId, filename } = exportedReport;
+    reportDownload.disabled = true;
+    try {
+      const blob = await request(
+        `report/${encodeURIComponent(operationId)}`,
+        'GET',
+        undefined,
+        'blob'
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (error) {
+      reportTarget.textContent = `The report was exported. Download failed: ${error.message}`;
+    } finally {
+      reportDownload.disabled = false;
+    }
+  });
   document.getElementById('report-inspect').addEventListener('click', async () => {
     const setup = getSetup();
     if (hasUnsavedReviewDraft() || !setup.preview) return;
@@ -128,7 +187,9 @@ export function initReportControls(request, getSetup, recoverActionFailure) {
         operationId: crypto.randomUUID(),
         agreeToOverwrite: reportOverwrite.checked,
       });
-      reportTarget.textContent = `Exported ${result.format} report to ${result.path}. This did not Save policy or JSON.`;
+      reportTarget.textContent = `Exported ${result.format} report. ${result.displayPath}`;
+      exportedReport = result;
+      reportActions.hidden = false;
       reportPlan = null;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -6,26 +6,45 @@ import { promisify } from 'node:util';
 import { licenseApiKey } from '@/domains/bible-provider-resources/classification/license-api-key';
 import { runLicenseCommand } from '@/domains/bible-provider-resources/classification/license-command';
 import {
+  describeLicenseReportPath,
+  licenseReviewerContainerArgs,
+} from '@/domains/bible-provider-resources/classification/license-reviewer-container';
+import { ownedWorkbenchDatabase } from '@/domains/bible-provider-resources/classification/license-workbench-database';
+import {
   LICENSE_WORKBENCH_HELP,
   parseLicenseWorkbenchLaunch,
 } from '@/domains/bible-provider-resources/classification/license-workbench-launch';
 import { startLicenseWorkbenchServer } from '@/domains/bible-provider-resources/classification/license-workbench-server';
 
 const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+const container = process.env.LICENSE_REVIEWER_CONTAINER === '1';
+const hostReports = process.env.LICENSE_REVIEWER_HOST_REPORTS;
+const shutdown = new AbortController();
+const requestShutdown = () => shutdown.abort();
 let terminal: ReturnType<typeof createInterface> | undefined;
 const io = {
   write: (message: string) => {
     process.stdout.write(`${message}\n`);
   },
   ask: async (question: string) => {
-    terminal ??= createInterface({ input: process.stdin, output: process.stdout });
-    return terminal.question(question);
+    shutdown.signal.throwIfAborted();
+    if (!terminal) {
+      terminal = createInterface({ input: process.stdin, output: process.stdout });
+      if (container) terminal.on('SIGINT', requestShutdown);
+    }
+    return terminal.question(question, { signal: shutdown.signal });
   },
 };
 try {
-  const args = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  const args = container ? licenseReviewerContainerArgs(rawArgs, process.env) : rawArgs;
   // Help and practice stay keyless and do not read local configuration.
-  if (!args.includes('--help') && !args.includes('-h') && !args.includes('--practice'))
+  if (
+    !container &&
+    !args.includes('--help') &&
+    !args.includes('-h') &&
+    !args.includes('--practice')
+  )
     config({ quiet: true });
   const parsed = parseLicenseWorkbenchLaunch(args, interactive, {
     GOOGLE_AI_MODEL: process.env.GOOGLE_AI_MODEL,
@@ -36,13 +55,27 @@ try {
       parsed.options,
       parsed.port,
       'practice' in parsed && parsed.practice,
-      parsed.localProxyUrl
+      parsed.localProxyUrl,
+      undefined,
+      container ? { hostReports } : undefined
     );
+    const close = () => {
+      if (shutdown.signal.aborted) return;
+      requestShutdown();
+      void workbench.close().catch(() => {
+        io.write('The reviewer did not shut down cleanly. Inspect the last selected targets.');
+        process.exitCode = 1;
+      });
+    };
+    process.once('SIGINT', close);
+    process.once('SIGTERM', close);
     io.write(`Open ${workbench.url}`);
     io.write(
-      'Loopback only. Ctrl+C stops the local workbench. Use only a local port forward or the explicitly configured loopback CodeServer proxy.'
+      container
+        ? 'Docker host loopback only. On a remote host, forward this same port over SSH. Ctrl+C stops the reviewer.'
+        : 'Loopback only. Ctrl+C stops the local workbench. Use only a local port forward or the explicitly configured loopback CodeServer proxy.'
     );
-    if (interactive) {
+    if (interactive && !container) {
       const command =
         process.platform === 'darwin'
           ? 'open'
@@ -55,17 +88,11 @@ try {
         io.write('Automatic browser opening was unavailable; open the printed local URL yourself.');
       }
     }
-    process.once('SIGINT', () => {
-      void workbench.close().then(() => {
-        process.exitCode = 0;
-      });
-    });
-    process.once('SIGTERM', () => {
-      void workbench.close().then(() => {
-        process.exitCode = 0;
-      });
-    });
   } else {
+    if (container) {
+      process.once('SIGINT', requestShutdown);
+      process.once('SIGTERM', requestShutdown);
+    }
     const apiKey = licenseApiKey();
     const options = parsed.options;
     while (!options.source) {
@@ -89,6 +116,13 @@ try {
       apiKey,
       interactive,
       io,
+      ...(container
+        ? {
+            database: () => ownedWorkbenchDatabase({ mode: 'environment' }),
+            describeReport: (path: string) => describeLicenseReportPath(path, hostReports),
+            signal: shutdown.signal,
+          }
+        : {}),
       openReport: async (path) => {
         const command =
           process.platform === 'darwin'
@@ -101,10 +135,13 @@ try {
     });
     terminal?.close();
     // The lazy database adapter owns the application's pool; this developer entry exits explicitly.
-    process.exit(exit);
+    process.exit(shutdown.signal.aborted ? 130 : exit);
   }
 } catch (error) {
-  io.write(`${error instanceof Error ? error.message : String(error)}\n${LICENSE_WORKBENCH_HELP}`);
+  if (!shutdown.signal.aborted)
+    io.write(
+      `${error instanceof Error ? error.message : String(error)}\n${LICENSE_WORKBENCH_HELP}`
+    );
   terminal?.close();
-  process.exitCode = 1;
+  process.exitCode = shutdown.signal.aborted ? 130 : 1;
 }

@@ -1,0 +1,9 @@
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!scripts/
+!scripts/**
+!src/
+!src/**
+**/.env*

@@ -25,6 +25,10 @@ export class LicenseWorkbenchReports {
     }
   >();
 
+  async exported(operationId: string) {
+    return this.operations.get(operationId)?.result.catch(() => undefined);
+  }
+
   clear() {
     this.plans.clear();
   }

@@ -25,6 +25,8 @@ interface CommandDependencies {
   fs?: LicenseFileIo;
   database?: () => Promise<LicenseDatabaseAdapter>;
   transport?: LlmTransport;
+  describeReport?: (path: string) => Promise<string>;
+  signal?: AbortSignal;
   openReport?: (path: string) => Promise<void>;
   now?: () => string;
 }
@@ -57,6 +59,7 @@ export async function runLicenseCommand(
       transport: dependencies.transport,
       now: dependencies.now,
     });
+    dependencies.signal?.throwIfAborted();
     const inspection = await workflow.inspect(workflow.status.configurationRevision);
     await io.write(
       `Preflight: ${inspection.preflight.distinctKeys} keys; ${inspection.preflight.ruleHits} rule matches; ${inspection.preflight.modelKeys} model keys; ${inspection.preflight.validCacheHits} valid cached samples; ${inspection.preflight.expectedUncachedRequests} expected uncached requests, up to ${inspection.preflight.maximumAttempts} attempts. ${inspection.preflight.rows
@@ -69,6 +72,7 @@ export async function runLicenseCommand(
     );
     const snapshot = inspection.database;
     const { inputBytes } = inspection;
+    dependencies.signal?.throwIfAborted();
     const analysis = await workflow.startAnalysis(workflow.status.configurationRevision);
     let { artifact } = analysis;
     if (inputBytes !== null)
@@ -94,7 +98,10 @@ export async function runLicenseCommand(
       for (const report of reports.reports) {
         await fs.mkdir(dirname(report.path));
         await fs.write(report.path, report.bytes);
-        await io.write(`Report: ${report.path}${report.url ? `\n${report.url}` : ''}`);
+        const location = dependencies.describeReport
+          ? await dependencies.describeReport(report.path)
+          : `${report.path}${report.url ? `\n${report.url}` : ''}`;
+        await io.write(`Report: ${location}`);
       }
     };
     let reports = renderLicenseReports(artifact, config);
@@ -167,10 +174,12 @@ export async function runLicenseCommand(
       reports = reviewed.reports;
       write = reviewed.writeIntent;
     }
+    dependencies.signal?.throwIfAborted();
     const preview = await workflow.preview(
       workflow.status.configurationRevision,
       workflow.status.contentRevision
     );
+    dependencies.signal?.throwIfAborted();
     await emitReports(preview.reports);
     const changes = (label: string, operation: string, value: typeof preview.plan.jsonChanges) =>
       `${label} ${operation}: ${value.inserted.length} inserts, ${value.updated.length} updates, ${value.preserved.length} preserved, ${value.unchanged.length} unchanged`;
@@ -199,6 +208,7 @@ export async function runLicenseCommand(
       await io.write(`Save conflicts: ${preview.plan.conflicts.join('; ')}`);
       return 3;
     }
+    dependencies.signal?.throwIfAborted();
     if (options.planOnly || !write) {
       if (preview.plan.jsonArtifact)
         await writeLicenseDestinations({
@@ -231,7 +241,8 @@ export async function runLicenseCommand(
     );
     return 0;
   } catch (error) {
-    await io.write(error instanceof Error ? error.message : String(error));
+    if (!dependencies.signal?.aborted)
+      await io.write(error instanceof Error ? error.message : String(error));
     return 1;
   } finally {
     await workflow?.close();

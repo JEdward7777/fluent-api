@@ -4,7 +4,6 @@ import type { DbTransaction } from '@/lib/types';
 
 import { bible_provider_resources, bibles, license_classifications } from '@/db/schema';
 import { hashCanonicalJson } from '@/lib/llm/canonical-json';
-import { logger } from '@/lib/logger';
 
 import type { LicenseArtifact, LicenseClassification } from '../license-artifact.schemas';
 import type {
@@ -28,7 +27,8 @@ export async function getClassifications(tx?: DbTransaction | LicenseDb) {
 }
 
 export async function loadClassificationSnapshot(
-  database?: LicenseDb
+  database?: LicenseDb,
+  logging?: Pick<typeof import('@/lib/logger').logger, 'warn'>
 ): Promise<LicenseDatabaseSnapshot> {
   const connection = database ?? (await import('@/db')).db;
   const [exists] = await connection
@@ -55,6 +55,7 @@ export async function loadClassificationSnapshot(
         )
       ),
   ]);
+  const logger = logging ?? (await import('@/lib/logger')).logger;
   const classifications: StoredLicenseClassification[] = rows.map((row) => {
     const content = row.rationale;
     // Existing card rows may contain only a rationale; model/human evidence is optional.

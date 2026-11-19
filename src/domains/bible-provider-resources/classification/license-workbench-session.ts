@@ -55,7 +55,7 @@ export class LicenseWorkbenchSession {
   private practice?: LicensePractice;
   private readonly practiceMode: boolean;
   private selectedPracticePath: string | null;
-  private readonly reports = new LicenseWorkbenchReports();
+  readonly reports = new LicenseWorkbenchReports();
   private resetAfterConfiguration(options: LicenseCommandOptions) {
     this.configurationRevision++;
     this.options = options;

@@ -6,13 +6,15 @@ import { Buffer } from 'node:buffer';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
+import { LICENSE_REPORT_HTML_CSP } from '../license-report-html';
+import { describeLicenseReportPath } from './license-reviewer-container';
 import { operationSchema, setupSchema } from './license-workbench-schema';
 import { LicenseWorkbenchSession } from './license-workbench-session';
 
@@ -41,7 +43,8 @@ function createLicenseWorkbenchApp(
   session: LicenseWorkbenchSession,
   getPort: () => number,
   token: string,
-  localProxyUrl?: string
+  localProxyUrl?: string,
+  container?: { hostReports?: string }
 ) {
   const app = new Hono();
   app.use('*', async (c, next) => {
@@ -49,10 +52,12 @@ function createLicenseWorkbenchApp(
     if (!allowedHost(host, getPort(), localProxyUrl)) return c.text('Invalid local Host', 403);
     c.header('Cache-Control', 'no-store');
     c.header('X-Content-Type-Options', 'nosniff');
-    c.header('Referrer-Policy', 'no-referrer');
+    const index = c.req.path === '/';
+    // Navigation POSTs need a same-origin referrer policy to send a usable Origin.
+    c.header('Referrer-Policy', index ? 'same-origin' : 'no-referrer');
     c.header(
       'Content-Security-Policy',
-      "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'"
+      `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; ${index ? "frame-src 'self'; form-action 'self'" : "form-action 'none'"}`
     );
     if (c.req.path.startsWith('/api/')) {
       if (!sameToken(c.req.header('x-workbench-token'), token))
@@ -274,10 +279,40 @@ function createLicenseWorkbenchApp(
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.text('Invalid report export', 400);
     try {
-      return c.json(await session.exportReport(parsed.data));
+      const { bytes: _bytes, ...report } = await session.exportReport(parsed.data);
+      return c.json({
+        ...report,
+        filename: basename(report.path),
+        displayPath: container
+          ? await describeLicenseReportPath(report.path, container.hostReports)
+          : report.path,
+      });
     } catch (error) {
       return c.text(error instanceof Error ? error.message : 'Report export failed', 409);
     }
+  });
+  const reportId = z.string().uuid();
+  app.get('/api/report/:id', async (c) => {
+    const id = reportId.safeParse(c.req.param('id'));
+    const report = id.success ? await session.reports.exported(id.data) : undefined;
+    if (!report) return c.text('Unknown exported report', 404);
+    c.header('Content-Type', 'application/octet-stream');
+    return c.body(report.bytes);
+  });
+  app.post('/report-view', async (c) => {
+    if (c.req.header('origin') !== `http://${c.req.header('host')}`)
+      return c.text('Local Origin required', 403);
+    const parsed = z
+      .object({ token: z.string(), id: reportId })
+      .strict()
+      .safeParse(await c.req.parseBody().catch(() => null));
+    if (!parsed.success || !sameToken(parsed.data.token, token))
+      return c.text('Session token required', 403);
+    const report = await session.reports.exported(parsed.data.id);
+    if (!report) return c.text('Unknown exported report', 404);
+    if (report.format === 'markdown') return c.text(report.bytes);
+    c.header('Content-Security-Policy', LICENSE_REPORT_HTML_CSP);
+    return c.html(report.bytes);
   });
   app.post('/api/practice/save', async (c) => {
     const parsed = revisionSchema
@@ -338,8 +373,11 @@ export async function startLicenseWorkbenchServer(
   requestedPort: number,
   practice = false,
   localProxyUrl?: string,
-  injected?: Pick<LicenseWorkflowDependencies, 'apiKey' | 'database' | 'transport' | 'fs'>
+  injected?: Pick<LicenseWorkflowDependencies, 'apiKey' | 'database' | 'transport' | 'fs'>,
+  container?: { hostReports?: string }
 ) {
+  if (container && (requestedPort === 0 || localProxyUrl))
+    throw new Error('Container mode requires a fixed port and direct loopback forwarding');
   if (localProxyUrl) {
     const proxy = new URL(localProxyUrl);
     if (
@@ -361,7 +399,13 @@ export async function startLicenseWorkbenchServer(
   let selectedPort = requestedPort;
   const listen = () =>
     new Promise<Server>((resolve, reject) => {
-      const app = createLicenseWorkbenchApp(session, () => selectedPort, token, localProxyUrl);
+      const app = createLicenseWorkbenchApp(
+        session,
+        () => selectedPort,
+        token,
+        localProxyUrl,
+        container
+      );
       const listener = getRequestListener(app.fetch);
       const candidate = createServer((request, response) => {
         if (!allowedHost(request.headers.host ?? '', selectedPort, localProxyUrl)) {
@@ -372,7 +416,7 @@ export async function startLicenseWorkbenchServer(
         void listener(request, response);
       });
       candidate.once('error', reject);
-      candidate.listen(requestedPort, '127.0.0.1', () => {
+      candidate.listen(requestedPort, container ? '0.0.0.0' : '127.0.0.1', () => {
         const address = candidate.address();
         if (!address || typeof address === 'string')
           return reject(new Error('Unable to allocate a local port'));

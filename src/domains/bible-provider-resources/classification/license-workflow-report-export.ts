@@ -63,5 +63,6 @@ export async function exportPreviewedLicenseReport(input: {
     contentRevision: request.contentRevision,
     path,
     format: request.format,
+    bytes,
   });
 }

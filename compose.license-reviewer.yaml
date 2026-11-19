@@ -1,0 +1,56 @@
+name: fluent-license-reviewer
+
+services:
+  reviewer:
+    build:
+      context: .
+      dockerfile: Dockerfile.license-reviewer
+    init: true
+    stop_grace_period: 2m
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    tmpfs:
+      - /tmp
+    env_file:
+      - path: ${LICENSE_REVIEWER_ENV_FILE:-.env}
+        required: false
+    environment:
+      HOME: /tmp
+      NODE_ENV: production
+      XDG_CACHE_HOME: /cache
+      LICENSE_REVIEWER_UID: ${LICENSE_REVIEWER_UID:-1000}
+      LICENSE_REVIEWER_GID: ${LICENSE_REVIEWER_GID:-1000}
+      LICENSE_REVIEWER_PORT: ${LICENSE_REVIEWER_PORT:-8766}
+      LICENSE_REVIEWER_NETWORK: ${LICENSE_REVIEWER_NETWORK:-bridge}
+      LICENSE_REVIEWER_UI: ${LICENSE_REVIEWER_UI:-web}
+      LICENSE_REVIEWER_HOST_REPORTS: ${LICENSE_REVIEWER_HOST_REPORTS:-}
+    ports:
+      - '127.0.0.1:${LICENSE_REVIEWER_PORT:-8766}:${LICENSE_REVIEWER_PORT:-8766}'
+    network_mode: ${LICENSE_REVIEWER_NETWORK:-bridge}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - type: bind
+        source: ${LICENSE_REVIEWER_JSON_DIR:-./docs/features/tts-license-ingestion/reference}
+        target: /app/docs/features/tts-license-ingestion/reference
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${LICENSE_REVIEWER_REPORT_DIR:-./.temp/license-reports}
+        target: /reports
+        bind:
+          create_host_path: false
+      - type: volume
+        source: model-cache
+        target: /cache
+
+volumes:
+  model-cache:

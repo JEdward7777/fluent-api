@@ -1,6 +1,14 @@
+import { createHash } from 'node:crypto';
+
 import type { LicenseReportModel } from './license-report-model';
 
 import { escapeReportHtml as html } from './license-report-formats';
+
+const reportSearchScript =
+  "const search=document.getElementById('license-search');const status=document.getElementById('license-status');function filter(){let count=0;const q=search.value.toLowerCase();for(const entry of document.querySelectorAll('.license-entry')){entry.hidden=!(entry.dataset.search.toLowerCase().includes(q)&&(status.value==='all'||entry.dataset.status===status.value));if(!entry.hidden)count++;}document.getElementById('visible-count').textContent=count+' classification entries shown';}search.addEventListener('input',filter);status.addEventListener('change',filter);filter();";
+const scriptHash = createHash('sha256').update(reportSearchScript).digest('base64');
+
+export const LICENSE_REPORT_HTML_CSP = `sandbox allow-scripts; default-src 'none'; script-src 'sha256-${scriptHash}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'`;
 
 export function renderLicenseHtml(model: LicenseReportModel): string {
   const { impact } = model;
@@ -67,6 +75,6 @@ ${impact.classificationChanges ? `<h2>Planned scoped classification writes</h2><
 <h2>Normalization collisions</h2>${impact.collisions.map((collision) => `<h3>${html(collision.normalizedText)}</h3>${collision.notices.map((notice) => `<pre>${html(notice)}</pre>`).join('')}`).join('') || '<p>None.</p>'}
 <h2>Complete license inventory</h2><label>Search notices, reasons or Bible identities <input id="license-search" type="search"></label> <label>Status <select id="license-status"><option value="all">All</option><option value="allowed">Allowed</option><option value="forbidden">Forbidden</option><option value="unknown">Unknown</option></select></label><p id="visible-count"></p>
 ${inventory}
-<script>const search=document.getElementById('license-search');const status=document.getElementById('license-status');function filter(){let count=0;const q=search.value.toLowerCase();for(const entry of document.querySelectorAll('.license-entry')){entry.hidden=!(entry.dataset.search.toLowerCase().includes(q)&&(status.value==='all'||entry.dataset.status===status.value));if(!entry.hidden)count++;}document.getElementById('visible-count').textContent=count+' classification entries shown';}search.addEventListener('input',filter);status.addEventListener('change',filter);filter();</script>
+<script>${reportSearchScript}</script>
 </body></html>\n`;
 }
