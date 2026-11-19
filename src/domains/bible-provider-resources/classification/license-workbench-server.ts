@@ -364,6 +364,7 @@ function allowedHost(host: string, port: number, localProxyUrl?: string) {
   return (
     host === `localhost:${port}` ||
     host === `127.0.0.1:${port}` ||
+    (port === 80 && (host === 'localhost' || host === '127.0.0.1')) ||
     (localProxyUrl !== undefined && host === new URL(localProxyUrl).host)
   );
 }

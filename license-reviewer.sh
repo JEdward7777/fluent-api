@@ -6,7 +6,8 @@ usage() {
 Usage: ./license-reviewer.sh [--ui=web|cli] [--port=PORT] [--network=BRIDGE_NETWORK]
                              [-- classifier options]
 
-Requires Docker and Compose 2.24+. Web is the default at http://127.0.0.1:8766.
+Requires Docker and Compose 2.24+. Web requires Docker Engine 28+ and
+defaults to http://127.0.0.1:8766.
 Use --port for an alternate port. Only web publishes a port. Ctrl+C stops
 the reviewer. The printed URL includes the browser session token.
 
@@ -46,16 +47,24 @@ if [[ ! "$reviewer_port" =~ ^[1-9][0-9]{0,4}$ ]] || ((reviewer_port > 65535)); t
   echo '--port must be an integer from 1 to 65535.' >&2
   exit 1
 fi
+if ! docker compose version >/dev/null 2>&1; then
+  echo 'Install Docker with Compose 2.24 or later.' >&2
+  exit 1
+fi
+if [[ "$reviewer_ui" == web ]]; then
+  engine_version="$(docker version --format '{{.Server.Version}}')"
+  engine_major="${engine_version%%.*}"
+  if [[ ! "$engine_major" =~ ^[0-9]+$ ]] || ((10#$engine_major < 28)); then
+    echo 'Web mode requires Docker Engine 28 or later for loopback-only port publishing.' >&2
+    exit 1
+  fi
+fi
 if [[ "${LICENSE_REVIEWER_NETWORK:-bridge}" != bridge ]]; then
   if [[ ! "${LICENSE_REVIEWER_NETWORK}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] ||
     [[ "$(docker network inspect --format '{{.Driver}}' -- "$LICENSE_REVIEWER_NETWORK" 2>/dev/null)" != bridge ]]; then
     echo 'Select an existing Docker bridge network.' >&2
     exit 1
   fi
-fi
-if ! docker compose version >/dev/null 2>&1; then
-  echo 'Install Docker with Compose 2.24 or later.' >&2
-  exit 1
 fi
 
 api_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -84,5 +93,8 @@ fi
 compose=(docker compose -f compose.license-reviewer.yaml run --rm --build --no-deps)
 if [[ "$reviewer_ui" == web ]]; then
   compose+=(--service-ports)
+fi
+if [[ "${DATABASE_URL+x}" ]]; then
+  compose+=(--env DATABASE_URL)
 fi
 exec "${compose[@]}" reviewer "$@"
