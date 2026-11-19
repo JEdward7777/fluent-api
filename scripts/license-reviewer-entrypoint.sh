@@ -20,5 +20,5 @@ if [ "$(stat -c '%u:%g' /cache)" != "$reviewer_uid:$reviewer_gid" ]; then
   chown -Rh "$reviewer_uid:$reviewer_gid" /cache
 fi
 
-export LICENSE_REVIEWER_CONTAINER=1
+export LICENSE_REVIEWER_CONTAINER=1 LICENSE_REVIEWER_ENGINE=Docker
 exec su-exec "$reviewer_uid:$reviewer_gid" node dist/src/db/scripts/classify-licenses.js "$@"

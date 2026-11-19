@@ -3,6 +3,8 @@ import { execFile } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { promisify } from 'node:util';
 
+import type { LicenseReviewerContainer } from '@/domains/bible-provider-resources/classification/license-reviewer-container';
+
 import { licenseApiKey } from '@/domains/bible-provider-resources/classification/license-api-key';
 import { runLicenseCommand } from '@/domains/bible-provider-resources/classification/license-command';
 import {
@@ -17,8 +19,13 @@ import {
 import { startLicenseWorkbenchServer } from '@/domains/bible-provider-resources/classification/license-workbench-server';
 
 const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-const container = process.env.LICENSE_REVIEWER_CONTAINER === '1';
-const hostReports = process.env.LICENSE_REVIEWER_HOST_REPORTS;
+const container: LicenseReviewerContainer | undefined =
+  process.env.LICENSE_REVIEWER_CONTAINER === '1'
+    ? {
+        hostReports: process.env.LICENSE_REVIEWER_HOST_REPORTS,
+        engine: process.env.LICENSE_REVIEWER_ENGINE === 'Podman' ? 'Podman' : 'Docker',
+      }
+    : undefined;
 const shutdown = new AbortController();
 const requestShutdown = () => shutdown.abort();
 let terminal: ReturnType<typeof createInterface> | undefined;
@@ -57,7 +64,7 @@ try {
       'practice' in parsed && parsed.practice,
       parsed.localProxyUrl,
       undefined,
-      container ? { hostReports } : undefined
+      container
     );
     const close = () => {
       if (shutdown.signal.aborted) return;
@@ -72,7 +79,7 @@ try {
     io.write(`Open ${workbench.url}`);
     io.write(
       container
-        ? 'Docker host loopback only. On a remote host, forward this same port over SSH. Ctrl+C stops the reviewer.'
+        ? `${container.engine} host loopback only. On a remote host, forward this same port over SSH. Ctrl+C stops the reviewer.`
         : 'Loopback only. Ctrl+C stops the local workbench. Use only a local port forward or the explicitly configured loopback CodeServer proxy.'
     );
     if (interactive && !container) {
@@ -119,7 +126,7 @@ try {
       ...(container
         ? {
             database: () => ownedWorkbenchDatabase({ mode: 'environment' }),
-            describeReport: (path: string) => describeLicenseReportPath(path, hostReports),
+            describeReport: (path: string) => describeLicenseReportPath(path, container),
             signal: shutdown.signal,
           }
         : {}),

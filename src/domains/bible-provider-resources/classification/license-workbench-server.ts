@@ -10,6 +10,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
+import type { LicenseReviewerContainer } from './license-reviewer-container';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
@@ -44,7 +45,7 @@ function createLicenseWorkbenchApp(
   getPort: () => number,
   token: string,
   localProxyUrl?: string,
-  container?: { hostReports?: string }
+  container?: LicenseReviewerContainer
 ) {
   const app = new Hono();
   app.use('*', async (c, next) => {
@@ -284,7 +285,7 @@ function createLicenseWorkbenchApp(
         ...report,
         filename: basename(report.path),
         displayPath: container
-          ? await describeLicenseReportPath(report.path, container.hostReports)
+          ? await describeLicenseReportPath(report.path, container)
           : report.path,
       });
     } catch (error) {
@@ -375,7 +376,7 @@ export async function startLicenseWorkbenchServer(
   practice = false,
   localProxyUrl?: string,
   injected?: Pick<LicenseWorkflowDependencies, 'apiKey' | 'database' | 'transport' | 'fs'>,
-  container?: { hostReports?: string }
+  container?: LicenseReviewerContainer
 ) {
   if (container && (requestedPort === 0 || localProxyUrl))
     throw new Error('Container mode requires a fixed port and direct loopback forwarding');

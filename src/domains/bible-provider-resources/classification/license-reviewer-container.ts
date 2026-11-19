@@ -3,7 +3,13 @@ import { isAbsolute, relative, sep } from 'node:path';
 
 const LICENSE_REVIEWER_REPORT_ROOT = '/reports';
 
-export async function describeLicenseReportPath(path: string, hostRoot?: string) {
+export interface LicenseReviewerContainer {
+  hostReports?: string;
+  engine?: 'Docker' | 'Podman';
+}
+
+export async function describeLicenseReportPath(path: string, container: LicenseReviewerContainer) {
+  const hostRoot = container.hostReports;
   if (hostRoot) {
     const target = await realpath(path).catch(() => undefined);
     if (target) {
@@ -11,7 +17,7 @@ export async function describeLicenseReportPath(path: string, hostRoot?: string)
       if (suffix && suffix !== '..' && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix)) {
         const separator = hostRoot.includes('\\') ? '\\' : '/';
         const hostPath = [hostRoot.replace(/[\\/]+$/, ''), ...suffix.split(sep)].join(separator);
-        return `Docker host path: ${hostPath}`;
+        return `${container.engine ?? 'Docker'} host path: ${hostPath}`;
       }
     }
   }
