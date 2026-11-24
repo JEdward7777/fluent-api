@@ -6,7 +6,7 @@ import { jsonValueSchema, llmRequestSchema } from '@/lib/llm/request-cache';
 
 import { computeLicenseReviewHash } from './license-artifact.hash';
 import { licenseVoteSchema } from './license-model-contract';
-import { LICENSE_NORMALIZER_VERSION } from './license-normalizer';
+import { LICENSE_NORMALIZER_VERSION, normalizeLicenseNotice } from './license-normalizer';
 
 export const LICENSE_ARTIFACT_SCHEMA_VERSION = 4;
 export const LICENSE_REVIEW_HASH_DOMAIN_VERSION = 4;
@@ -113,6 +113,7 @@ const reviewSnapshot = z
   .strict();
 
 export const licenseClassificationSchema = v3ClassificationSchema.extend({
+  exampleNotice: z.string().nullable(),
   rationale: z.union([text, z.literal('')]),
   reviewComment: text.optional(),
   rowNoteProvenance: rowNoteProvenance.optional(),
@@ -211,6 +212,60 @@ function preserveExtensions(value: Record<string, unknown>, version: 2 | 3, name
     value.migrationExtensions = { schemaVersion: version, fields: Object.fromEntries(entries) };
 }
 
+/** Both original writers checked these two relations, including for empty strings. */
+function validHistoricalNotice(
+  row: Pick<z.infer<typeof legacyClassificationSchema>, 'exampleNotice' | 'normalizedText'>
+) {
+  return (
+    normalizeLicenseNotice(row.normalizedText) === row.normalizedText &&
+    normalizeLicenseNotice(row.exampleNotice) === row.normalizedText
+  );
+}
+
+function migrateClassification(
+  row: z.infer<typeof legacyClassificationSchema> | z.infer<typeof v3ClassificationSchema>,
+  version: 2 | 3
+) {
+  const promoted = ['reviewComment', 'reviewHistory', 'rowNoteProvenance'];
+  if (version === 2) promoted.push('reviewState', 'decisionAt', 'reviewedBy', 'humanReviewedAt');
+  preserveExtensions(row, version, promoted);
+  if (version === 2)
+    Object.assign(row, {
+      reviewState:
+        row.source === 'gemini' || row.automaticDecision?.source === 'gemini'
+          ? 'llm_reviewed'
+          : 'unreviewed',
+      decisionAt: null,
+      reviewedBy: null,
+      humanReviewedAt: null,
+    });
+  return row;
+}
+
+/** Historical DB writers emitted the complete v3 provenance tuple or no tuple (v2). */
+export function parseStoredLicenseEvidence(
+  value: unknown,
+  version: unknown
+): LicenseClassification | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const tuple = ['reviewState', 'decisionAt', 'reviewedBy', 'humanReviewedAt'];
+  const complete = tuple.every((key) => Object.hasOwn(value, key));
+  if (version === 4) {
+    const parsed = complete && licenseClassificationSchema.safeParse(value);
+    return parsed && parsed.success ? (structuredClone(value) as LicenseClassification) : undefined;
+  }
+  if (version !== undefined || (!complete && tuple.some((key) => Object.hasOwn(value, key))))
+    return;
+  const historical = (complete ? v3ClassificationSchema : legacyClassificationSchema).safeParse(
+    value
+  );
+  if (!historical.success || !validHistoricalNotice(historical.data)) return;
+  return migrateClassification(
+    structuredClone(value) as typeof historical.data,
+    complete ? 3 : 2
+  ) as LicenseClassification;
+}
+
 /** Validate the original domain before assigning any new ownership or binding. */
 function migrateArtifact(value: unknown, version: 2 | 3): LicenseArtifact {
   (version === 2 ? legacyArtifactSchema : v3ArtifactSchema).parse(value);
@@ -220,6 +275,11 @@ function migrateArtifact(value: unknown, version: 2 | 3): LicenseArtifact {
     throw new Error(`Legacy v${version} review content hash mismatch`);
   if (old.attestation && old.attestation.reviewContentHash !== hash)
     throw new Error(`Legacy v${version} attestation is bound to another revision`);
+
+  if (!old.classifications.every(validHistoricalNotice))
+    throw new Error(
+      `Legacy v${version} classification key does not match exact notice normalization`
+    );
 
   preserveExtensions(
     old,
@@ -236,22 +296,7 @@ function migrateArtifact(value: unknown, version: 2 | 3): LicenseArtifact {
     );
   delete old.attestation;
   delete old.historicalAttestation;
-  const rows = old.classifications.map((row) => {
-    const promoted = ['reviewComment', 'reviewHistory', 'rowNoteProvenance'];
-    if (version === 2) promoted.push('reviewState', 'decisionAt', 'reviewedBy', 'humanReviewedAt');
-    preserveExtensions(row, version, promoted);
-    if (version === 2)
-      Object.assign(row, {
-        reviewState:
-          row.source === 'gemini' || row.automaticDecision?.source === 'gemini'
-            ? 'llm_reviewed'
-            : 'unreviewed',
-        decisionAt: null,
-        reviewedBy: null,
-        humanReviewedAt: null,
-      });
-    return row;
-  });
+  const rows = old.classifications.map((row) => migrateClassification(row, version));
   const artifact: LicenseArtifact = {
     ...old,
     schemaVersion: LICENSE_ARTIFACT_SCHEMA_VERSION,

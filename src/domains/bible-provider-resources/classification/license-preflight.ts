@@ -7,7 +7,9 @@ import type { LicenseDatabaseSnapshot } from './license-database.types';
 import type { LicenseEligibilityRow } from './license-eligibility';
 
 import { buildLicenseSampleRequest, parseLicenseVote } from '../license-model-contract';
+import { indexLicenseNoticeExamples } from '../license-normalizer';
 import { planLicenseEligibility } from './license-eligibility';
+import { storedLicenseDecision } from './license-stored-decision';
 
 export interface LicensePreflightSample {
   normalizedText: string;
@@ -37,7 +39,7 @@ export interface LicensePreflight {
 /** Mirrors analysis precedence and the structured-request cache validation without transport calls. */
 export async function inspectLicensePreflight(input: {
   database?: LicenseDatabaseSnapshot;
-  jsonClassificationKeys?: string[];
+  priorNotices?: (string | null)[];
   jsonClassifications?: LicenseClassification[];
   jsonNotices?: string[];
   rerunRule?: string[];
@@ -52,28 +54,21 @@ export async function inspectLicensePreflight(input: {
   let ruleHits = 0;
   let modelKeys = 0;
   const cache = input.noCache ? undefined : createRequestCache(input.cacheDir);
-  const stored = new Map<string, LicenseClassification>();
-  for (const row of input.database?.classifications ?? [])
-    if (row.evidence) stored.set(row.normalizedText, row.evidence);
-    else
-      stored.set(row.normalizedText, {
-        normalizedText: row.normalizedText,
-        exampleNotice: row.normalizedText,
-        status: row.status,
-        source: 'table',
-        rationale: row.rationale,
-        samples: [],
-        reviewState: row.reviewState,
-        decisionAt: row.decisionAt,
-        reviewedBy: row.reviewedBy,
-        humanReviewedAt: row.humanReviewedAt,
-      });
-  for (const row of input.jsonClassifications ?? []) stored.set(row.normalizedText, row);
   const notices = input.database
     ? input.database.context.resources.flatMap((row) =>
         row.rawNotice?.trim() ? [row.rawNotice] : []
       )
-    : (input.jsonNotices ?? input.jsonClassificationKeys ?? []);
+    : (input.jsonNotices ?? []);
+  const examples = indexLicenseNoticeExamples([...notices, ...(input.priorNotices ?? [])]);
+  const stored = new Map<string, LicenseClassification>();
+  for (const row of input.database?.classifications ?? []) {
+    const decision = storedLicenseDecision(row, examples.get(row.normalizedText));
+    // Older adapter snapshots omitted review_state. Such rows never opted into
+    // automatic reassessment of explicitly unreviewed unknowns.
+    if (row.reviewState === undefined && !row.evidence) delete decision.reviewState;
+    stored.set(row.normalizedText, decision);
+  }
+  for (const row of input.jsonClassifications ?? []) stored.set(row.normalizedText, row);
   const rows = planLicenseEligibility({
     notices,
     stored,
@@ -91,6 +86,8 @@ export async function inspectLicensePreflight(input: {
       continue;
     }
     if (row.action === 'model') {
+      if (row.exampleNotice === null)
+        throw new Error('An original notice is required for reassessment');
       modelKeys++;
       for (let index = 1; index <= input.sampleCount; index++) {
         const request = buildLicenseSampleRequest(

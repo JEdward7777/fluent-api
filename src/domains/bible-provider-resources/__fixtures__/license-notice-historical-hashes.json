@@ -1,0 +1,104 @@
+{
+  "v2": {
+    "table": {
+      "empty": "b607d3b68b4f9d5c474b0ffb3bc5b9b53583269d1c3d51dda3f16d9b1fa453cf",
+      "whitespace": "215ac51703bfcc7af739e738cf604d911ec86618d48b4a70c4ac2fe4607457bd",
+      "normalizesEmpty": "8bd69546732e68a631c74e22136922ea4d2e71e4bbf2472f4d44a55a13f53bc0",
+      "ordinary": "aca5f91678022036bf7d01b42e8f965c484cc15057d7d4ddae60ab40630f236f",
+      "nonFixedPoint": null
+    },
+    "manual": {
+      "empty": null,
+      "whitespace": null,
+      "normalizesEmpty": null,
+      "ordinary": null,
+      "nonFixedPoint": null
+    },
+    "manual-table": {
+      "empty": "83c119b660b055ad21748f1e37500baaab70db4db1ee280587568767c8a8930f",
+      "whitespace": "e405e71c54f51248593a59b3865e424b662c9ec43b740070a6a7ea642ca662d5",
+      "normalizesEmpty": "33c598c6c7b8b7f07c3a7e15fce5095de0844615e1cc538441f10a75fb80dd31",
+      "ordinary": "05b56975a4cd2f6b1364808ea3349876cb4e9da5b9f1ddbe4cd7230d78a57374",
+      "nonFixedPoint": null
+    },
+    "rule": {
+      "empty": null,
+      "whitespace": null,
+      "normalizesEmpty": "62222056bc8407130d60dea2881b752e410bc6fd5ca6701145ccb37b36a9480d",
+      "ordinary": "e0e08d5f2a9adec1b629c3e1fec45bd0a0343d8126984ec1710d18d8db3a4ada",
+      "nonFixedPoint": null
+    },
+    "manual-rule": {
+      "empty": null,
+      "whitespace": null,
+      "normalizesEmpty": "860f911f22eef550526812e782b8f1d5dd3f92342f6721957ab45f22fe2c54b7",
+      "ordinary": "8c279541f540d04f831baae8e83a1e675282827db33cd0a31726f3dcc4fdab2a",
+      "nonFixedPoint": null
+    },
+    "gemini": {
+      "empty": "435f4b446d9d6b758bd1a39394085e70076ca46c5a2687de5580ebb7782b7d5b",
+      "whitespace": "2f400c5bcf4b50ab5741c478e7b5e14628ced859e1c0e8f75757c483ed4c0041",
+      "normalizesEmpty": "249b333efa6295dc5fc08ac3d528a80d5440f3194e88246f78df782b5f3f4fe3",
+      "ordinary": "45dc4c88ae780a32746ea01c239939085df87eb80dc28a38eb7c1716a3b50117",
+      "nonFixedPoint": null
+    },
+    "manual-gemini": {
+      "empty": "069f9cd20249aae86631491b8ff46eac698e73538c04b54aba3d4fdaf6a44471",
+      "whitespace": "5d738e42a9371b1c10da9f4446cafa6f221c086e6f9609b5b278c508b918219b",
+      "normalizesEmpty": "074e539e525d7bf6a27d470334cc452b158da78ea7490af7392326f9a9945daf",
+      "ordinary": "c9932a9c7be4e061e34291a90fee01fe71343f86aea9e4bdab4cc44839f2134e",
+      "nonFixedPoint": null
+    }
+  },
+  "v3": {
+    "table": {
+      "empty": "61d352f9e6bbb2671cc650134970827e5c818552af3db20a3d933b01e3d85b7e",
+      "whitespace": "92ff68bf31ffa27bc4af15d8d436a5a5a4bee9d7ff69634a3e3062c553aa4c41",
+      "normalizesEmpty": "e8d6f94b23fac4a213467deaf7bab356762f5eefd5d8f281df5721411a16d725",
+      "ordinary": "70745f040b89b988569d29504a212f0ca482cfc3e880560e5ea7471bbb23ede4",
+      "nonFixedPoint": null
+    },
+    "manual": {
+      "empty": "8923f61b69c0be6b5d867dd50b769bb6e9d44bb9e53bacff84e7b1c709463957",
+      "whitespace": "ded74e723488a80c44a5a6169e249d4bbe712817fe0069b11d3e887a81032471",
+      "normalizesEmpty": "8d377da3e5e413d69c12d6d630a588efe7337630dc51cf0439e9c217d545224b",
+      "ordinary": "464c248571881f8924844c7d2972cf4a7d65effbd248d4f0e360d650e84b32b9",
+      "nonFixedPoint": null
+    },
+    "manual-table": {
+      "empty": "1b0ea426110c345e6d2fa7fa6a26b5b4bfc9fc75988d35574a20c6f16e2abf4d",
+      "whitespace": "27fe49c60851097ba099be5dd4aad9b4d2ca73a5c939504549357b8f6fe024b4",
+      "normalizesEmpty": "2f4c7c60a503d3798d1c9d4cf94f4e22f000167c2f02b3da82906a961e104a96",
+      "ordinary": "a465f8597cc7dc4cee276b123f4130db8069e422b533e29dcdfa83a70481756a",
+      "nonFixedPoint": null
+    },
+    "rule": {
+      "empty": null,
+      "whitespace": null,
+      "normalizesEmpty": "13c8c590e0732e12e34e02a51ed0542cf8fed4750a0a6cd53baa6e9bfe996777",
+      "ordinary": "dca357cdc437a08717997c04e956f8470c1f1fc159200db9bdb12d68be580542",
+      "nonFixedPoint": null
+    },
+    "manual-rule": {
+      "empty": null,
+      "whitespace": null,
+      "normalizesEmpty": "18d0a4bc220a76d4dbb2c3acbb15b9b4dcec78428979b377f01d63995dbef3e5",
+      "ordinary": "d8a2d7e274670a3aeabe91c4144b952050ed07507eb32132b0dbb212cb12c4ee",
+      "nonFixedPoint": null
+    },
+    "gemini": {
+      "empty": "89035641bd9b4cf9d8d19b2013649635f10e37605d5302d54c25d79d38b92a4b",
+      "whitespace": "37d1d6bd2abf438e24ac5ec4cdb889c1c3d81cb1bb5e6e7c955c29a8c0b3d4bb",
+      "normalizesEmpty": "00d8a6af7e81e6c6f7b5ec27ef1cbdc92edcc3b7ebce89ce9b3c81b25333386a",
+      "ordinary": "e9f50511cd29d4ec3e9a21b29f515d0127ca2ece540068eeda90cc7c4ad7edf9",
+      "nonFixedPoint": null
+    },
+    "manual-gemini": {
+      "empty": "c68c02a1e7d9747409e364dd347303821149b92d0db375d654c0ab9a79421b74",
+      "whitespace": "90622e42ee2a36f0e1777eda42e3b96dd31a9c470878b4a43ee6660f4f92e9c6",
+      "normalizesEmpty": "6ebd76bc6eec1ed30686f2c85110fed954bc1aeea18bd5cc7b953186ecfcb3f4",
+      "ordinary": "0757fc74912fde6e119a4a8487cd83ccd7548a0d3eb81387680bc54e24dc538a",
+      "nonFixedPoint": null
+    }
+  }
+}

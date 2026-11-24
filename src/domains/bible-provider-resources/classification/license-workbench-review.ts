@@ -5,7 +5,7 @@ import type { LicenseDatabaseContext } from '../license-impact';
 
 import { licenseOverrideWarning } from '../license-artifact';
 import { computeLicenseImpact } from '../license-impact';
-import { normalizeLicenseNotice } from '../license-normalizer';
+import { displayLicenseNotice, normalizeLicenseNotice } from '../license-normalizer';
 
 export interface LicenseReviewQuery {
   search: string;
@@ -19,17 +19,20 @@ const rowId = (normalizedText: string) => createHash('sha256').update(normalized
 
 function savedVariants(artifact: LicenseArtifact, normalizedText: string) {
   return [
-    ...new Set([
-      artifact.classifications.find((row) => row.normalizedText === normalizedText)!.exampleNotice,
-      ...artifact.catalog
-        .filter(
-          (bible) =>
-            bible.rawNotice !== null &&
-            bible.rawNotice.trim() !== '' &&
-            normalizeLicenseNotice(bible.rawNotice) === normalizedText
-        )
-        .map((bible) => bible.rawNotice!),
-    ]),
+    ...new Set(
+      [
+        artifact.classifications.find((row) => row.normalizedText === normalizedText)!
+          .exampleNotice,
+        ...artifact.catalog
+          .filter(
+            (bible) =>
+              bible.rawNotice !== null &&
+              bible.rawNotice.trim() !== '' &&
+              normalizeLicenseNotice(bible.rawNotice) === normalizedText
+          )
+          .map((bible) => bible.rawNotice!),
+      ].filter((notice) => notice !== null)
+    ),
   ];
 }
 
@@ -50,7 +53,7 @@ export function listLicenseWorkbenchReview(
       return {
         id: rowId(row.normalizedText),
         normalizedText: row.normalizedText,
-        preview: row.exampleNotice.slice(0, 240),
+        preview: displayLicenseNotice(row.exampleNotice).slice(0, 240),
         status: row.status,
         reviewState: row.reviewState,
         reviewedBy: row.reviewedBy,
@@ -130,6 +133,8 @@ export function getLicenseWorkbenchReviewDetail(
     rowNote: row.rowNote,
     context: impact.context,
     variants,
+    variantLabels: variants.map(displayLicenseNotice),
+    missingNoticeLabel: variants.length ? null : displayLicenseNotice(row.exampleNotice),
     bibles: affected.map((bible) => ({
       provider: bible.provider,
       externalId: bible.externalId,

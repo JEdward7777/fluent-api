@@ -1,9 +1,14 @@
-import type { JsonValue } from '@/lib/llm/canonical-json';
-
 import { hashCanonicalJson } from '@/lib/llm/canonical-json';
 
 import type { LicenseArtifact, LicenseClassification } from '../license-artifact.schemas';
 import type { StoredLicenseClassification } from './license-database.types';
+
+import { projectStoredExtensions } from './license-database-extensions';
+import {
+  databaseRationaleText,
+  licenseDecisionProducer,
+  storedLicenseDecision,
+} from './license-stored-decision';
 
 function ownedContract(run: LicenseArtifact['classificationRun']) {
   return {
@@ -64,11 +69,14 @@ function ownedLicenseClassification(
                 ? 1
                 : a.index - b.index
       ),
-    ...(row.samples.length || row.rule
+    ...(row.evidenceContract || row.samples.length || row.rule
       ? { evidenceContract: ownedContract(row.evidenceContract ?? contract) }
       : {}),
     ...(row.rule ? { rule: row.rule } : {}),
     ...(row.automaticDecision ? { automaticDecision: row.automaticDecision } : {}),
+    ...(row.reviewComment !== undefined ? { reviewComment: row.reviewComment } : {}),
+    ...(row.reviewHistory?.length ? { reviewHistory: row.reviewHistory } : {}),
+    ...(row.rowNoteProvenance ? { rowNoteProvenance: row.rowNoteProvenance } : {}),
     ...(row.rowNote ? { rowNote: row.rowNote } : {}),
     reviewState: row.reviewState ?? 'unreviewed',
     decisionAt: row.decisionAt ?? null,
@@ -81,25 +89,19 @@ export function licenseDatabaseProjection(artifact: LicenseArtifact) {
   return artifact.classifications.map((row) => {
     const run = row.evidenceContract ?? artifact.classificationRun;
     const classificationRun = ownedContract(run);
+    const extensions = projectStoredExtensions(row, run);
     return {
       normalizedText: row.normalizedText,
       status: row.status,
       rationale: {
-        text: row.rationale,
+        evidenceVersion: 4,
+        // Keep passthrough JSON outside the evidence that selects and compares decisions.
+        ...extensions,
+        text: databaseRationaleText(row),
         evidence: ownedLicenseClassification(row, run),
         ...(row.samples.length || row.rule ? { classificationRun } : {}),
       },
-      classifiedBy:
-        row.source === 'manual'
-          ? 'human'
-          : row.source === 'rule'
-            ? `rule:${row.rule!.id}`
-            : row.source === 'gemini'
-              ? run.models
-                  .map((model) => `${model.provider}:${model.model}`)
-                  .sort()
-                  .join(',')
-              : 'table',
+      classifiedBy: licenseDecisionProducer(row, run),
       reviewedAt: null,
       reviewState: row.reviewState ?? 'unreviewed',
       decisionAt: row.decisionAt ? new Date(row.decisionAt) : null,
@@ -109,126 +111,43 @@ export function licenseDatabaseProjection(artifact: LicenseArtifact) {
   });
 }
 
-export function licenseRationaleText(content: unknown) {
-  return typeof content === 'string'
-    ? content
-    : content &&
-        !Array.isArray(content) &&
-        typeof content === 'object' &&
-        'text' in content &&
-        typeof content.text === 'string'
-      ? content.text
-      : JSON.stringify(content) || 'No recorded rationale';
-}
-
-/** Keep maintenance's legacy-table preservation predicate identical to the transaction writer. */
+/**
+ * Compare complete owned decisions so changing the storage representation alone
+ * cannot rewrite untouched legacy evidence, producer labels or timestamps.
+ */
 export function selectLicenseMaintenanceRows(
-  artifact: LicenseArtifact,
-  existing: {
-    normalizedText: string;
-    status: LicenseClassification['status'];
-    rationale: unknown;
-    storedRationale?: unknown;
-    reviewState?: LicenseClassification['reviewState'];
-    decisionAt?: string | Date | null;
-    reviewedBy?: string | null;
-    humanReviewedAt?: string | Date | null;
-    classifiedBy?: string | null;
-  }[]
-) {
-  const before = new Map(existing.map((row) => [row.normalizedText, row]));
-  const sources = new Map(artifact.classifications.map((row) => [row.normalizedText, row.source]));
-  return licenseDatabaseProjection(artifact).filter((row) => {
-    const old = before.get(row.normalizedText);
-    if (!old) return true;
-    // A legacy table row with no evidence is already authoritative. Preserve its
-    // producer and timestamps unless the decision or owned metadata actually changed.
-    const priorDecisionAt =
-      old.decisionAt instanceof Date ? old.decisionAt.toISOString() : (old.decisionAt ?? null);
-    const priorHumanAt =
-      old.humanReviewedAt instanceof Date
-        ? old.humanReviewedAt.toISOString()
-        : (old.humanReviewedAt ?? null);
-    const unchangedLegacy =
-      sources.get(row.normalizedText) === 'table' &&
-      old.status === row.status &&
-      licenseRationaleText(old.storedRationale ?? old.rationale) === row.rationale.text &&
-      (old.reviewState ?? 'unreviewed') === row.reviewState &&
-      priorDecisionAt === (row.decisionAt?.toISOString() ?? null) &&
-      (old.reviewedBy ?? null) === row.reviewedBy &&
-      priorHumanAt === (row.humanReviewedAt?.toISOString() ?? null);
-    return (
-      !unchangedLegacy &&
-      (old.status !== row.status ||
-        old.classifiedBy !== row.classifiedBy ||
-        (old.reviewState ?? 'unreviewed') !== row.reviewState ||
-        priorDecisionAt !== (row.decisionAt?.toISOString() ?? null) ||
-        (old.reviewedBy ?? null) !== row.reviewedBy ||
-        priorHumanAt !== (row.humanReviewedAt?.toISOString() ?? null) ||
-        hashCanonicalJson((old.storedRationale ?? old.rationale) as JsonValue) !==
-          hashCanonicalJson(row.rationale))
-    );
-  });
-}
-
-/** Immediate maintenance diff; resource status forecasts are reported separately. */
-export function planLicenseMaintenanceChanges(
   artifact: LicenseArtifact,
   existing: StoredLicenseClassification[]
 ) {
   const before = new Map(existing.map((row) => [row.normalizedText, row]));
-  const rows = selectLicenseMaintenanceRows(artifact, existing);
-  return {
-    insertedKeys: rows
-      .filter((row) => !before.has(row.normalizedText))
-      .map((row) => row.normalizedText),
-    changedKeys: rows
-      .filter((row) => {
-        const old = before.get(row.normalizedText);
-        return (
-          old &&
-          (old.reviewState !== row.reviewState ||
-            old.decisionAt !== (row.decisionAt?.toISOString() ?? null) ||
-            old.reviewedBy !== row.reviewedBy ||
-            old.humanReviewedAt !== (row.humanReviewedAt?.toISOString() ?? null) ||
-            old.status !== row.status ||
-            old.classifiedBy !== row.classifiedBy ||
-            hashCanonicalJson(old.storedRationale ?? old.rationale) !==
-              hashCanonicalJson(row.rationale))
-        );
-      })
-      .map((row) => row.normalizedText),
-    deletedKeys: [] as string[],
-  };
+  return licenseDatabaseProjection(artifact).filter((projected) => {
+    const old = before.get(projected.normalizedText);
+    if (!old) return true;
+    const stored = storedLicenseDecision(old, projected.rationale.evidence.exampleNotice);
+    const prior = ownedLicenseClassification(
+      stored,
+      old.classificationRun ?? artifact.classificationRun
+    );
+    // Column-only policies never stored a spelling for the raw notice.
+    if (!old.evidence && projected.rationale.evidence.source === 'table')
+      prior.exampleNotice = projected.rationale.evidence.exampleNotice;
+    return hashCanonicalJson(prior) !== hashCanonicalJson(projected.rationale.evidence);
+  });
 }
 
-/** Mirrors the apply query's status/rationale/producer distinct-value predicate. */
 export function planLicenseDatabaseChanges(
   artifact: LicenseArtifact,
   existing: StoredLicenseClassification[]
 ) {
-  const before = new Map(existing.map((row) => [row.normalizedText, row]));
-  const proposed = licenseDatabaseProjection(artifact);
+  const before = new Set(existing.map((row) => row.normalizedText));
+  const rows = selectLicenseMaintenanceRows(artifact, existing);
   return {
     deletedKeys: [] as string[],
-    insertedKeys: proposed
+    insertedKeys: rows
       .filter((row) => !before.has(row.normalizedText))
       .map((row) => row.normalizedText),
-    changedKeys: proposed
-      .filter((row) => {
-        const old = before.get(row.normalizedText);
-        return (
-          old &&
-          (old.reviewState !== row.reviewState ||
-            old.decisionAt !== (row.decisionAt?.toISOString() ?? null) ||
-            old.reviewedBy !== row.reviewedBy ||
-            old.humanReviewedAt !== (row.humanReviewedAt?.toISOString() ?? null) ||
-            old.status !== row.status ||
-            old.classifiedBy !== row.classifiedBy ||
-            hashCanonicalJson(old.storedRationale ?? old.rationale) !==
-              hashCanonicalJson(row.rationale))
-        );
-      })
+    changedKeys: rows
+      .filter((row) => before.has(row.normalizedText))
       .map((row) => row.normalizedText),
   };
 }

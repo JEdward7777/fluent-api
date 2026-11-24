@@ -5,6 +5,8 @@ import type { LicenseDatabaseContext } from '../license-impact';
 
 export interface StoredLicenseClassification {
   normalizedText: string;
+  /** A matching raw notice from the currently loaded catalog, when available. */
+  exampleNotice?: string;
   status: LicenseClassification['status'];
   rationale: string;
   classifiedBy: string | null;

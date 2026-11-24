@@ -87,7 +87,7 @@ async function loadRows(view, focusRow) {
     rows.replaceChildren();
     for (const item of result.rows) {
       const tr = node('tr');
-      const action = node('button', item.preview || '(empty original notice)');
+      const action = node('button', item.preview);
       action.type = 'button';
       action.dataset.rowId = item.id;
       action.addEventListener('click', () => navigation.openRow(item.id));
@@ -374,8 +374,9 @@ async function openDetail(id) {
       );
     }
     const variants = node('div');
-    for (const [index, variant] of item.variants.entries())
-      variants.append(block(`Original notice variant ${index + 1}`, variant));
+    if (item.missingNoticeLabel) variants.append(node('p', item.missingNoticeLabel));
+    for (const [index, label] of item.variantLabels.entries())
+      variants.append(block(`Original notice variant ${index + 1}`, label));
     detail.append(node('h4', `Saved original notice variants (${item.variants.length})`), variants);
     const bibles = node('ul');
     for (const bible of item.bibles) {

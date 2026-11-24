@@ -137,7 +137,7 @@ describe('versioned license artifact lifecycle', () => {
         (model) => model.provider === sample.provider && model.model === sample.model
       )!;
       sample.request = buildLicenseSampleRequest(
-        owned.classifications[1].exampleNotice,
+        owned.classifications[1].exampleNotice!,
         model.provider,
         model.model,
         sample.index,
@@ -279,7 +279,7 @@ describe('versioned license artifact lifecycle', () => {
         (model) => model.provider === sample.provider && model.model === sample.model
       )!;
       sample.request = buildLicenseSampleRequest(
-        artifact.classifications[1].exampleNotice,
+        artifact.classifications[1].exampleNotice!,
         model.provider,
         model.model,
         sample.index,

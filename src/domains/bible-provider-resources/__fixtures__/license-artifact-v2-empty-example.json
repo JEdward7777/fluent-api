@@ -1,0 +1,37 @@
+{
+  "catalog": [],
+  "classificationRun": {
+    "prompt": "License fixture",
+    "promptHash": "ae3c6b13b280b1413b13a0d2f6115abd35e641483242922b7f509489ec1751de",
+    "ruleSetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "responseSchema": {},
+    "models": [
+      {
+        "provider": "fixture",
+        "model": "fixture",
+        "settings": {},
+        "sampleCount": 2
+      }
+    ]
+  },
+  "classifications": [
+    {
+      "normalizedText": "",
+      "exampleNotice": "",
+      "source": "table",
+      "status": "allowed",
+      "rationale": "Historic table decision",
+      "samples": []
+    }
+  ],
+  "schemaVersion": 2,
+  "hashDomainVersion": 2,
+  "normalizerVersion": 1,
+  "reviewContentHash": "807b2d6344c5087c214cb495079804d55ea44356483cdebb0cf9e61919a31c6f",
+  "attestation": {
+    "reviewedBy": "Historical file signer",
+    "reviewReason": "Checked the historical table",
+    "reviewedAt": "2025-04-03T00:00:00.000Z",
+    "reviewContentHash": "807b2d6344c5087c214cb495079804d55ea44356483cdebb0cf9e61919a31c6f"
+  }
+}

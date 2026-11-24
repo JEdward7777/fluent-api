@@ -2,6 +2,7 @@ import type { LicenseDatabaseContext } from './license-impact';
 
 import { serializeLicenseArtifact } from './license-artifact';
 import { computeLicenseImpact } from './license-impact';
+import { displayLicenseNotice } from './license-normalizer';
 import { freezeLicenseRevision, freezeReviewValue } from './license-review-revision';
 
 export function buildLicenseReportModel(
@@ -22,7 +23,7 @@ export function buildLicenseReportModel(
     )
     .map((row) => ({
       normalizedText: row.normalizedText,
-      exampleNotice: row.exampleNotice,
+      exampleNotice: displayLicenseNotice(row.exampleNotice),
       status: row.status,
       rationale: row.rationale,
       source: row.source,

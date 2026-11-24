@@ -195,9 +195,9 @@ it('archives human evidence when a completed rule reassessment replaces the deci
   );
   const result = assessedLicenseRow({
     normalizedText: rule.normalizedText,
-    exampleNotice: rule.exampleNotice,
+    exampleNotice: rule.exampleNotice!,
     proposal: await createLicenseClassifier({ model: 'google:fixture', apiKey: '', noCache: true })(
-      rule.exampleNotice
+      rule.exampleNotice!
     ),
     classificationRun: base.classificationRun,
     previous: reviewed.classifications[0],

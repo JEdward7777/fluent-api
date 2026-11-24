@@ -135,7 +135,15 @@ describe('classification authority and following ordinary sync journey', () => {
       expect(after[0].updatedAt!.getTime()).toBeGreaterThan(times[0].updatedAt!.getTime());
       await database
         .update(schema.license_classifications)
-        .set({ status: 'unknown', rationale: 'Human retained unknown', classifiedBy: 'human' })
+        .set({
+          status: 'unknown',
+          rationale: 'Human retained unknown',
+          classifiedBy: 'human',
+          reviewState: 'human_reviewed',
+          reviewedBy: 'Catalog reviewer',
+          decisionAt: new Date('2026-11-01T00:00:00.000Z'),
+          humanReviewedAt: new Date('2026-11-01T00:00:00.000Z'),
+        })
         .where(
           eq(
             schema.license_classifications.normalizedText,
@@ -270,7 +278,7 @@ describe('classification authority and following ordinary sync journey', () => {
             (model) => model.model === sample.model
           )!;
           sample.request = buildLicenseSampleRequest(
-            row.exampleNotice,
+            row.exampleNotice!,
             sample.provider,
             sample.model,
             sample.index,
@@ -298,7 +306,7 @@ describe('classification authority and following ordinary sync journey', () => {
     expect(Object.hasOwn(Object.prototype, 'inert')).toBe(false);
   });
 
-  it('does not retain owned JSON evidence after a producer-only DB change, and maintenance preserves legacy authority without invented evidence', async () => {
+  it('blocks a stale producer from downgrading an authoritative LLM review without complete evidence', async () => {
     const adapter = createLicenseDatabaseAdapter();
     const artifact = makeLicenseArtifact();
     await adapter.apply(artifact, true, undefined, true);
@@ -312,27 +320,19 @@ describe('classification authority and following ordinary sync journey', () => {
       snapshot.classifications.find((row) => row.normalizedText === key)?.evidence
     ).toBeUndefined();
     const classify = vi.fn(createLicenseClassifier({ apiKey: 'mock', transport: vi.fn() }));
-    const refreshed = await analyzeDatabaseLicenses({
-      base: artifact,
-      catalog: [],
-      classifications: snapshot.classifications,
-      classify,
-      model: 'google:current',
-      sampleCount: 3,
-    });
-    const changed = refreshed.classifications.find((row) => row.normalizedText === key)!;
-    expect(changed).toMatchObject({ source: 'table', samples: [] });
-    expect(changed.rule).toBeUndefined();
-    expect(changed.rowNote).toBeUndefined();
-    expect(changed.automaticDecision).toBeUndefined();
-    expect(changed.evidenceContract).toBeUndefined();
+    const before = await rows();
+    await expect(
+      analyzeDatabaseLicenses({
+        base: artifact,
+        catalog: [],
+        classifications: snapshot.classifications,
+        classify,
+        model: 'google:current',
+        sampleCount: 3,
+      })
+    ).rejects.toThrow('requires complete model evidence');
     expect(classify).not.toHaveBeenCalled();
-    const before = (await rows()).find((row) => row.normalizedText === key);
-    await adapter.apply(refreshed, false);
-    const after = (await rows()).find((row) => row.normalizedText === key)!;
-    expect(after.status).toBe(before!.status);
-    expect(after.reviewState).toBe('unreviewed');
-    expect(after.decisionAt).toBeNull();
+    expect(await rows()).toEqual(before);
   });
 
   it('rejects stale empty-table previews under the DB lock, including with force set', async () => {

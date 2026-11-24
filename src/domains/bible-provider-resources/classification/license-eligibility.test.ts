@@ -5,6 +5,7 @@ import { createLicenseClassifier } from '../license-classifier';
 import { assessedLicenseRow } from './license-assessment';
 import { licenseKeyDigest, planLicenseEligibility } from './license-eligibility';
 import { inspectLicensePreflight } from './license-preflight';
+import { licenseDecisionProducer } from './license-stored-decision';
 
 const artifact = makeLicenseArtifact();
 const rows = new Map(artifact.classifications.map((row) => [row.normalizedText, row]));
@@ -18,7 +19,8 @@ describe('shared classification eligibility', () => {
         normalizedText: row.normalizedText,
         status: row.status,
         rationale: row.rationale,
-        classifiedBy: null,
+        classifiedBy: licenseDecisionProducer(row, artifact.classificationRun),
+        classificationRun: artifact.classificationRun,
         reviewedAt: null,
         evidence: row,
       })),
@@ -156,10 +158,10 @@ describe('actual assessment event time', () => {
       }),
     });
     const original = artifact.classifications[0];
-    const proposal = await classifier(original.exampleNotice);
+    const proposal = await classifier(original.exampleNotice!);
     const first = assessedLicenseRow({
       normalizedText: original.normalizedText,
-      exampleNotice: original.exampleNotice,
+      exampleNotice: original.exampleNotice!,
       proposal,
       previous: original,
       classificationRun: artifact.classificationRun,
@@ -167,7 +169,7 @@ describe('actual assessment event time', () => {
     });
     const second = assessedLicenseRow({
       normalizedText: original.normalizedText,
-      exampleNotice: original.exampleNotice,
+      exampleNotice: original.exampleNotice!,
       proposal,
       previous: first,
       classificationRun: artifact.classificationRun,

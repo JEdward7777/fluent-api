@@ -11,9 +11,15 @@ import {
   LICENSE_INFERENCE_SETTINGS,
   LICENSE_VOTE_JSON_SCHEMA,
 } from '../license-model-contract';
-import { normalizeLicenseNotice } from '../license-normalizer';
+import {
+  catalogLicenseNotices,
+  indexLicenseNoticeExamples,
+  isLicenseNoticeUnavailable,
+  savedLicenseNotices,
+} from '../license-normalizer';
 import { LICENSE_RULE_SET_HASH } from '../license-rules';
 import { assessedLicenseRow } from './license-assessment';
+import { storedLicenseDecision } from './license-stored-decision';
 
 /** Refresh owned database authority; only unconsumed JSON extensions overlay that source. */
 export async function analyzeDatabaseLicenses(input: {
@@ -44,52 +50,34 @@ export async function analyzeDatabaseLicenses(input: {
       },
     ],
   };
-  const examples = new Map<string, string>();
-  for (const row of input.catalog) {
-    if (row.rawNotice?.trim()) {
-      const key = normalizeLicenseNotice(row.rawNotice);
-      if (!examples.has(key)) examples.set(key, row.rawNotice);
-    }
-  }
-  // Retain authoritative keys even if the current catalog no longer contains them.
-  for (const row of input.classifications)
-    if (!examples.has(row.normalizedText)) examples.set(row.normalizedText, row.normalizedText);
+  const examples = indexLicenseNoticeExamples(catalogLicenseNotices(input.catalog));
+  const priorExamples = indexLicenseNoticeExamples(savedLicenseNotices(input.base));
+  const keys = new Set([...examples.keys(), ...known.keys()]);
   const classifications: LicenseClassification[] = [];
   // Serial distinct-key inference bounds model pressure; each key's independent samples run concurrently.
-  for (const [normalizedText, exampleNotice] of [...examples].sort(([a], [b]) =>
-    a < b ? -1 : a > b ? 1 : 0
-  )) {
+  for (const normalizedText of [...keys].sort()) {
     if (input.shouldStop?.()) throw new LicenseAnalysisStoppedError();
     const basePrior = input.base?.classifications.find(
       (row) => row.normalizedText === normalizedText
     );
-    const storedEvidence = known.get(normalizedText)?.evidence;
     const stored = known.get(normalizedText);
+    const rawExample = examples.get(normalizedText) ?? priorExamples.get(normalizedText);
+    const storedDecision = stored && storedLicenseDecision(stored, rawExample);
+    const exampleNotice = examples.get(normalizedText) ?? storedDecision?.exampleNotice ?? null;
     const action = selected.get(normalizedText)?.action ?? (stored ? 'retain' : 'rule');
     if (
-      stored &&
+      storedDecision &&
       (action === 'retain' || (action === 'rule' && !selected.get(normalizedText)?.ruleMatches))
     ) {
       // The database is the source of owned provenance. Missing evidence is absent,
       // even when an older JSON decision/producer happens to match the same core fields.
-      const hasCurrentEvidence =
-        storedEvidence &&
-        storedEvidence.status === stored.status &&
-        storedEvidence.rationale === stored.rationale &&
-        storedEvidence.normalizedText === normalizedText;
-      const retained: LicenseClassification = hasCurrentEvidence
-        ? structuredClone(storedEvidence)
-        : {
-            normalizedText,
-            exampleNotice,
-            status: stored.status,
-            source: 'table',
-            rationale: stored.rationale,
-            samples: [],
-          };
+      const retained = storedDecision;
       if (basePrior) {
         for (const [key, value] of Object.entries(basePrior))
-          if (!Object.hasOwn(licenseClassificationSchema.shape, key))
+          if (
+            !Object.hasOwn(licenseClassificationSchema.shape, key) &&
+            !Object.hasOwn(retained, key)
+          )
             Object.defineProperty(retained, key, {
               value: structuredClone(value),
               enumerable: true,
@@ -97,11 +85,11 @@ export async function analyzeDatabaseLicenses(input: {
               writable: true,
             });
       }
-      if ((retained.samples.length || retained.rule) && !retained.evidenceContract)
-        retained.evidenceContract = stored.classificationRun;
       classifications.push(retained);
       continue;
     }
+    if (isLicenseNoticeUnavailable(exampleNotice))
+      throw new Error('An original notice is required for reassessment');
     const proposal = await input.classify(
       exampleNotice,
       undefined,
@@ -113,14 +101,14 @@ export async function analyzeDatabaseLicenses(input: {
       normalizedText,
       exampleNotice,
       proposal,
-      previous: storedEvidence,
+      previous: storedDecision,
       previousRun: stored?.classificationRun,
       classificationRun,
       now: input.now ?? (() => new Date().toISOString()),
     });
     if (basePrior) {
       for (const [key, value] of Object.entries(basePrior))
-        if (!Object.hasOwn(licenseClassificationSchema.shape, key))
+        if (!Object.hasOwn(licenseClassificationSchema.shape, key) && !Object.hasOwn(fresh, key))
           Object.defineProperty(fresh, key, {
             value: structuredClone(value),
             enumerable: true,
@@ -192,6 +180,8 @@ export async function analyzeJsonLicenses(input: {
       classifications.push(previous);
       continue;
     }
+    if (isLicenseNoticeUnavailable(eligible.exampleNotice))
+      throw new Error('An original notice is required for reassessment');
     const proposal = await input.classify(
       eligible.exampleNotice,
       undefined,

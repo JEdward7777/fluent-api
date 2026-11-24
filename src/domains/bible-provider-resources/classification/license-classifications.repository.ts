@@ -5,19 +5,16 @@ import type { DbTransaction } from '@/lib/types';
 import { bible_provider_resources, bibles, license_classifications } from '@/db/schema';
 import { hashCanonicalJson } from '@/lib/llm/canonical-json';
 
-import type { LicenseArtifact, LicenseClassification } from '../license-artifact.schemas';
+import type { LicenseArtifact } from '../license-artifact.schemas';
 import type {
   LicenseDatabaseSnapshot,
   StoredLicenseClassification,
 } from './license-database.types';
 
-import { licenseArtifactSchema, licenseClassificationSchema } from '../license-artifact.schemas';
-import {
-  licenseDatabaseProjection,
-  licenseRationaleText,
-  selectLicenseMaintenanceRows,
-} from './license-database-projection';
+import { catalogLicenseNotices, indexLicenseNoticeExamples } from '../license-normalizer';
+import { selectLicenseMaintenanceRows } from './license-database-projection';
 import { LicensePolicyDriftError } from './license-database.types';
+import { readStoredLicenseClassification } from './license-stored-decision';
 
 type LicenseDb = typeof import('@/db').db;
 
@@ -56,84 +53,12 @@ export async function loadClassificationSnapshot(
       ),
   ]);
   const logger = logging ?? (await import('@/lib/logger')).logger;
-  const classifications: StoredLicenseClassification[] = rows.map((row) => {
-    const content = row.rationale;
-    // Existing card rows may contain only a rationale; model/human evidence is optional.
-    const text = licenseRationaleText(content);
-    const metadata =
-      content && typeof content === 'object' && !Array.isArray(content) ? content : {};
-    const evidence = licenseClassificationSchema.safeParse(metadata.evidence);
-    const run = licenseArtifactSchema.shape.classificationRun.safeParse(metadata.classificationRun);
-    const contract = evidence.success
-      ? (evidence.data.evidenceContract ?? (run.success ? run.data : undefined))
-      : undefined;
-    const expectedProducer = !evidence.success
-      ? null
-      : evidence.data.source === 'manual'
-        ? 'human'
-        : evidence.data.source === 'rule'
-          ? `rule:${evidence.data.rule?.id}`
-          : evidence.data.source === 'gemini'
-            ? contract?.models
-                .map((model) => `${model.provider}:${model.model}`)
-                .sort()
-                .join(',')
-            : 'table';
-    const usableEvidence =
-      row.classifiedBy === expectedProducer &&
-      evidence.success &&
-      (run.success || (!evidence.data.samples.length && !evidence.data.rule)) &&
-      evidence.data.status === row.status &&
-      evidence.data.rationale === text &&
-      evidence.data.normalizedText === row.normalizedText &&
-      (evidence.data.reviewState === undefined ||
-        (evidence.data.reviewState === row.reviewState &&
-          (evidence.data.decisionAt ?? null) === (row.decisionAt?.toISOString() ?? null) &&
-          (evidence.data.reviewedBy ?? null) === row.reviewedBy &&
-          (evidence.data.humanReviewedAt ?? null) ===
-            (row.humanReviewedAt?.toISOString() ?? null)));
-    if (metadata.evidence !== undefined && !usableEvidence)
-      logger.warn({
-        normalizedText: row.normalizedText,
-        classifiedBy: row.classifiedBy,
-        message:
-          'Stored provenance does not match the current database decision; retaining exact table authority without stale evidence',
-      });
-    const evidenceRow = usableEvidence
-      ? {
-          ...(structuredClone(metadata.evidence) as LicenseClassification),
-          reviewState:
-            evidence.data.reviewState ??
-            (evidence.data.source === 'gemini' ? 'llm_reviewed' : 'unreviewed'),
-          decisionAt: evidence.data.decisionAt ?? null,
-          reviewedBy: evidence.data.reviewedBy ?? null,
-          humanReviewedAt: evidence.data.humanReviewedAt ?? null,
-        }
-      : null;
-    return {
-      ...(usableEvidence
-        ? {
-            evidence: structuredClone(evidenceRow) as LicenseClassification,
-            ...(run.success
-              ? {
-                  classificationRun: structuredClone(
-                    metadata.classificationRun
-                  ) as LicenseArtifact['classificationRun'],
-                }
-              : {}),
-          }
-        : {}),
-      storedRationale: structuredClone(content),
-      normalizedText: row.normalizedText,
-      status: row.status,
-      rationale: text || 'No recorded rationale',
-      classifiedBy: row.classifiedBy,
-      reviewedAt: row.reviewedAt?.toISOString() ?? null,
-      reviewState: row.reviewState,
-      decisionAt: row.decisionAt?.toISOString() ?? null,
-      reviewedBy: row.reviewedBy,
-      humanReviewedAt: row.humanReviewedAt?.toISOString() ?? null,
-    };
+  const examples = indexLicenseNoticeExamples(catalogLicenseNotices(resources));
+  const classifications = rows.map((row) => {
+    const stored = readStoredLicenseClassification(row, logger);
+    const example = examples.get(row.normalizedText);
+    if (example !== undefined) stored.exampleNotice = example;
+    return stored;
   });
   return {
     tableExists: exists.exists,
@@ -156,7 +81,6 @@ export async function applyClassifications(
   database?: LicenseDb
 ) {
   const connection = database ?? (await import('@/db')).db;
-  const proposed = licenseDatabaseProjection(artifact);
   await connection.transaction(async (tx) => {
     // Serialize initialization/replacement with ordinary table writes, including the
     // empty-table case where no row exists to lock. This enforces --force at apply.
@@ -189,9 +113,11 @@ export async function applyClassifications(
       if (!matches) throw new LicensePolicyDriftError();
     }
     // Both overwrite and sync are scoped upserts. The plan supplies only selected keys.
-    const rows = replace
-      ? proposed
-      : selectLicenseMaintenanceRows(artifact, [...existing.values()]);
+    const selectedExisting = artifact.classifications.flatMap(({ normalizedText }) => {
+      const row = existing.get(normalizedText);
+      return row ? [readStoredLicenseClassification(row)] : [];
+    });
+    const rows = selectLicenseMaintenanceRows(artifact, selectedExisting);
     // Bounded batches reduce parameter pressure; the transaction preserves all-or-nothing writes.
     for (let offset = 0; offset < rows.length; offset += 100) {
       await tx

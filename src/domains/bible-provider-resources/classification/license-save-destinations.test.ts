@@ -9,6 +9,7 @@ import {
 } from '../license-artifact';
 import { makeLicenseArtifact, REVIEWER } from '../license-artifact.test-fixtures';
 import { planLicenseSaveDestinations } from './license-save-destinations';
+import { licenseDecisionProducer } from './license-stored-decision';
 
 const time = '2026-11-17T12:00:00.000Z';
 const base = () => makeLicenseArtifact();
@@ -26,7 +27,7 @@ const stored = (artifact: ReturnType<typeof base>) =>
     normalizedText: row.normalizedText,
     status: row.status,
     rationale: row.rationale,
-    classifiedBy: row.source,
+    classifiedBy: licenseDecisionProducer(row, artifact.classificationRun),
     reviewedAt: null,
     reviewState: row.reviewState,
     decisionAt: row.decisionAt,

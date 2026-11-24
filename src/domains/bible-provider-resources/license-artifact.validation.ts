@@ -4,7 +4,7 @@ import { llmRequestHash } from '@/lib/llm/request-cache';
 import type { LicenseArtifact, LicenseClassification } from './license-artifact.schemas';
 
 import { buildLicenseSampleRequest, parseLicenseVote } from './license-model-contract';
-import { normalizeLicenseNotice } from './license-normalizer';
+import { isLicenseNoticeUnavailable, normalizeLicenseNotice } from './license-normalizer';
 
 function unique(values: string[], label: string) {
   if (new Set(values).size !== values.length) throw new Error(`Duplicate ${label}`);
@@ -47,7 +47,28 @@ function validateReviewFacts(row: ReviewFacts) {
   }
 }
 
-function validateEvidence(row: LicenseClassification, artifact: LicenseArtifact) {
+export function validateLicenseEvidence(
+  row: LicenseClassification,
+  run?: LicenseArtifact['classificationRun']
+) {
+  if (isLicenseNoticeUnavailable(row.exampleNotice)) {
+    if (
+      !(
+        row.source === 'table' ||
+        (row.source === 'manual' && row.automaticDecision?.source === 'table')
+      ) ||
+      row.samples.length ||
+      row.rule ||
+      row.evidenceContract
+    )
+      throw new Error(
+        'Only table-derived decisions without rule or model evidence may lack an original notice'
+      );
+    if (row.normalizedText !== row.normalizedText.toLowerCase().replace(/\s+/g, ' ').trim())
+      throw new Error('Malformed normalized classification key');
+  } else if (normalizeLicenseNotice(row.exampleNotice) !== row.normalizedText) {
+    throw new Error('Classification key does not match exact notice normalization');
+  }
   validateReviewFacts(row);
   for (const prior of row.reviewHistory ?? []) validateReviewFacts(prior);
   const proposal = row.source === 'manual' ? row.automaticDecision : row;
@@ -63,6 +84,7 @@ function validateEvidence(row: LicenseClassification, artifact: LicenseArtifact)
   if (!proposal) throw new Error('A manual disposition must preserve its previous decision');
   if (row.source !== 'manual' && row.automaticDecision)
     throw new Error('Only manual dispositions carry an automatic decision');
+  if (row.exampleNotice === null) return;
   if (proposal.source === 'rule') {
     if (
       !row.rule ||
@@ -75,7 +97,12 @@ function validateEvidence(row: LicenseClassification, artifact: LicenseArtifact)
   } else if (row.rule) throw new Error('Unexpected rule evidence');
   if (proposal.source !== 'gemini' && row.samples.length > 0)
     throw new Error('Unexpected model evidence');
-  const contract = row.evidenceContract ?? artifact.classificationRun;
+  const contract = row.evidenceContract ?? run;
+  if (!contract) {
+    if (proposal.source === 'gemini' || proposal.source === 'rule')
+      throw new Error('Missing evidence contract');
+    return;
+  }
   if (hashCanonicalJson(contract.prompt) !== contract.promptHash)
     throw new Error('Recorded row prompt hash mismatch');
   unique(
@@ -165,12 +192,6 @@ export function validateLicenseArtifactContent(artifact: LicenseArtifact): void 
     )
       throw new Error('Catalog notice has no exact normalized classification');
   }
-  for (const row of artifact.classifications) {
-    if (
-      row.normalizedText !== normalizeLicenseNotice(row.normalizedText) ||
-      row.normalizedText !== normalizeLicenseNotice(row.exampleNotice)
-    )
-      throw new Error('Classification key does not match exact notice normalization');
-    validateEvidence(row, artifact);
-  }
+  for (const row of artifact.classifications)
+    validateLicenseEvidence(row, artifact.classificationRun);
 }

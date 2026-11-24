@@ -88,10 +88,15 @@ export async function reviewLicenseRows(
     );
     const affected = impact.rows.filter((bible) => bible.normalizedText === row.normalizedText);
     const notices = [
-      ...new Set([row.exampleNotice, ...affected.map((bible) => bible.rawNotice ?? '')]),
+      ...new Set(
+        [row.exampleNotice, ...affected.map((bible) => bible.rawNotice)].filter(
+          (notice) => notice !== null
+        )
+      ),
     ];
     await io.write(
       [
+        ...(notices.length ? [] : ['Original notice unavailable']),
         ...notices.map((notice) => `Raw notice: ${JSON.stringify(notice)}`),
         `Affected Bibles (${affected.length}):`,
         ...affected.map(

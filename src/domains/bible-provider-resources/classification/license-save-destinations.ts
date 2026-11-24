@@ -3,33 +3,21 @@ import type { StoredLicenseClassification } from './license-database.types';
 
 import { checkLicenseArtifactReview, createLicenseArtifact } from '../license-artifact';
 import { computeLicenseReviewHash } from '../license-artifact.hash';
+import {
+  indexLicenseNoticeExamples,
+  isLicenseNoticeUnavailable,
+  savedLicenseNotices,
+} from '../license-normalizer';
 import { planLicenseDatabaseChanges } from './license-database-projection';
 import { planLicenseDecisionMerge } from './license-decision-merge';
+import { storedLicenseDecision } from './license-stored-decision';
 import { parseLicenseArtifactBytes } from './license-workflow-freshness';
 
-function storedDecision(row: StoredLicenseClassification): LicenseClassification {
-  if (row.evidence) {
-    const evidence = structuredClone(row.evidence);
-    if (
-      (evidence.samples.length || evidence.rule) &&
-      !evidence.evidenceContract &&
-      row.classificationRun
-    )
-      evidence.evidenceContract = structuredClone(row.classificationRun);
-    return evidence;
-  }
-  return {
-    normalizedText: row.normalizedText,
-    exampleNotice: row.normalizedText,
-    status: row.status,
-    source: 'table',
-    rationale: row.rationale,
-    samples: [],
-    reviewState: 'unreviewed',
-    decisionAt: null,
-    reviewedBy: null,
-    humanReviewedAt: null,
-  };
+function withNotice(row: LicenseClassification, examples: Map<string, string>) {
+  const raw = examples.get(row.normalizedText);
+  return isLicenseNoticeUnavailable(row.exampleNotice) && raw !== undefined
+    ? { ...row, exampleNotice: raw }
+    : row;
 }
 
 function withContract(row: LicenseClassification, run: LicenseArtifact['classificationRun']) {
@@ -120,8 +108,14 @@ export function planLicenseSaveDestinations(input: {
     } else {
       const prior =
         input.outputBytes === null ? null : parseLicenseArtifactBytes(input.outputBytes);
-      const sourceRows = artifact.classifications;
-      const destinationRows = prior?.classifications ?? [];
+      const examples = indexLicenseNoticeExamples([
+        ...savedLicenseNotices(artifact),
+        ...savedLicenseNotices(prior ?? undefined),
+      ]);
+      const sourceRows = artifact.classifications.map((row) => withNotice(row, examples));
+      const destinationRows = (prior?.classifications ?? []).map((row) =>
+        withNotice(row, examples)
+      );
       const decisions = planLicenseDecisionMerge(
         sourceRows.map((row) => withContract(row, artifact.classificationRun)),
         destinationRows.map((row) => withContract(row, prior!.classificationRun))
@@ -175,7 +169,16 @@ export function planLicenseSaveDestinations(input: {
     }
   }
   if (destination !== 'json') {
-    const destinationRows = (input.databaseRows ?? []).map(storedDecision);
+    const examples = indexLicenseNoticeExamples([
+      ...savedLicenseNotices(artifact),
+      ...(input.databaseRows ?? []).map((row) => row.exampleNotice ?? null),
+    ]);
+    const destinationRows = (input.databaseRows ?? []).map((row) =>
+      storedLicenseDecision(row, examples.get(row.normalizedText))
+    );
+    const comparisonExamples = indexLicenseNoticeExamples(
+      destinationRows.map((row) => row.exampleNotice)
+    );
     const decisions =
       source === 'database'
         ? artifact.classifications.map((row) => ({
@@ -187,7 +190,9 @@ export function planLicenseSaveDestinations(input: {
             reason: 'update' as const,
           }))
         : planLicenseDecisionMerge(
-            artifact.classifications.map((row) => withContract(row, artifact.classificationRun)),
+            artifact.classifications.map((row) =>
+              withContract(withNotice(row, comparisonExamples), artifact.classificationRun)
+            ),
             destinationRows
           );
     const overwriteDiff =

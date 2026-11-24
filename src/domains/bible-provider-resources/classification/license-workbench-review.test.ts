@@ -43,7 +43,7 @@ describe('license workbench review projection', () => {
     artifact.classifications.push({
       ...example,
       normalizedText: '',
-      exampleNotice: '2010',
+      exampleNotice: '',
       status: 'unknown',
       samples: [],
       source: 'table',
@@ -55,7 +55,7 @@ describe('license workbench review projection', () => {
       bibleId: 99,
       name: 'Year Bible',
       abbreviation: 'YB',
-      rawNotice: '2010',
+      rawNotice: '© 2025',
     });
     const all = listLicenseWorkbenchReview(artifact, {
       search: '',
@@ -71,9 +71,12 @@ describe('license workbench review projection', () => {
     });
     expect(filtered).toMatchObject({ total: 1, allCount: 4, page: 1, pageSize: 25 });
     expect(filtered.rows[0].id).toBe(all.rows.find((row) => row.normalizedText === '')?.id);
-    expect(filtered.rows[0]).toMatchObject({ preview: '2010', bibleNames: ['Year Bible'] });
+    expect(filtered.rows[0]).toMatchObject({
+      preview: '(empty original notice)',
+      bibleNames: ['Year Bible'],
+    });
     const detail = getLicenseWorkbenchReviewDetail(artifact, filtered.rows[0].id);
-    expect(detail).toMatchObject({ normalizedText: '', variants: ['2010'] });
+    expect(detail).toMatchObject({ normalizedText: '', variants: ['', '© 2025'] });
     expect(detail?.modelEvidenceLabel).toContain('No model request');
   });
 

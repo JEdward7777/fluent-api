@@ -17,6 +17,12 @@ interface InvalidMutation {
   edit: (artifact: LicenseArtifact) => void;
 }
 const invalid: InvalidMutation[] = [
+  ...[0, 1].map((index) => ({
+    name: `unavailable original notice on automatic source ${index}`,
+    edit: (artifact: ReturnType<typeof makeLicenseArtifact>) => {
+      artifact.classifications[index].exampleNotice = null;
+    },
+  })),
   {
     name: 'duplicate exact key',
     edit: (a) => {

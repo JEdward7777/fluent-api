@@ -8,6 +8,7 @@ import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type { LicenseFileIo } from './license-write';
 
+import { savedLicenseNotices } from '../license-normalizer';
 import { licenseInlineSummary } from '../license-report-model';
 import { renderLicenseReports } from '../license-reports';
 import { runLicenseReview } from '../license-review';
@@ -132,6 +133,10 @@ export async function runLicenseCommand(
           const saved = inputBytes === null ? undefined : parseLicenseArtifactBytes(inputBytes);
           const estimate = await inspectLicensePreflight({
             database: options.source === 'database' ? inspection.database : undefined,
+            priorNotices:
+              options.source === 'database' && inspection.outputBytes !== null
+                ? savedLicenseNotices(parseLicenseArtifactBytes(inspection.outputBytes))
+                : undefined,
             jsonClassifications: saved?.classifications,
             jsonNotices: saved?.catalog.flatMap((row) =>
               row.rawNotice?.trim() ? [row.rawNotice] : []

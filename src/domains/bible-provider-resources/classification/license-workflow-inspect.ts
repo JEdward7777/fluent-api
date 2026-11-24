@@ -4,6 +4,7 @@ import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type { LicenseInspection, LicenseWorkflowDependencies } from './license-workflow.types';
 
+import { savedLicenseNotices } from '../license-normalizer';
 import { freezeReviewValue } from '../license-review-revision';
 import { isIssuedLicensePractice } from './license-practice';
 import { inspectLicensePreflight } from './license-preflight';
@@ -79,6 +80,10 @@ export async function inspectLicenseWorkflowInputs(input: {
     options.source === 'json' ? parseLicenseArtifactBytes(inputBytes!) : undefined;
   const preflight = await inspectLicensePreflight({
     database: options.source === 'database' ? snapshot : undefined,
+    priorNotices:
+      options.source === 'database' && outputBytes !== null
+        ? savedLicenseNotices(parseLicenseArtifactBytes(outputBytes))
+        : undefined,
     jsonClassifications: jsonArtifact?.classifications,
     jsonNotices: jsonArtifact?.catalog.flatMap((row) =>
       row.rawNotice?.trim() ? [row.rawNotice] : []

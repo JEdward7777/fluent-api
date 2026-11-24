@@ -2,14 +2,14 @@ import { createHash } from 'node:crypto';
 
 import type { LicenseClassification } from '../license-artifact.schemas';
 
-import { normalizeLicenseNotice } from '../license-normalizer';
+import { indexLicenseNoticeExamples, isLicenseNoticeUnavailable } from '../license-normalizer';
 import { matchLicenseRule } from '../license-rules';
 
 export type LicenseEligibilityAction = 'retain' | 'rule' | 'model';
 
 export interface LicenseEligibilityRow {
   normalizedText: string;
-  exampleNotice: string;
+  exampleNotice: string | null;
   action: LicenseEligibilityAction;
   reason: string;
   ruleMatches: boolean;
@@ -30,7 +30,8 @@ function resolveLicenseKeyDigests(keys: Iterable<string>, digests: readonly stri
   const selected = new Set<string>();
   for (const digest of digests) {
     const key = lookup.get(digest);
-    if (!key) throw new Error(`Selected license key digest is absent from source: ${digest}`);
+    if (key === undefined)
+      throw new Error(`Selected license key digest is absent from source: ${digest}`);
     if (selected.has(key)) throw new Error(`Duplicate selected license key digest: ${digest}`);
     selected.add(key);
   }
@@ -38,32 +39,33 @@ function resolveLicenseKeyDigests(keys: Iterable<string>, digests: readonly stri
 }
 
 export function planLicenseEligibility(input: {
-  notices: Iterable<string>;
+  notices: Iterable<string | null>;
   stored: ReadonlyMap<string, LicenseClassification>;
   ruleDigests: readonly string[];
   modelDigests: readonly string[];
   source: 'json' | 'database';
 }): LicenseEligibilityRow[] {
-  const examples = new Map<string, string>();
-  for (const notice of input.notices) {
-    const key = normalizeLicenseNotice(notice);
-    if (!examples.has(key)) examples.set(key, notice);
-  }
-  for (const key of input.stored.keys()) if (!examples.has(key)) examples.set(key, key);
+  const examples = new Map<string, string | null>(indexLicenseNoticeExamples(input.notices));
+  for (const [key, row] of input.stored)
+    if (!examples.has(key)) examples.set(key, row.exampleNotice);
   const ruleKeys = resolveLicenseKeyDigests(examples.keys(), input.ruleDigests);
   const modelKeys = resolveLicenseKeyDigests(examples.keys(), input.modelDigests);
   return [...examples]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([normalizedText, exampleNotice]) => {
       const prior = input.stored.get(normalizedText);
-      const ruleMatches = Boolean(matchLicenseRule(exampleNotice));
+      const ruleMatches = exampleNotice !== null && Boolean(matchLicenseRule(exampleNotice));
       const explicitRule = ruleKeys.has(normalizedText);
       const explicitModel = modelKeys.has(normalizedText);
       if (explicitRule && prior && prior.reviewState !== 'unreviewed')
         throw new Error(`Rule reevaluation requires an unreviewed row: ${normalizedText}`);
       let action: LicenseEligibilityAction = 'retain';
       let reason = 'saved decision';
-      if (explicitModel && (!explicitRule || !ruleMatches)) {
+      if (isLicenseNoticeUnavailable(exampleNotice)) {
+        if (explicitModel || explicitRule)
+          throw new Error('An original notice is required for reassessment');
+        reason = 'original notice unavailable';
+      } else if (explicitModel && (!explicitRule || !ruleMatches)) {
         action = 'model';
         reason = 'explicit model selection';
       } else if (explicitRule) {

@@ -1,9 +1,15 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { checkLicenseArtifactReview, serializeLicenseArtifact } from './license-artifact';
-import { LICENSE_CLASSIFICATIONS_PATH, parseLicenseArtifact } from './license-artifact.schemas';
+import { computeLicenseReviewHash } from './license-artifact.hash';
+import {
+  LICENSE_CLASSIFICATIONS_PATH,
+  parseLicenseArtifact,
+  parseStoredLicenseEvidence,
+} from './license-artifact.schemas';
 
 describe('tracked v2 candidate migration', () => {
   it('upgrades validated evidence in memory without touching source bytes', async () => {
@@ -81,4 +87,66 @@ describe('tracked v2 candidate migration', () => {
     legacy.classifications[0].rationale = 'Tampered legacy rationale';
     expect(() => parseLicenseArtifact(legacy)).toThrow('Legacy v2 review content hash mismatch');
   }, 20000);
+});
+
+describe('historical table decisions with an empty original and key', () => {
+  it.each([
+    [2, '807b2d6344c5087c214cb495079804d55ea44356483cdebb0cf9e61919a31c6f'],
+    [3, '732358dca5394f98f638a88317fe26eccd078df344c421bcf76ec340b446690f'],
+  ] as const)(
+    'verifies and migrates the signed original v%i writer output',
+    async (version, signedHash) => {
+      const path = fileURLToPath(
+        new URL(`./__fixtures__/license-artifact-v${version}-empty-example.json`, import.meta.url)
+      );
+      const legacy = JSON.parse(await readFile(path, 'utf8'));
+      expect(legacy.attestation.reviewContentHash).toBe(signedHash);
+      const migrated = parseLicenseArtifact(legacy);
+      const saved = JSON.parse(serializeLicenseArtifact(migrated).bytes);
+      expect(saved.historicalAttestations).toEqual([
+        { ...legacy.attestation, schemaVersion: version, hashDomainVersion: version },
+      ]);
+      expect(saved.classifications[0]).toMatchObject({
+        normalizedText: '',
+        exampleNotice: '',
+        source: 'table',
+        status: 'allowed',
+        reviewState: version === 2 ? 'unreviewed' : 'human_reviewed',
+        reviewedBy: version === 2 ? null : 'Original table reviewer',
+        decisionAt: version === 2 ? null : '2025-04-01T00:00:00.000Z',
+        humanReviewedAt: version === 2 ? null : '2025-04-01T00:00:00.000Z',
+      });
+      expect(parseStoredLicenseEvidence(legacy.classifications[0], undefined)).toEqual(
+        saved.classifications[0]
+      );
+      expect(
+        parseStoredLicenseEvidence(
+          {
+            ...legacy.classifications[0],
+            normalizedText: 'copyright restrictions',
+            exampleNotice: 'Copy©right restrictions',
+          },
+          undefined
+        )
+      ).toBeUndefined();
+      expect(
+        parseStoredLicenseEvidence(
+          { ...legacy.classifications[0], exampleNotice: '   ' },
+          undefined
+        )?.exampleNotice
+      ).toBe('   ');
+      const invalidOriginal = structuredClone(legacy);
+      invalidOriginal.classifications[0].normalizedText = 'copyright restrictions';
+      invalidOriginal.classifications[0].exampleNotice = 'Copy©right restrictions';
+      invalidOriginal.reviewContentHash = computeLicenseReviewHash(invalidOriginal);
+      invalidOriginal.attestation.reviewContentHash = invalidOriginal.reviewContentHash;
+      expect(() => parseLicenseArtifact(invalidOriginal)).toThrow(
+        `Legacy v${version} classification key`
+      );
+      legacy.classifications[0].exampleNotice = 'Altered spelling';
+      expect(() => parseLicenseArtifact(legacy)).toThrow(
+        `Legacy v${version} review content hash mismatch`
+      );
+    }
+  );
 });

@@ -113,7 +113,7 @@ describe('database refresh and recorded evidence contracts', () => {
               (model) => model.model === sample.model
             )!;
             const request = buildLicenseSampleRequest(
-              row.exampleNotice,
+              row.exampleNotice!,
               sample.provider,
               sample.model,
               sample.index,

@@ -1,0 +1,41 @@
+{
+  "catalog": [],
+  "classificationRun": {
+    "prompt": "Check the notice",
+    "promptHash": "ed39003172cce097eef842128254ef13a1ef02bd814a2c32873c7168e95c6865",
+    "ruleSetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "responseSchema": {},
+    "models": [
+      {
+        "provider": "test",
+        "model": "model",
+        "sampleCount": 2,
+        "settings": {}
+      }
+    ]
+  },
+  "classifications": [
+    {
+      "normalizedText": "",
+      "exampleNotice": "",
+      "status": "allowed",
+      "source": "manual",
+      "rationale": "Human ruling",
+      "samples": [],
+      "reviewState": "human_reviewed",
+      "reviewedBy": "Historic row reviewer",
+      "decisionAt": "2025-04-01T00:00:00.000Z",
+      "humanReviewedAt": "2025-04-01T00:00:00.000Z"
+    }
+  ],
+  "schemaVersion": 3,
+  "hashDomainVersion": 3,
+  "normalizerVersion": 1,
+  "reviewContentHash": "8923f61b69c0be6b5d867dd50b769bb6e9d44bb9e53bacff84e7b1c709463957",
+  "attestation": {
+    "reviewedBy": "Historic file signer",
+    "reviewReason": "Checked the notice matrix case",
+    "reviewedAt": "2025-04-03T00:00:00.000Z",
+    "reviewContentHash": "8923f61b69c0be6b5d867dd50b769bb6e9d44bb9e53bacff84e7b1c709463957"
+  }
+}
