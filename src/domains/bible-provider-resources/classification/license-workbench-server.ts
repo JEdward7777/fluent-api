@@ -26,11 +26,13 @@ const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/analysis-progress.js', ['analysis-progress.js', 'text/javascript; charset=utf-8']],
   ['/database-test.js', ['database-test.js', 'text/javascript; charset=utf-8']],
   ['/preview-ui.js', ['preview-ui.js', 'text/javascript; charset=utf-8']],
   ['/guide.js', ['guide.js', 'text/javascript; charset=utf-8']],
   ['/help.js', ['help.js', 'text/javascript; charset=utf-8']],
   ['/review.js', ['review.js', 'text/javascript; charset=utf-8']],
+  ['/review-pagination.js', ['review-pagination.js', 'text/javascript; charset=utf-8']],
   ['/review-navigation.js', ['review-navigation.js', 'text/javascript; charset=utf-8']],
   ['/review-rerun.js', ['review-rerun.js', 'text/javascript; charset=utf-8']],
   ['/save.js', ['save.js', 'text/javascript; charset=utf-8']],
@@ -353,11 +355,13 @@ function createLicenseWorkbenchApp(
         | '/'
         | '/app.css'
         | '/app.js'
+        | '/analysis-progress.js'
         | '/database-test.js'
         | '/preview-ui.js'
         | '/guide.js'
         | '/help.js'
         | '/review.js'
+        | '/review-pagination.js'
         | '/review-navigation.js'
         | '/save.js'
         | '/settings-draft.js'

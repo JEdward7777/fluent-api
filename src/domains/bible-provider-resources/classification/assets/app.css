@@ -256,6 +256,35 @@ details label:has(input[type='checkbox']) {
   gap: 0.6rem;
   margin-top: 1rem;
 }
+#analysis-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 600;
+}
+#analysis-progress:has(.analysis-spinner:not([hidden])),
+#analysis-progress:has(#analysis-progress-text:not(:empty)) {
+  margin-top: 0.6rem;
+}
+.analysis-spinner {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  border: 0.15rem solid currentcolor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: analysis-spin 0.8s linear infinite;
+}
+@keyframes analysis-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .analysis-spinner {
+    animation: none;
+  }
+}
 button:not(:disabled) {
   background: #164f6e;
   color: white;
@@ -288,14 +317,23 @@ pre {
 .review-filter label {
   flex: 1 1 12rem;
 }
-#review-pager {
+.review-pager {
   align-items: center;
   margin-bottom: 0.75rem;
 }
-#review-page-status {
+.review-page-status {
   flex: 1 1 18rem;
   margin: 0;
   font-weight: 600;
+}
+.page-jump,
+.page-jump label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.page-jump input {
+  width: 4.5rem;
 }
 .table-scroll {
   overflow-x: auto;

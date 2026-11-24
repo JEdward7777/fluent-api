@@ -31,7 +31,7 @@ const chainId = () =>
     byte.toString(16).padStart(2, '0')
   ).join('');
 
-export function initReviewNavigation(form, pager, onNavigate, mayTraverse) {
+export function initReviewNavigation(form, onNavigate, mayTraverse) {
   form.elements.search.maxLength = maxSearchLength;
   let entry;
   let pending = null;
@@ -114,13 +114,6 @@ export function initReviewNavigation(form, pager, onNavigate, mayTraverse) {
   });
   for (const key of ['status', 'source'])
     form.elements[key].addEventListener('change', applyFilters);
-  pager.querySelector('[name="previous"]').addEventListener('click', () => {
-    push({ page: Math.max(1, entry.page - 1) });
-  });
-  pager.querySelector('[name="next"]').addEventListener('click', () => {
-    push({ page: entry.page + 1 });
-  });
-
   return {
     sync(setup) {
       if (entry === undefined) entry = readEntry(window.history.state);
@@ -140,6 +133,9 @@ export function initReviewNavigation(form, pager, onNavigate, mayTraverse) {
         write('replaceState');
       }
       return entry;
+    },
+    goTo(page) {
+      push({ page });
     },
     openRow(row) {
       push({ row });

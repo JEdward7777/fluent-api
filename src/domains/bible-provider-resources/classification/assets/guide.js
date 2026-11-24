@@ -1,7 +1,7 @@
 import { hasUnsavedReviewDraft } from './review.js';
 import { saveStatusUnconfirmed } from './save.js';
 
-export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed }) {
+export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed, startingAnalysis }) {
   document.getElementById('guide-settings-effect').textContent = next.practice
     ? ' Practice has a preset source and destination. You can change the input path; click Apply settings if you do. Applying does not read the input.'
     : ' Choose a source and destination. Click Apply settings if you change the form; it records your choices without reading inputs.';
@@ -35,6 +35,9 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed }) {
   } else if (sessionUnconfirmed) {
     message =
       'Session status is unavailable. Reload before another action; check destinations if Save may have started.';
+  } else if (startingAnalysis && next.state !== 'analyzing') {
+    step = 'analyze';
+    message = 'Starting analysis…';
   } else if (
     next.activeOperationId ||
     practiceBusy ||

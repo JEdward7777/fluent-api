@@ -186,10 +186,14 @@
           <p>It may write JSON too, while leaving policy untouched.</p>
           <pre id="cli-command"></pre>
         </details>
-        <div class="actions">
+        <div id="analysis-actions" class="actions">
           <button id="inspect" type="button" disabled>Inspect inputs</button
           ><button id="analyze" type="button" disabled>Start analysis</button
           ><button id="stop" type="button" hidden>Stop after current key</button>
+        </div>
+        <div id="analysis-progress" role="status">
+          <span class="analysis-spinner" aria-hidden="true" hidden></span>
+          <span id="analysis-progress-text"></span>
         </div>
         <p id="inspect-help">Inspect reads selected files, database and request cache as needed.</p>
         <p id="analysis-help">Analysis follows the inspected request plan.</p>
@@ -224,10 +228,17 @@
               <button type="submit">Search</button>
             </form>
             <p id="review-summary" role="status">Loading review results…</p>
-            <div id="review-pager" class="actions" role="group" aria-label="Review pagination">
-              <p id="review-page-status" role="status" aria-atomic="true"></p>
+            <div class="actions review-pager" role="group" aria-label="Top review pages">
+              <p class="review-page-status" role="status" aria-atomic="true" tabindex="-1"></p>
               <button type="button" name="previous">Previous page</button
               ><button type="button" name="next">Next page</button>
+              <form class="page-jump">
+                <!-- prettier-ignore -->
+                <label
+                  >Go to page <input name="page" type="number" min="1" step="1" required
+                /></label>
+                <button type="submit">Go</button>
+              </form>
             </div>
             <div class="table-scroll">
               <table>
@@ -243,6 +254,18 @@
                 </thead>
                 <tbody id="review-rows"></tbody>
               </table>
+            </div>
+            <div class="actions review-pager" role="group" aria-label="Bottom review pages">
+              <p class="review-page-status" tabindex="-1"></p>
+              <button type="button" name="previous">Previous page</button
+              ><button type="button" name="next">Next page</button>
+              <form class="page-jump">
+                <!-- prettier-ignore -->
+                <label
+                  >Go to page <input name="page" type="number" min="1" step="1" required
+                /></label>
+                <button type="submit">Go</button>
+              </form>
             </div>
           </div>
           <div id="review-detail" hidden></div>

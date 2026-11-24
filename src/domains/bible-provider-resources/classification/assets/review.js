@@ -1,4 +1,5 @@
 import { initReviewNavigation } from './review-navigation.js';
+import { initReviewPagination } from './review-pagination.js';
 import { reviewRerunActions } from './review-rerun.js';
 
 const section = document.getElementById('review');
@@ -6,8 +7,6 @@ const form = document.getElementById('review-filter');
 const rows = document.getElementById('review-rows');
 const summary = document.getElementById('review-summary');
 const detail = document.getElementById('review-detail');
-const pager = document.getElementById('review-pager');
-const pageStatus = document.getElementById('review-page-status');
 const results = document.getElementById('review-results');
 const heading = document.getElementById('review-heading');
 const viewStatus = document.getElementById('review-view-status');
@@ -27,10 +26,11 @@ let editMessage = '';
 let updateEditorControls = () => {};
 const navigation = initReviewNavigation(
   form,
-  pager,
   () => updateReview(currentSetup),
   () => !editBusy
 );
+
+const pagination = initReviewPagination(section, (page) => navigation.goTo(page));
 
 function setDraftDirty(value) {
   if (editDirty === value) return;
@@ -72,7 +72,7 @@ function currentRevision(result) {
 }
 async function loadRows(view, focusRow) {
   const sequence = ++listRequest;
-  pageStatus.textContent = 'Loading results…';
+  pagination.loading();
   try {
     const { search, status, source, page: requestedPage } = view;
     const result = await request(
@@ -81,7 +81,7 @@ async function loadRows(view, focusRow) {
     if (sequence !== listRequest) return;
     if (!currentRevision(result))
       throw new Error('Review changed. Reload to see the current results.');
-    const { page, pageCount, pageSize, total, allCount } = result;
+    const { page, total, allCount } = result;
     navigation.setPage(view, page);
     rows.replaceChildren();
     for (const item of result.rows) {
@@ -125,12 +125,7 @@ async function loadRows(view, focusRow) {
     summary.textContent =
       (total < allCount ? `${total} of ${allCount} classifications match. ` : '') +
       result.context.disclaimer;
-    const offset = (page - 1) * pageSize;
-    pageStatus.textContent = total
-      ? `Page ${page} of ${pageCount} · Showing ${offset + 1}–${offset + result.rows.length} of ${total} results · ${pageSize} per page`
-      : `No matching results · ${pageSize} per page`;
-    pager.querySelector('[name="previous"]').disabled = page <= 1;
-    pager.querySelector('[name="next"]').disabled = page >= pageCount;
+    pagination.render(result);
     if (!result.rows.length) {
       const empty = node('tr');
       empty.append(node('td', 'No matching classifications. Change search or filters.'));
@@ -141,7 +136,7 @@ async function loadRows(view, focusRow) {
   } catch (error) {
     if (sequence === listRequest) {
       rows.replaceChildren();
-      pageStatus.textContent = '';
+      pagination.clear();
       summary.textContent =
         error.message === 'Start analysis before reviewing evidence'
           ? 'Review is no longer available. Reload to see the current setup.'

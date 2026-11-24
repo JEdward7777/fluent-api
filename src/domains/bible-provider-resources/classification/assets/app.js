@@ -1,3 +1,4 @@
+import { createAnalysisProgress, workflowStatus } from './analysis-progress.js';
 import { createDraftDatabaseTest } from './database-test.js';
 import { renderGuide as updateGuide } from './guide.js';
 import {
@@ -31,6 +32,7 @@ let dirty = '';
 let applyingSettings = false;
 let practiceBusy = false;
 let sessionUnconfirmed = false;
+
 const previewButton = document.getElementById('normal-preview-button');
 const attestation = document.getElementById('attestation');
 const reportTarget = document.getElementById('report-target');
@@ -41,6 +43,11 @@ const draftDatabase = createDraftDatabaseTest(
   updateDraftControls
 );
 
+const analysisProgress = createAnalysisProgress(
+  () => setup,
+  render,
+  () => sessionUnconfirmed
+);
 const readDraft = () => readSettings(form, draftDatabase.read());
 const pending = () => (setup ? pendingSettings(setup, readDraft()) : '');
 
@@ -57,6 +64,7 @@ function settingsRequestActive(next = setup) {
 
 function workbenchBusy(next) {
   return (
+    analysisProgress.starting ||
     sessionUnconfirmed ||
     saveStatusUnconfirmed() ||
     Boolean(next.activeOperationId) ||
@@ -76,7 +84,13 @@ function syncSettingsActions(next) {
   analyze.disabled = blocked || dirty || next.state !== 'inspected';
 }
 
-const renderGuide = (next) => updateGuide(next, { dirty, practiceBusy, sessionUnconfirmed });
+const renderGuide = (next) =>
+  updateGuide(next, {
+    dirty,
+    practiceBusy,
+    sessionUnconfirmed,
+    startingAnalysis: analysisProgress.starting,
+  });
 
 const previewFlags = () => ({
   dirty,
@@ -235,32 +249,13 @@ function render(next, populate = false) {
   }
   stop.hidden = next.state !== 'analyzing';
   stop.disabled = next.state !== 'analyzing';
+  analysisProgress.update(next);
   inspection.hidden = !next.inspected;
   if (next.inspected) {
     const preflight = next.inspected.preflight;
     inspection.textContent = `Inspected ${next.inspected.inspectedAt}. ${preflight.distinctKeys} distinct keys; ${preflight.tableHits} saved decisions (${preflight.savedEvidenceReuse} complete saved model assessments reused); ${preflight.ruleHits} rule matches; ${preflight.modelKeys} model keys. ${preflight.validCacheHits} valid cache hits; ${preflight.expectedUncachedRequests} expected uncached requests, up to ${preflight.maximumAttempts} attempts. ${preflight.rows.map((row) => `${row.normalizedText}: ${row.action} (${row.reason}${row.ruleMatches ? '; rule match' : '; rule nonmatch'})`).join(' | ')} Cost unavailable: ${preflight.cost.reason}`;
   }
-  if (next.state === 'uncertain')
-    status.textContent =
-      'Save outcome uncertain. Inspect actual targets before starting a new process.';
-  else if (!next.practice && next.state === 'saved')
-    status.textContent = 'Save completed. See the written paths, hashes and policy result below.';
-  else if (next.practice && next.state === 'saved')
-    status.textContent = `Incomplete practice JSON saved to ${next.preview?.output}. Discard the scratch directory when finished.`;
-  else if (next.analysis)
-    status.textContent = next.practice
-      ? `Practice analysis ready: ${next.analysis.rows} rows. Review the evidence below, then save only to scratch.`
-      : `Analysis ready: ${next.analysis.rows} rows. Review the evidence below before previewing changes.`;
-  else if (next.state === 'inspected')
-    status.textContent = 'Inputs inspected. Review the request estimate, then start analysis.';
-  else if (next.latestOperation?.state === 'failed')
-    status.textContent = next.latestOperation.error;
-  else if (busy) status.textContent = `${next.state}… Reloading keeps the operation.`;
-  else if (dirty) status.textContent = 'Apply the changes or restore the applied settings.';
-  else
-    status.textContent = next.readyForInspect
-      ? 'Settings ready. Click Inspect inputs.'
-      : 'Choose settings and click Apply settings.';
+  status.textContent = workflowStatus(next, { busy, dirty, starting: analysisProgress.starting });
   const practiceReview = document.getElementById('practice-review');
   practiceReview.hidden = !next.practice || !next.analysis;
   syncReviewAvailability(next);
@@ -270,9 +265,24 @@ async function refresh() {
   render(await request('setup'));
   if (setup.activeOperationId) {
     const operation = await request(`operations/${encodeURIComponent(setup.activeOperationId)}`);
-    if (operation.state === 'running') window.setTimeout(refresh, 800);
+    if (operation.state === 'running')
+      window.setTimeout(operation.kind === 'analysis' ? pollAnalysis : refresh, 800);
     else render(await request('setup'));
   } else if (setup.testingDatabase && !draftDatabase.running) window.setTimeout(refresh, 800);
+}
+async function pollAnalysis() {
+  try {
+    await refresh();
+  } catch {
+    sessionUnconfirmed = true;
+    stop.disabled = true;
+    const message = 'Analysis status is unavailable. Reload to check the result.';
+    analysisProgress.update(setup, message);
+    status.textContent = message;
+    syncSettingsActions(setup);
+    syncReviewAvailability(setup);
+    renderGuide(setup);
+  }
 }
 form.addEventListener('input', (event) => {
   draftDatabase.syncFields(setup?.databaseConnection);
@@ -354,26 +364,27 @@ databaseTest.addEventListener('click', () => {
   void draftDatabase.run(setup.configurationRevision);
 });
 async function start(kind) {
-  if (
-    sessionUnconfirmed ||
-    saveStatusUnconfirmed() ||
-    settingsRequestActive() ||
-    checkPendingSettings()
-  )
-    return;
-  try {
+  if (!setup || workbenchBusy(setup) || settingsRequestActive() || checkPendingSettings()) return;
+  const begin = async () => {
     await request(kind, 'POST', {
       operationId: crypto.randomUUID(),
       configurationRevision: setup.configurationRevision,
     });
     await refresh();
+  };
+  try {
+    if (kind === 'analysis') await analysisProgress.start(begin, pollAnalysis);
+    else await begin();
   } catch (error) {
+    if (sessionUnconfirmed) return;
     status.textContent = error.message;
+    if (kind === 'analysis') analysisProgress.update(setup, error.message);
   }
 }
 inspect.addEventListener('click', () => start('inspect'));
 analyze.addEventListener('click', () => start('analysis'));
 stop.addEventListener('click', async () => {
+  if (stop.disabled || sessionUnconfirmed) return;
   try {
     await request('stop', 'POST');
     status.textContent = 'Stop requested after the current key.';
@@ -485,7 +496,8 @@ if (!token) {
 } else {
   try {
     render(await request('setup'), true);
-    if (setup.activeOperationId || setup.testingDatabase) await refresh();
+    if (setup.activeOperationId && setup.latestOperation?.kind === 'analysis') await pollAnalysis();
+    else if (setup.activeOperationId || setup.testingDatabase) await refresh();
   } catch (error) {
     status.textContent = error.message;
     document.getElementById('guide-next').textContent =
