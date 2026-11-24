@@ -94,6 +94,7 @@ export function planLicenseSaveDestinations(input: {
   artifact: LicenseArtifact;
   outputBytes: string | null;
   databaseRows?: StoredLicenseClassification[];
+  overwriteDatabase?: boolean;
 }): DestinationDecisionPlan {
   const { source, destination, artifact } = input;
   const result: DestinationDecisionPlan = {
@@ -169,6 +170,7 @@ export function planLicenseSaveDestinations(input: {
     }
   }
   if (destination !== 'json') {
+    const overwrite = input.overwriteDatabase ?? source === 'database';
     const examples = indexLicenseNoticeExamples([
       ...savedLicenseNotices(artifact),
       ...(input.databaseRows ?? []).map((row) => row.exampleNotice ?? null),
@@ -179,24 +181,24 @@ export function planLicenseSaveDestinations(input: {
     const comparisonExamples = indexLicenseNoticeExamples(
       destinationRows.map((row) => row.exampleNotice)
     );
-    const decisions =
-      source === 'database'
-        ? artifact.classifications.map((row) => ({
-            normalizedText: row.normalizedText,
-            source: row,
-            destination:
-              destinationRows.find((prior) => prior.normalizedText === row.normalizedText) ?? null,
-            winner: row,
-            reason: 'update' as const,
-          }))
-        : planLicenseDecisionMerge(
-            artifact.classifications.map((row) =>
-              withContract(withNotice(row, comparisonExamples), artifact.classificationRun)
-            ),
-            destinationRows
-          );
-    const overwriteDiff =
-      source === 'database' ? planLicenseDatabaseChanges(artifact, input.databaseRows ?? []) : null;
+    const decisions = overwrite
+      ? artifact.classifications.map((row) => ({
+          normalizedText: row.normalizedText,
+          source: row,
+          destination:
+            destinationRows.find((prior) => prior.normalizedText === row.normalizedText) ?? null,
+          winner: row,
+          reason: 'update' as const,
+        }))
+      : planLicenseDecisionMerge(
+          artifact.classifications.map((row) =>
+            withContract(withNotice(row, comparisonExamples), artifact.classificationRun)
+          ),
+          destinationRows
+        );
+    const overwriteDiff = overwrite
+      ? planLicenseDatabaseChanges(artifact, input.databaseRows ?? [])
+      : null;
     for (const decision of decisions) {
       const changes = result.databaseChanges;
       if (decision.reason === 'conflict')

@@ -14,7 +14,7 @@ import type { LicenseFileIo } from './license-write';
 import { renderLicenseHtml } from '../license-report-html';
 import { renderLicenseMarkdown } from '../license-report-markdown';
 import { freezeReviewValue } from '../license-review-revision';
-import { requireFreshLicenseSources } from './license-freshness';
+import { requireFreshLicenseDestination, requireFreshLicenseSources } from './license-freshness';
 import { LicenseFileDriftError, licenseFileIo } from './license-write';
 
 /** An explicit report publication, independent of artifact Save and in-memory preview. */
@@ -24,10 +24,22 @@ export async function exportPreviewedLicenseReport(input: {
   inspection: LicenseInspection;
   options: LicenseCommandOptions;
   database?: LicenseDatabaseAdapter;
+  loadedSource?: { inspection: LicenseInspection; database?: LicenseDatabaseAdapter };
   fs?: LicenseFileIo;
 }): Promise<LicenseReportExportResult> {
   const { request, preview, inspection, options, database } = input;
   const fs = input.fs ?? licenseFileIo;
+  const recheck = async () => {
+    if (input.loadedSource) {
+      await requireFreshLicenseSources(
+        input.loadedSource.inspection,
+        options,
+        fs,
+        input.loadedSource.database
+      );
+      await requireFreshLicenseDestination(inspection, options, fs, database);
+    } else await requireFreshLicenseSources(inspection, options, fs, database);
+  };
   if (!request.path.trim()) throw new Error('Report export path is required');
   const path = resolve(request.path);
   if (preview.plan.expectedFiles.some((file) => file.path === path))
@@ -38,14 +50,14 @@ export async function exportPreviewedLicenseReport(input: {
       : renderLicenseMarkdown(preview.reports.model);
   if (request.expectedPreviousBytes !== null && !request.agreeToOverwrite)
     throw new Error('Explicit agreement is required to overwrite an existing report');
-  await requireFreshLicenseSources(inspection, options, fs, database);
+  await recheck();
   if ((await fs.read(path)) !== request.expectedPreviousBytes)
     throw new LicenseFileDriftError(path);
   await fs.mkdir(dirname(path));
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await fs.write(temporary, bytes);
-    await requireFreshLicenseSources(inspection, options, fs, database);
+    await recheck();
     if ((await fs.read(path)) !== request.expectedPreviousBytes)
       throw new LicenseFileDriftError(path);
     await fs.rename(temporary, path);

@@ -2,11 +2,11 @@ export function createAnalysisProgress(getSetup, render, isUnconfirmed) {
   const actions = document.getElementById('analysis-actions');
   const spinner = document.querySelector('.analysis-spinner');
   const label = document.getElementById('analysis-progress-text');
-  let starting = false;
+  let starting = null;
 
   function update(next, error) {
     const running = next.state === 'analyzing';
-    const busy = !isUnconfirmed() && (starting || running);
+    const busy = !isUnconfirmed() && (starting === 'analysis' || running);
     const operation = next.latestOperation;
     const text = busy
       ? running
@@ -25,8 +25,8 @@ export function createAnalysisProgress(getSetup, render, isUnconfirmed) {
       return starting;
     },
     update,
-    async start(begin, recover) {
-      starting = true;
+    async start(kind, begin, recover) {
+      starting = kind;
       render(getSetup());
       try {
         await begin();
@@ -34,7 +34,7 @@ export function createAnalysisProgress(getSetup, render, isUnconfirmed) {
         await recover();
         throw error;
       } finally {
-        starting = false;
+        starting = null;
         if (!isUnconfirmed()) render(getSetup());
       }
     },
@@ -44,6 +44,16 @@ export function createAnalysisProgress(getSetup, render, isUnconfirmed) {
 export function workflowStatus(next, { busy, dirty, starting }) {
   if (next.state === 'uncertain')
     return 'Save outcome uncertain. Inspect actual targets before starting a new process.';
+  const operation = next.latestOperation;
+  if (starting === 'inspect' || (operation?.kind === 'inspect' && operation.state === 'running'))
+    return 'Inspecting the selected source…';
+  if (starting === 'analysis') return 'Starting analysis…';
+  if (operation?.kind === 'inspect') {
+    if (operation.state === 'failed')
+      return [operation.error, operation.cleanupWarning].filter(Boolean).join(' ');
+    if (operation.state === 'succeeded' && operation.cleanupWarning)
+      return `Loaded the selected source. ${operation.cleanupWarning}`;
+  }
   if (!next.practice && next.state === 'saved')
     return 'Save completed. See the written paths, hashes and policy result below.';
   if (next.practice && next.state === 'saved')
@@ -52,8 +62,7 @@ export function workflowStatus(next, { busy, dirty, starting }) {
     return next.practice
       ? `Practice analysis ready: ${next.analysis.rows} rows. Review the evidence below, then save only to scratch.`
       : `Analysis ready: ${next.analysis.rows} rows. Review the evidence below before previewing changes.`;
-  if (busy && starting) return 'Starting analysis…';
-  if (next.latestOperation?.state === 'failed') return next.latestOperation.error;
+  if (operation?.state === 'failed') return operation.error;
   if (next.state === 'inspected')
     return 'Inputs inspected. Review the request estimate, then start analysis.';
   if (busy) return `${next.state}… Reloading keeps the operation.`;
@@ -61,4 +70,15 @@ export function workflowStatus(next, { busy, dirty, starting }) {
   return next.readyForInspect
     ? 'Settings ready. Click Inspect inputs.'
     : 'Choose settings and click Apply settings.';
+}
+
+export function evidenceActions(next, blocked, dirtySettings, dirtyRow) {
+  const available = !blocked && !dirtySettings && !dirtyRow;
+  return {
+    inspect:
+      available &&
+      next.readyForInspect &&
+      (next.sourceDraftPending || ['configuring', 'error'].includes(next.state)),
+    analyze: available && !next.sourceDraftPending && next.state === 'inspected',
+  };
 }

@@ -5,6 +5,8 @@ import type { LicenseDatabaseAdapter, LicenseDatabaseSnapshot } from './license-
 import type { LicenseFileIo } from './license-write';
 
 interface InspectedSources {
+  sourceOnly?: true;
+  skipOutput?: boolean;
   inputBytes: string | null;
   outputBytes: string | null;
   database?: LicenseDatabaseSnapshot;
@@ -32,14 +34,21 @@ export async function requireFreshLicenseSources(
   inspected: InspectedSources,
   options: LicenseCommandOptions,
   fs: LicenseFileIo,
-  adapter?: LicenseDatabaseAdapter
+  adapter?: LicenseDatabaseAdapter,
+  destinationOnly = false
 ) {
-  const inputBytes = options.source === 'json' ? await fs.read(options.input) : null;
+  const checkInput = !destinationOnly && options.source === 'json';
+  const inputBytes = checkInput ? await fs.read(options.input) : null;
   const outputBytes =
-    resolve(options.output) === resolve(options.input) && options.source === 'json'
-      ? inputBytes
-      : await fs.read(options.output);
-  if (inputBytes !== inspected.inputBytes || outputBytes !== inspected.outputBytes)
+    inspected.sourceOnly || inspected.skipOutput
+      ? null
+      : resolve(options.output) === resolve(options.input) && checkInput
+        ? inputBytes
+        : await fs.read(options.output);
+  if (
+    (!destinationOnly && inputBytes !== inspected.inputBytes) ||
+    outputBytes !== inspected.outputBytes
+  )
     throw new LicenseInspectionStaleError();
   const database = adapter ? await adapter.load() : undefined;
   if (
@@ -48,4 +57,26 @@ export async function requireFreshLicenseSources(
   )
     throw new LicenseInspectionStaleError();
   return { inputBytes, database };
+}
+
+export class LicenseDestinationRecheckError extends Error {
+  constructor(cause: unknown) {
+    super(
+      'The save destination changed or could not be rechecked. Prepare a new preview before continuing.',
+      { cause }
+    );
+  }
+}
+
+export async function requireFreshLicenseDestination(
+  inspection: InspectedSources,
+  options: LicenseCommandOptions,
+  fs: LicenseFileIo,
+  database?: LicenseDatabaseAdapter
+) {
+  try {
+    await requireFreshLicenseSources(inspection, options, fs, database, true);
+  } catch (error) {
+    throw new LicenseDestinationRecheckError(error);
+  }
 }

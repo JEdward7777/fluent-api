@@ -23,7 +23,7 @@ interface LicenseExpectedFile {
 }
 
 export class LicenseFileDriftError extends Error {
-  constructor(path: string) {
+  constructor(readonly path: string) {
     super(`Inspected file changed: ${path}. Inspect and preview again before saving.`);
     this.name = 'LicenseFileDriftError';
   }

@@ -128,7 +128,8 @@ function createLicenseWorkbenchApp(
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       return c.text(
-        message.includes('revision') ||
+        message === 'Configuration changed; reload setup before applying' ||
+          message.includes('revision') ||
           message.includes('discard') ||
           message.includes('Cannot configure')
           ? message
@@ -141,6 +142,7 @@ function createLicenseWorkbenchApp(
     const parsed = z
       .object({
         configurationRevision: z.number().int().positive(),
+        role: z.enum(['source', 'destination']).optional(),
         databaseConnection: databaseConnectionSchema.optional(),
       })
       .strict()
@@ -148,8 +150,8 @@ function createLicenseWorkbenchApp(
     if (!parsed.success)
       return c.text('Check the entered database host, port, database and username.', 400);
     try {
-      const { configurationRevision, databaseConnection } = parsed.data;
-      return c.json(await session.testDatabase(configurationRevision, databaseConnection));
+      const { configurationRevision, databaseConnection, role } = parsed.data;
+      return c.json(await session.testDatabase(configurationRevision, databaseConnection, role));
     } catch (error) {
       return c.text(
         error instanceof LicenseWorkbenchDatabaseError ||
@@ -410,7 +412,10 @@ export async function startLicenseWorkbenchServer(
   requestedPort: number,
   practice = false,
   localProxyUrl?: string,
-  injected?: Pick<LicenseWorkflowDependencies, 'apiKey' | 'database' | 'transport' | 'fs'>,
+  injected?: Pick<
+    LicenseWorkflowDependencies,
+    'apiKey' | 'database' | 'destinationDatabase' | 'transport' | 'fs'
+  >,
   container?: LicenseReviewerContainer
 ) {
   if (container && (requestedPort === 0 || localProxyUrl))

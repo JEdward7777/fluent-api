@@ -38,6 +38,7 @@ export const databaseConnectionSchema = z.discriminatedUnion('mode', [
 export const setupSchema = z
   .object({
     configurationRevision: z.number().int().positive(),
+    expectedContentRevision: z.number().int().nonnegative().optional(),
     discardReviewedState: z.boolean(),
     source: z.enum(['json', 'database']).nullable(),
     destination: z.enum(['json', 'database', 'both']).nullable(),
@@ -51,12 +52,16 @@ export const setupSchema = z
     reportFormats: z.enum(['none', 'markdown', 'html', 'markdown,html']),
     reportDir: path.nullable(),
     preserveExistingNonUnknowns: z.boolean(),
+    sourceDatabaseConnection: databaseConnectionSchema.optional(),
+    destinationDatabaseConnection: databaseConnectionSchema.optional(),
     databaseConnection: databaseConnectionSchema.optional(),
   })
   .strict();
 export const operationSchema = z
   .object({
     operationId: z.string().uuid(),
+    expectedContentRevision: z.number().int().nonnegative().optional(),
+    discardReviewedState: z.boolean().optional(),
     configurationRevision: z.number().int().positive(),
   })
   .strict();

@@ -1,4 +1,4 @@
-import { createAnalysisProgress, workflowStatus } from './analysis-progress.js';
+import { createAnalysisProgress, evidenceActions, workflowStatus } from './analysis-progress.js';
 import { createDraftDatabaseTest } from './database-test.js';
 import { renderGuide as updateGuide } from './guide.js';
 import {
@@ -8,7 +8,12 @@ import {
 import { initReportControls, invalidateReportSelection } from './report-controls.js';
 import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
 import { initSave, renderSave, saveStatusUnconfirmed } from './save.js';
-import { pendingSettings, populateSettings, readSettings } from './settings-draft.js';
+import {
+  pendingSettings,
+  populateSettings,
+  roleConnectionDrafts,
+  syncSettingsFields,
+} from './settings-draft.js';
 
 const launchedToken = window.location.hash.slice(1);
 if (launchedToken) window.sessionStorage.setItem('license-workbench-token', launchedToken);
@@ -47,14 +52,17 @@ const analysisProgress = createAnalysisProgress(
   render,
   () => sessionUnconfirmed
 );
-const readDraft = () => readSettings(form, draftDatabase.read());
-const pending = () => (setup ? pendingSettings(setup, readDraft()) : '');
+const drafts = roleConnectionDrafts(form, draftDatabase, () => setup, checkPendingSettings);
+const { readDraft, appliedConnection } = drafts;
+const pending = () => drafts.conflict || (setup ? pendingSettings(setup, readDraft()) : '');
 
 function showPending(changes) {
   dirty = changes;
-  settingsChangeStatus.textContent = dirty
-    ? `Pending settings changes: ${dirty}. Restore applied settings to keep the current review.`
-    : '';
+  settingsChangeStatus.textContent =
+    drafts.conflict ||
+    (dirty
+      ? `Pending settings changes: ${dirty}. Restore applied settings to keep the current review.`
+      : '');
 }
 
 function settingsRequestActive(next = setup) {
@@ -63,7 +71,7 @@ function settingsRequestActive(next = setup) {
 
 function workbenchBusy(next) {
   return (
-    analysisProgress.starting ||
+    Boolean(analysisProgress.starting) ||
     sessionUnconfirmed ||
     saveStatusUnconfirmed() ||
     Boolean(next.activeOperationId) ||
@@ -74,13 +82,16 @@ function workbenchBusy(next) {
 }
 
 function syncSettingsActions(next) {
-  const blocked = workbenchBusy(next) || settingsRequestActive(next);
-  databaseTest.disabled = blocked || next.practice || next.state === 'uncertain';
-  applySettings.disabled = blocked;
+  const busy = workbenchBusy(next);
+  syncSettingsFields(form, busy || applyingSettings, next.practice);
+  const blocked = busy || settingsRequestActive(next);
+  databaseTest.disabled =
+    blocked || Boolean(drafts.conflict) || next.practice || next.state === 'uncertain';
+  applySettings.disabled = blocked || Boolean(drafts.conflict);
   restoreSettings.disabled = blocked;
-  inspect.disabled =
-    blocked || dirty || !next.readyForInspect || !['configuring', 'error'].includes(next.state);
-  analyze.disabled = blocked || dirty || next.state !== 'inspected';
+  const actions = evidenceActions(next, blocked, dirty, hasUnsavedReviewDraft());
+  inspect.disabled = !actions.inspect;
+  analyze.disabled = !actions.analyze;
 }
 
 const renderGuide = (next) =>
@@ -88,7 +99,7 @@ const renderGuide = (next) =>
     dirty,
     practiceBusy,
     sessionUnconfirmed,
-    startingAnalysis: analysisProgress.starting,
+    startingAnalysis: analysisProgress.starting === 'analysis',
   });
 
 const previewFlags = () => ({
@@ -104,13 +115,7 @@ function syncReviewAvailability(next) {
   renderExactPreview(next);
   renderSave(next);
   syncPracticeDraftControls();
-  setReviewBusy(
-    sessionUnconfirmed ||
-      saveStatusUnconfirmed() ||
-      practiceBusy ||
-      settingsRequestActive(next) ||
-      Boolean(next.activeOperationId)
-  );
+  setReviewBusy(workbenchBusy(next) || practiceBusy || settingsRequestActive(next));
 }
 
 function checkPendingSettings() {
@@ -146,6 +151,7 @@ initReview(
   () => {
     syncPracticeDraftControls();
     if (setup) {
+      syncSettingsActions(setup);
       renderExactPreview(setup);
       renderSave(setup);
       renderGuide(setup);
@@ -160,11 +166,12 @@ initReview(
 );
 function render(next, populate = false) {
   sessionUnconfirmed = false;
-  if (next.configurationRevision !== setup?.configurationRevision) draftDatabase.invalidate();
+  if (setup?.loadRevision !== next.loadRevision || setup?.contentRevision !== next.contentRevision)
+    form.elements.discardReviewedState.checked = false;
+  drafts.refresh(setup, next, populate);
   setup = next;
   updateReview(next);
-  if (populate) populateSettings(form, next);
-  draftDatabase.syncFields(setup?.databaseConnection);
+  draftDatabase.syncFields(appliedConnection());
   form.hidden = false;
   document.getElementById('practice-banner').hidden = !next.practice;
   document.getElementById('cli-details').hidden = next.practice;
@@ -224,26 +231,11 @@ function render(next, populate = false) {
     ...(next.preserveExistingNonUnknowns ? ['--preserve-existing-non-unknowns'] : []),
   ].join(' ');
   const busy = workbenchBusy(next);
-  for (const field of form.elements) field.disabled = busy;
   syncSettingsActions(next);
   databaseTest.hidden = next.practice;
   settingsActionsHelp.hidden = next.practice;
   if (next.practice) {
     document.getElementById('database-settings').hidden = true;
-    for (const key of [
-      'source',
-      'destination',
-      'output',
-      'model',
-      'samples',
-      'force',
-      'noCache',
-      'cacheDir',
-      'reportFormats',
-      'reportDir',
-      'preserve',
-    ])
-      form.elements[key].disabled = true;
     form.elements.input.placeholder = 'Bundled example or an absolute saved JSON path';
   }
   stop.hidden = next.state !== 'analyzing';
@@ -264,18 +256,17 @@ async function refresh() {
   render(await request('setup'));
   if (setup.activeOperationId) {
     const operation = await request(`operations/${encodeURIComponent(setup.activeOperationId)}`);
-    if (operation.state === 'running')
-      window.setTimeout(operation.kind === 'analysis' ? pollAnalysis : refresh, 800);
+    if (operation.state === 'running') window.setTimeout(pollEvidence, 800);
     else render(await request('setup'));
   } else if (setup.testingDatabase && !draftDatabase.running) window.setTimeout(refresh, 800);
 }
-async function pollAnalysis() {
+async function pollEvidence() {
   try {
     await refresh();
   } catch {
     sessionUnconfirmed = true;
     stop.disabled = true;
-    const message = 'Analysis status is unavailable. Reload to check the result.';
+    const message = 'Operation status is unavailable. Reload to check the result.';
     analysisProgress.update(setup, message);
     status.textContent = message;
     syncSettingsActions(setup);
@@ -284,7 +275,7 @@ async function pollAnalysis() {
   }
 }
 form.addEventListener('input', (event) => {
-  draftDatabase.syncFields(setup?.databaseConnection);
+  draftDatabase.syncFields(appliedConnection());
   if (databaseSettings.contains(event.target)) draftDatabase.invalidate();
   checkPendingSettings();
 });
@@ -293,27 +284,21 @@ document.addEventListener('focusin', checkPendingSettings);
 document.addEventListener('pointerdown', checkPendingSettings, true);
 restoreSettings.addEventListener('click', () => {
   if (!setup || restoreSettings.disabled) return;
+  drafts.reset();
   populateSettings(form, setup);
-  draftDatabase.syncFields(setup.databaseConnection);
+  draftDatabase.syncFields(appliedConnection());
   draftDatabase.invalidate();
   checkPendingSettings();
   status.textContent = 'Applied settings restored.';
 });
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!setup || workbenchBusy(setup) || settingsRequestActive() || !checkPendingSettings()) return;
+  if (!setup || applySettings.disabled || !checkPendingSettings()) return;
   try {
     if (hasUnsavedReviewDraft()) {
       status.textContent = 'Apply or discard the open row edit before changing settings.';
       status.tabIndex = -1;
       status.focus();
-      return;
-    }
-    const values = form.elements;
-    const discardReviewedState = Boolean(setup.analysis && values.discardReviewedState.checked);
-    if (setup.analysis && !discardReviewedState) {
-      status.textContent =
-        'Restore applied settings to keep this review. To replace its settings, check Discard unsaved review and apply.';
       return;
     }
     applyingSettings = true;
@@ -323,7 +308,7 @@ form.addEventListener('submit', async (event) => {
     render(
       await request('setup', 'POST', {
         configurationRevision: setup.configurationRevision,
-        discardReviewedState,
+        ...drafts.discardConfirmation(),
         ...readDraft(),
       }),
       true
@@ -336,14 +321,15 @@ form.addEventListener('submit', async (event) => {
     syncReviewAvailability(setup);
   }
 });
-async function confirmTestRevision(revision) {
+async function confirmTestRevision(revision, role) {
   try {
     const latest = await request('setup');
-    if (latest.configurationRevision === revision) {
-      render(latest);
-      return true;
-    }
-    status.textContent = 'Review settings changed while testing. Reload before applying settings.';
+    render(latest);
+    if (latest[`${role}Revision`] === revision) return true;
+    status.textContent =
+      drafts.conflict ||
+      'Connection settings changed while testing. Review the current settings and test again.';
+    return false;
   } catch {
     status.textContent = 'Session status is unavailable. Reload before applying settings.';
   }
@@ -360,20 +346,22 @@ function updateDraftControls() {
 
 databaseTest.addEventListener('click', () => {
   if (!setup || databaseTest.disabled || settingsRequestActive()) return;
-  void draftDatabase.run(setup.configurationRevision);
+  void draftDatabase.run(setup[`${drafts.role}Revision`], drafts.role);
 });
 async function start(kind) {
+  if (hasUnsavedReviewDraft() || (kind === 'analysis' ? analyze.disabled : inspect.disabled))
+    return;
   if (!setup || workbenchBusy(setup) || settingsRequestActive() || checkPendingSettings()) return;
   const begin = async () => {
     await request(kind, 'POST', {
       operationId: crypto.randomUUID(),
       configurationRevision: setup.configurationRevision,
+      ...drafts.discardConfirmation(),
     });
     await refresh();
   };
   try {
-    if (kind === 'analysis') await analysisProgress.start(begin, pollAnalysis);
-    else await begin();
+    await analysisProgress.start(kind, begin, pollEvidence);
   } catch (error) {
     if (sessionUnconfirmed) return;
     status.textContent = error.message;
@@ -431,6 +419,7 @@ async function recoverActionFailure(message) {
   } catch {
     sessionUnconfirmed = true;
     if (setup) {
+      syncSettingsActions(setup);
       renderExactPreview(setup);
       syncPracticeDraftControls();
       setReviewBusy(true);
@@ -459,12 +448,13 @@ initSave({
   },
   render,
 });
-previewButton.addEventListener('click', () => {
-  void practiceAction('preview', {
+function preview(path) {
+  return practiceAction(path, {
     configurationRevision: setup.configurationRevision,
     contentRevision: setup.contentRevision,
   });
-});
+}
+previewButton.addEventListener('click', () => void preview('preview'));
 attestation.addEventListener('submit', (event) => {
   event.preventDefault();
   if (
@@ -485,20 +475,16 @@ attestation.addEventListener('submit', (event) => {
   });
 });
 initReportControls(request, () => setup, recoverActionFailure, token, checkPendingSettings);
-document.getElementById('practice-preview').addEventListener('click', () => {
-  void practiceAction('practice/preview', {
-    configurationRevision: setup.configurationRevision,
-    contentRevision: setup.contentRevision,
-  });
-});
+document
+  .getElementById('practice-preview')
+  .addEventListener('click', () => void preview('practice/preview'));
 if (!token) {
   status.textContent = 'Open the printed local URL, including its session token after #.';
   document.getElementById('guide-next').textContent = 'Open the printed session URL to begin.';
 } else {
   try {
     render(await request('setup'), true);
-    if (setup.activeOperationId && setup.latestOperation?.kind === 'analysis') await pollAnalysis();
-    else if (setup.activeOperationId || setup.testingDatabase) await refresh();
+    if (setup.activeOperationId || setup.testingDatabase) await pollEvidence();
   } catch (error) {
     status.textContent = error.message;
     document.getElementById('guide-next').textContent =

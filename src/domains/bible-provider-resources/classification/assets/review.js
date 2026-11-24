@@ -231,7 +231,7 @@ function reviewEditor(item) {
   editor.addEventListener('input', feedback.onInput);
   editor.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (editBusy) return;
+    if (editBusy || externalBusy) return;
     const kind = event.submitter?.value ?? 'disposition';
     const message = item.overrideWarnings[decision.value];
     feedback.clear();

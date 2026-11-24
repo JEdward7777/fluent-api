@@ -111,7 +111,27 @@ describe('workbench Save operation', () => {
         }
       }
       const state = await (await api('setup')).json();
-      const revision = { configurationRevision: 1, contentRevision: state.contentRevision };
+      const rows = await (await api('review?status=all&page=1')).json();
+      const row = rows.rows[0];
+      const edit = await api('review/edit', 'POST', {
+        id: row.id,
+        configurationRevision: 1,
+        contentRevision: state.contentRevision,
+        acknowledgeWarning: true,
+        edit: {
+          kind: 'disposition',
+          normalizedText: row.normalizedText,
+          status: 'unknown',
+          reason: 'Pending destination retry.',
+          reviewedBy: 'Fixture reviewer',
+          unknownNote: 'Checked the notice.',
+        },
+      });
+      expect(edit.status).toBe(200);
+      const revision = {
+        configurationRevision: 1,
+        contentRevision: (await edit.json()).setup.contentRevision,
+      };
       await api('preview', 'POST', revision);
       await writeFile(fixture.output, 'external edit');
       const saveId = crypto.randomUUID();
@@ -124,7 +144,12 @@ describe('workbench Save operation', () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       const after = await (await api('setup')).json();
-      expect(after.state).toBe('configuring');
+      expect(after.state).toBe('reviewing');
+      expect(after.contentRevision).toBe(revision.contentRevision);
+      expect(await (await api(`review/${row.id}`)).json()).toMatchObject({
+        reviewedBy: 'Fixture reviewer',
+        rationale: 'Pending destination retry.',
+      });
       expect(after.preview).toBeNull();
       expect(await readFile(fixture.output, 'utf8')).toBe('external edit');
     } finally {

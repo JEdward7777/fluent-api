@@ -51,7 +51,7 @@ export function createDraftDatabaseTest(form, request, confirm, updateControls) 
     result.textContent = '';
   }
 
-  async function run(configurationRevision) {
+  async function run(configurationRevision, role) {
     if (running) return;
     const databaseConnection = read();
     if (databaseConnection.mode === 'session') {
@@ -69,12 +69,12 @@ export function createDraftDatabaseTest(form, request, confirm, updateControls) 
     result.textContent = 'Testing the entered connection…';
     let outcome = 'Entered connection passed. Apply settings to use it for review.';
     try {
-      await request('database/test', 'POST', { configurationRevision, databaseConnection });
+      await request('database/test', 'POST', { configurationRevision, databaseConnection, role });
     } catch (error) {
       outcome = `Entered connection: ${error.message}`;
     }
     try {
-      const confirmed = await confirm(configurationRevision);
+      const confirmed = await confirm(configurationRevision, role);
       if (startedGeneration === generation) {
         const unchanged = JSON.stringify(databaseConnection) === JSON.stringify(read());
         result.textContent = confirmed && unchanged ? outcome : '';

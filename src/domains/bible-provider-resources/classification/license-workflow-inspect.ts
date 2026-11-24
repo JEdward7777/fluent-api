@@ -6,10 +6,33 @@ import type { LicenseInspection, LicenseWorkflowDependencies } from './license-w
 
 import { savedLicenseNotices } from '../license-normalizer';
 import { freezeReviewValue } from '../license-review-revision';
+import { analyzeDatabaseLicenses } from './license-analysis';
 import { isIssuedLicensePractice } from './license-practice';
 import { inspectLicensePreflight } from './license-preflight';
 import { parseLicenseArtifactBytes } from './license-workflow-freshness';
 import { licenseFileIo } from './license-write';
+
+export class LicenseSourceReadError extends Error {}
+
+async function readJsonSource(fs: typeof licenseFileIo, path: string) {
+  try {
+    return await fs.read(path);
+  } catch {
+    throw new LicenseSourceReadError(
+      'Could not read the selected JSON source. Check its path and read permissions.'
+    );
+  }
+}
+
+function validateJsonSource(bytes: string) {
+  try {
+    return parseLicenseArtifactBytes(bytes);
+  } catch {
+    throw new LicenseSourceReadError(
+      'Invalid JSON source. Check its classification format, evidence and review hash.'
+    );
+  }
+}
 
 export async function inspectLicenseWorkflowInputs(input: {
   options: LicenseCommandOptions;
@@ -25,27 +48,17 @@ export async function inspectLicenseWorkflowInputs(input: {
     if (
       dependencies.apiKey ||
       dependencies.database ||
+      dependencies.destinationDatabase ||
       dependencies.transport ||
       dependencies.fs ||
       dependencies.legacySkipFreshness ||
       input.database
     )
       throw new Error('Practice cannot hold model, database or file override capabilities');
-    const practice = dependencies.practice;
-    if (
-      options.source !== 'json' ||
-      options.destination !== 'json' ||
-      options.input !== practice.input ||
-      options.output !== practice.output ||
-      options.cacheDir !== practice.cacheDir ||
-      options.reportDir !== practice.reportDir ||
-      options.force ||
-      options.reviewer ||
-      options.reviewReason
-    )
-      throw new Error('Practice is confined to its JSON scratch paths');
+    requirePracticeOptions(options, dependencies.practice);
   }
-  if (!options.source || !options.destination)
+  const sourceOnly = Boolean(dependencies.destinationDatabase);
+  if (!options.source || (!sourceOnly && !options.destination))
     throw new Error('Select both source and destination before analysis');
   if (!/^google:[^\s:]+$/.test(options.model))
     throw new Error(`Unsupported model reference: ${options.model}. Use google:<model-id>`);
@@ -53,7 +66,8 @@ export async function inspectLicenseWorkflowInputs(input: {
     throw new Error('Sample count must be an integer of at least two');
   const fs = dependencies.fs ?? licenseFileIo;
   let database = input.database;
-  const needsDatabase = options.source === 'database' || options.destination !== 'json';
+  const needsDatabase =
+    options.source === 'database' || (!sourceOnly && options.destination !== 'json');
   if (needsDatabase && !database) {
     if (dependencies.database) database = await dependencies.database();
     else {
@@ -66,19 +80,48 @@ export async function inspectLicenseWorkflowInputs(input: {
   if (database) input.onDatabase?.(database);
   const loaded = await database?.load();
   const snapshot = loaded ? freezeReviewValue(loaded) : undefined;
-  if (options.destination !== 'json' && !snapshot?.tableExists)
+  if (!sourceOnly && options.destination !== 'json' && !snapshot?.tableExists)
     throw new Error(
       'The license_classifications table must exist before a database destination can be used'
     );
-  const inputBytes = options.source === 'json' ? await fs.read(options.input) : null;
+  const inputBytes = options.source === 'json' ? await readJsonSource(fs, options.input) : null;
   if (options.source === 'json' && inputBytes === null)
     throw new Error(`JSON source not found: ${options.input}`);
   const samePath = resolve(options.output) === resolve(options.input);
-  const outputBytes =
-    samePath && options.source === 'json' ? inputBytes : await fs.read(options.output);
-  const jsonArtifact =
-    options.source === 'json' ? parseLicenseArtifactBytes(inputBytes!) : undefined;
-  const preflight = await inspectLicensePreflight({
+  const outputBytes = sourceOnly
+    ? null
+    : samePath && options.source === 'json'
+      ? inputBytes
+      : await fs.read(options.output);
+  const preflight = await inspectLoadedLicensePreflight(options, {
+    inputBytes,
+    outputBytes,
+    database: snapshot,
+  });
+  return {
+    database,
+    inspection: freezeReviewValue({
+      configurationRevision: input.configurationRevision,
+      inspectedAt: dependencies.now?.() ?? new Date().toISOString(),
+      ...(sourceOnly ? { sourceOnly: true as const } : {}),
+      inputBytes,
+      outputBytes,
+      preflight,
+      ...(snapshot ? { database: snapshot } : {}),
+    }),
+  };
+}
+
+export function inspectLoadedLicensePreflight(
+  options: LicenseCommandOptions,
+  {
+    inputBytes,
+    outputBytes,
+    database: snapshot,
+  }: Pick<LicenseInspection, 'inputBytes' | 'outputBytes' | 'database'>
+) {
+  const jsonArtifact = options.source === 'json' ? validateJsonSource(inputBytes!) : undefined;
+  return inspectLicensePreflight({
     database: options.source === 'database' ? snapshot : undefined,
     priorNotices:
       options.source === 'database' && outputBytes !== null
@@ -95,15 +138,45 @@ export async function inspectLicenseWorkflowInputs(input: {
     cacheDir: options.cacheDir,
     noCache: options.noCache,
   });
-  return {
-    database,
-    inspection: freezeReviewValue({
-      configurationRevision: input.configurationRevision,
-      inspectedAt: dependencies.now?.() ?? new Date().toISOString(),
-      inputBytes,
-      outputBytes,
-      preflight,
-      ...(snapshot ? { database: snapshot } : {}),
-    }),
-  };
+}
+
+export async function loadedLicenseReview(
+  inspection: LicenseInspection,
+  options: LicenseCommandOptions,
+  contentRevision: number
+) {
+  const snapshot = inspection.database;
+  const artifact = snapshot
+    ? await analyzeDatabaseLicenses({
+        loadOnly: true,
+        catalog: snapshot.context.resources.map(({ ttsLicenseStatus: _status, ...row }) => row),
+        classifications: snapshot.classifications,
+        model: options.model,
+        sampleCount: options.sampleCount,
+      })
+    : parseLicenseArtifactBytes(inspection.inputBytes!);
+  return freezeReviewValue({
+    configurationRevision: inspection.configurationRevision,
+    contentRevision,
+    artifact,
+    ...(snapshot ? {} : { originalSourceArtifact: artifact }),
+  });
+}
+
+export function requirePracticeOptions(
+  options: LicenseCommandOptions,
+  practice: NonNullable<LicenseWorkflowDependencies['practice']>
+) {
+  if (
+    options.source !== 'json' ||
+    options.destination !== 'json' ||
+    options.input !== practice.input ||
+    options.output !== practice.output ||
+    options.cacheDir !== practice.cacheDir ||
+    options.reportDir !== practice.reportDir ||
+    options.force ||
+    options.reviewer ||
+    options.reviewReason
+  )
+    throw new Error('Practice is confined to its JSON scratch paths');
 }

@@ -9,6 +9,8 @@ import { checkLicenseArtifactReview } from '../license-artifact';
 /** Publish only reviewable preview facts, never target prior bytes or credentials. */
 export function licenseWorkbenchPreviewView(input: {
   workflow?: LicenseWorkflow;
+  loadedDatabaseTarget: string | null;
+  destinationDatabaseTarget: string;
   options: LicenseCommandOptions;
   configurationRevision: number;
   policyBaseline?: StoredLicenseClassification[];
@@ -22,6 +24,9 @@ export function licenseWorkbenchPreviewView(input: {
   void policyBaseline;
   return {
     configurationRevision,
+    sourceLabel: options.source === 'database' ? input.loadedDatabaseTarget : options.input,
+    destinationDatabaseLabel:
+      options.destination === 'json' ? null : input.destinationDatabaseTarget,
     contentRevision: preview.contentRevision,
     reviewContentHash: preview.plan.reviewContentHash,
     wholeFileHash: preview.plan.wholeFileHash,
@@ -43,7 +48,7 @@ export function licenseWorkbenchPreviewView(input: {
       : null,
     database: preview.plan.databaseArtifact
       ? {
-          operation: options.source === 'database' ? 'overwrite' : 'sync',
+          operation: preview.plan.replace ? 'overwrite' : 'sync',
           ...preview.plan.databaseChanges,
         }
       : null,

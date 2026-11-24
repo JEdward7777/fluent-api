@@ -26,6 +26,8 @@ export type LicenseWorkflowState =
 export interface LicenseInspection {
   configurationRevision: number;
   inspectedAt: string;
+  sourceOnly?: true;
+  skipOutput?: boolean;
   inputBytes: string | null;
   outputBytes: string | null;
   database?: LicenseDatabaseSnapshot;
@@ -107,6 +109,7 @@ export interface LicenseWorkflowDependencies {
   practice?: LicensePracticeCapability;
   fs?: LicenseFileIo;
   database?: () => Promise<LicenseDatabaseAdapter>;
+  destinationDatabase?: () => Promise<LicenseDatabaseAdapter>;
   transport?: LlmTransport;
   now?: () => string;
   /** The legacy terminal command preserves its existing snapshot behavior. */

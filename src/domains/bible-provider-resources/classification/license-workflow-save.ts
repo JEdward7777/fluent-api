@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type {
@@ -10,8 +12,14 @@ import type {
 import type { LicenseFileIo } from './license-write';
 
 import { freezeReviewValue } from '../license-review-revision';
-import { LicenseInspectionStaleError, requireFreshLicenseSources } from './license-freshness';
-import { licenseFileIo, writeLicenseDestinations } from './license-write';
+import { LicensePolicyDriftError } from './license-database.types';
+import {
+  LicenseDestinationRecheckError,
+  LicenseInspectionStaleError,
+  requireFreshLicenseDestination,
+  requireFreshLicenseSources,
+} from './license-freshness';
+import { LicenseFileDriftError, licenseFileIo, writeLicenseDestinations } from './license-write';
 
 export class LicenseSavePreflightError extends Error {
   constructor(cause: unknown) {
@@ -20,6 +28,15 @@ export class LicenseSavePreflightError extends Error {
     });
     this.name = 'LicenseSavePreflightError';
   }
+}
+
+export function destinationSaveFailure(error: unknown, options: LicenseCommandOptions) {
+  return (
+    error instanceof LicenseDestinationRecheckError ||
+    error instanceof LicensePolicyDriftError ||
+    (error instanceof LicenseFileDriftError &&
+      (options.source !== 'json' || resolve(error.path) !== resolve(options.input)))
+  );
 }
 
 export function licenseSaveFingerprint(request: LicenseSaveRequest) {
@@ -39,17 +56,28 @@ export async function writePreviewedLicenseSave(input: {
   analysis: LicenseAnalysis;
   options: LicenseCommandOptions;
   database?: LicenseDatabaseAdapter;
+  loadedSource?: { inspection: LicenseInspection; database?: LicenseDatabaseAdapter };
   fs?: LicenseFileIo;
 }): Promise<LicenseSaveResult> {
   const { request, preview, inspection, analysis, options, database, fs } = input;
   if (preview.plan.conflicts.length)
     throw new Error(`Save conflicts: ${preview.plan.conflicts.join('; ')}`);
   try {
-    await requireFreshLicenseSources(inspection, options, fs ?? licenseFileIo, database);
+    if (input.loadedSource)
+      await requireFreshLicenseSources(
+        input.loadedSource.inspection,
+        options,
+        fs ?? licenseFileIo,
+        input.loadedSource.database
+      );
+    if (!input.loadedSource)
+      await requireFreshLicenseSources(inspection, options, fs ?? licenseFileIo, database);
   } catch (error) {
     if (error instanceof LicenseInspectionStaleError) throw error;
     throw new LicenseSavePreflightError(error);
   }
+  if (input.loadedSource)
+    await requireFreshLicenseDestination(inspection, options, fs ?? licenseFileIo, database);
   await writeLicenseDestinations({
     artifact: preview.plan.databaseArtifact ?? analysis.artifact,
     fileArtifact: preview.plan.jsonArtifact,

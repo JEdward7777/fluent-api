@@ -65,6 +65,72 @@ describe('license workflow operation lifecycle', () => {
     await workflow.close();
   });
 
+  it('settles source closure when the independent destination rejects close', async () => {
+    const source = await fixture();
+    const destination = await fixture();
+    destination.adapter.close.mockRejectedValueOnce(new Error('fixture cleanup rejection'));
+    const workflow = new LicenseWorkflow(
+      { ...source.options, source: 'database', destination: 'database' },
+      { ...source.dependencies, destinationDatabase: destination.dependencies.database }
+    );
+    await workflow.inspect(1);
+    await workflow.preview(1, workflow.status.contentRevision);
+    const closing = workflow.close();
+    expect(workflow.close()).toBe(closing);
+    await expect(closing).rejects.toThrow('fixture cleanup rejection');
+    expect(destination.adapter.close).toHaveBeenCalledOnce();
+    expect(source.adapter.close).toHaveBeenCalledOnce();
+    expect(workflow.status.state).toBe('closed');
+  });
+
+  it('keeps edited review after destination drift during report export and detects source drift separately', async () => {
+    const f = await fixture();
+    const workflow = new LicenseWorkflow(f.options, {
+      ...f.dependencies,
+      destinationDatabase: f.dependencies.database,
+    });
+    try {
+      await workflow.inspect(1);
+      const edit = workflow.editReview(
+        {
+          kind: 'disposition',
+          normalizedText: f.artifact.classifications[0].normalizedText,
+          status: 'allowed',
+          reason: 'Fixture decision',
+          reviewedBy: 'Fixture reviewer',
+        },
+        1,
+        workflow.status.contentRevision
+      );
+      const request = {
+        configurationRevision: 1,
+        contentRevision: edit.analysis.contentRevision,
+        format: 'markdown' as const,
+        path: join(f.dir, 'report.md'),
+        expectedPreviousBytes: null,
+        agreeToOverwrite: false,
+      };
+      await workflow.preview(1, request.contentRevision);
+      await writeFile(f.output, f.sourceBytes);
+      await expect(
+        workflow.exportReport({ ...request, operationId: 'destination-drift' })
+      ).rejects.toThrow('save destination');
+      expect(workflow.status.state).toBe('reviewing');
+      expect(workflow.previewed).toBeUndefined();
+      expect(workflow.analyzed).toEqual(edit.analysis);
+      await workflow.preview(1, request.contentRevision);
+      await writeFile(f.input, `${f.sourceBytes}\n`);
+      await expect(
+        workflow.exportReport({ ...request, operationId: 'source-drift' })
+      ).rejects.toThrow('Inspected inputs changed');
+      expect(workflow.status.state).toBe('configuring');
+      expect(workflow.analyzed).toBeUndefined();
+      await expect(readFile(request.path)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await workflow.close();
+    }
+  });
+
   it('exports only an explicitly named report with destination freshness and deduplication', async () => {
     const f = await fixture();
     const workflow = new LicenseWorkflow(f.options, f.dependencies);

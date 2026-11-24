@@ -48,12 +48,16 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed, sta
     message = 'Current operation is running. Wait for its result; reloading keeps the operation.';
   } else if (hasUnsavedReviewDraft()) {
     step = 'review';
-    message = 'Next: Apply or discard the open row edit before previewing or saving.';
+    message =
+      'Apply or discard the open row edit before inspecting, analyzing, previewing or saving.';
   } else if (dirty) {
     step = 'settings';
     message = next.analysis
       ? `Pending settings changes: ${dirty}. Choose Restore applied settings to keep this review.`
       : `Pending settings changes: ${dirty}. Apply the changes or restore the applied settings.`;
+  } else if (next.sourceDraftPending) {
+    step = 'inspect';
+    message = 'Inspect the selected source before starting analysis.';
   } else if (next.state === 'saved') {
     message = next.practice
       ? 'Done: Incomplete JSON was saved to private scratch. See its path below.'

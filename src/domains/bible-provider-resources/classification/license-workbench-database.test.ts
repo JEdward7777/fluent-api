@@ -1,6 +1,8 @@
+import { writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 
 import { parseLicenseCommandOptions } from './license-command-options';
+import { makeCommandFixture } from './license-command.test-fixtures';
 import {
   ownedWorkbenchDatabase,
   selectWorkbenchDatabase,
@@ -32,6 +34,7 @@ function settings(session: LicenseWorkbenchSession) {
   const view = session.visible;
   return {
     configurationRevision: view.configurationRevision,
+    expectedContentRevision: view.contentRevision,
     discardReviewedState: false,
     source: view.source,
     destination: view.destination,
@@ -267,6 +270,248 @@ describe('draft database tests', () => {
       reservation.resolve();
       pending.resolve();
       test.mockRestore();
+    }
+  });
+});
+
+describe('source and destination connection ownership', () => {
+  async function operate(session: LicenseWorkbenchSession, kind: 'inspect' | 'analysis') {
+    const request = {
+      operationId: crypto.randomUUID(),
+      configurationRevision: session.visible.configurationRevision,
+    };
+    session.start(kind, request);
+    await vi.waitFor(() =>
+      expect(session.operation(request.operationId)?.state).not.toBe('running')
+    );
+    return session.operation(request.operationId);
+  }
+
+  it('loads source policy without any destination and copies the connection once after success', async () => {
+    const fixture = await makeCommandFixture(false);
+    const other = await makeCommandFixture(false);
+    const session = new LicenseWorkbenchSession(
+      { ...fixture.options, source: 'database', destination: undefined },
+      false,
+      {
+        ...fixture.dependencies,
+        destinationDatabase: other.dependencies.database,
+      }
+    );
+    const test = vi.spyOn(database, 'testWorkbenchDatabase').mockResolvedValue();
+    try {
+      await session.configure({ ...settings(session), sourceDatabaseConnection: connection });
+      expect((await operate(session, 'inspect'))?.state).toBe('succeeded');
+      const loaded = session.visible;
+      expect(loaded.analysis?.rows).toBeGreaterThan(0);
+      expect(loaded.destinationDatabaseConnection).toEqual(loaded.sourceDatabaseConnection);
+      expect(other.dependencies.database).not.toHaveBeenCalled();
+      expect(fixture.dependencies.transport).not.toHaveBeenCalled();
+      await session.testDatabase(
+        loaded.destinationRevision,
+        { ...connection, password: '' },
+        'destination'
+      );
+      expect(test).toHaveBeenLastCalledWith(
+        expect.objectContaining({ password: secret }),
+        'draft-test'
+      );
+      const destination = {
+        ...connection,
+        database: 'other',
+        tls: 'disable' as const,
+        password: 'destination-only-password',
+      };
+      await session.configure({
+        ...settings(session),
+        destination: 'database',
+        destinationDatabaseConnection: destination,
+      });
+      const changed = session.visible;
+      expect(changed).toMatchObject({
+        sourceRevision: loaded.sourceRevision,
+        loadRevision: loaded.loadRevision,
+        contentRevision: loaded.contentRevision,
+        inspected: loaded.inspected,
+      });
+      expect(fixture.adapter.load).toHaveBeenCalledTimes(1);
+      await session.testDatabase(changed.sourceRevision, { ...connection, password: '' }, 'source');
+      expect(test).toHaveBeenLastCalledWith(
+        expect.objectContaining({ password: secret }),
+        'draft-test'
+      );
+      await session.testDatabase(
+        changed.destinationRevision,
+        { ...destination, password: '' },
+        'destination'
+      );
+      expect(test).toHaveBeenLastCalledWith(
+        expect.objectContaining({ password: destination.password }),
+        'draft-test'
+      );
+      await expect(
+        session.testDatabase(loaded.destinationRevision, destination, 'destination')
+      ).rejects.toThrow('Configuration changed');
+      expect(JSON.stringify(changed)).not.toContain(secret);
+      expect(JSON.stringify(changed)).not.toContain(destination.password);
+      expect(JSON.stringify(changed)).not.toContain('postgres://');
+      await session.preview(changed.configurationRevision, changed.contentRevision);
+      expect(other.dependencies.database).toHaveBeenCalledOnce();
+      expect(other.adapter.load).toHaveBeenCalledOnce();
+      expect(session.visible.preview).toMatchObject({
+        sourceLabel: expect.stringContaining(connection.database),
+        destinationDatabaseLabel: expect.stringContaining('other'),
+      });
+      await session.configure({ ...settings(session), source: 'json', input: fixture.input });
+      expect(session.visible.preview).toMatchObject({
+        sourceLabel: expect.stringContaining(connection.database),
+        destinationDatabaseLabel: expect.stringContaining('other'),
+      });
+      other.adapter.load.mockRejectedValueOnce(new Error(secret));
+      const saveDestination = () =>
+        session.save({
+          operationId: crypto.randomUUID(),
+          configurationRevision: session.visible.configurationRevision,
+          contentRevision: changed.contentRevision,
+          agreeToReplace: false,
+        });
+      const unavailable = saveDestination();
+      await vi.waitFor(() =>
+        expect(session.operation(unavailable.operationId)).toMatchObject({
+          state: 'failed',
+          error: expect.stringContaining('save destination'),
+        })
+      );
+      expect(session.visible).toMatchObject({
+        state: 'reviewing',
+        analysis: loaded.analysis,
+        preview: null,
+      });
+      expect(other.adapter.apply).not.toHaveBeenCalled();
+      expect(JSON.stringify(session.visible)).not.toContain(secret);
+      await session.preview(session.visible.configurationRevision, changed.contentRevision);
+      const save = saveDestination();
+      await vi.waitFor(() => expect(session.operation(save.operationId)?.state).toBe('succeeded'));
+      expect(other.adapter.apply).toHaveBeenCalledOnce();
+      expect(fixture.adapter.apply).not.toHaveBeenCalled();
+      await session.configure({ ...settings(session), destination: 'json' });
+      expect(other.adapter.close).toHaveBeenCalledOnce();
+      expect(fixture.adapter.close).not.toHaveBeenCalled();
+      await session.configure({
+        ...settings(session),
+        source: 'database',
+        sourceDatabaseConnection: { ...connection, database: 'source2', password: '' },
+        discardReviewedState: true,
+      });
+      expect((await operate(session, 'inspect'))?.state).toBe('succeeded');
+      expect(session.visible.destinationDatabaseConnection).toMatchObject({
+        database: 'other',
+        passwordRetained: true,
+      });
+      expect(session.visible.sourceDatabaseConnection).toMatchObject({
+        database: 'source2',
+        passwordRetained: false,
+      });
+    } finally {
+      test.mockRestore();
+      await session.close();
+      await Promise.all([fixture.cleanup(), other.cleanup()]);
+    }
+  });
+
+  it('recovers from an analysis failure on the same source and settles failed pool cleanup on both replacement paths', async () => {
+    const fixture = await makeCommandFixture(false);
+    const session = new LicenseWorkbenchSession(
+      { ...fixture.options, source: 'database' },
+      false,
+      fixture.dependencies
+    );
+    try {
+      expect((await operate(session, 'inspect'))?.state).toBe('succeeded');
+      fixture.adapter.load.mockRejectedValueOnce(new Error('source unavailable'));
+      expect((await operate(session, 'analysis'))?.state).toBe('failed');
+      expect(session.visible.state).toBe('error');
+      fixture.adapter.close.mockRejectedValueOnce(new Error(secret));
+      expect(await operate(session, 'inspect')).toMatchObject({
+        state: 'succeeded',
+        cleanupWarning: expect.stringContaining('cleanup'),
+      });
+      expect(session.visible.activeOperationId).toBeNull();
+      const prior = session.visible;
+      await session.configure({ ...settings(session), sourceDatabaseConnection: connection });
+      fixture.adapter.load.mockRejectedValueOnce(new Error('could not load'));
+      fixture.adapter.close.mockRejectedValueOnce(new Error(secret));
+      expect(await operate(session, 'inspect')).toMatchObject({
+        state: 'failed',
+        cleanupWarning: expect.stringContaining('cleanup'),
+      });
+      expect(session.visible).toMatchObject({
+        activeOperationId: null,
+        loadRevision: prior.loadRevision,
+        analysis: prior.analysis,
+        inspected: prior.inspected,
+      });
+      expect(JSON.stringify(session.visible)).not.toContain(secret);
+      expect((await operate(session, 'inspect'))?.state).toBe('succeeded');
+    } finally {
+      await session.close();
+      await fixture.cleanup();
+    }
+  });
+
+  it('keeps malformed JSON and database TLS failures distinct and leaves the loaded review intact', async () => {
+    const fixture = await makeCommandFixture(false);
+    const destinationDatabase = vi.fn(async () => {
+      throw new Error('Unexpected destination access');
+    });
+    const session = new LicenseWorkbenchSession(
+      { ...fixture.options, destination: 'database' },
+      false,
+      {
+        ...fixture.dependencies,
+        destinationDatabase,
+        database: async () => {
+          throw new LicenseWorkbenchDatabaseError(
+            'inspect',
+            Object.assign(new Error(secret), { code: 'CERT_HAS_EXPIRED' })
+          );
+        },
+      }
+    );
+    try {
+      expect((await operate(session, 'inspect'))?.state).toBe('succeeded');
+      const loaded = session.visible;
+      await writeFile(fixture.output, '{"bad":');
+      await session.configure({
+        ...settings(session),
+        input: fixture.output,
+        discardReviewedState: true,
+      });
+      expect(await operate(session, 'inspect')).toMatchObject({
+        state: 'failed',
+        error: expect.stringContaining('Invalid JSON source'),
+      });
+      await session.configure({
+        ...settings(session),
+        source: 'database',
+        discardReviewedState: true,
+      });
+      expect(await operate(session, 'inspect')).toMatchObject({
+        state: 'failed',
+        error: expect.stringContaining('certificate verification failed'),
+      });
+      expect(session.visible).toMatchObject({
+        loadRevision: loaded.loadRevision,
+        loadedSource: loaded.loadedSource,
+        analysis: loaded.analysis,
+        inspected: loaded.inspected,
+      });
+      expect(JSON.stringify(session.visible)).not.toContain(secret);
+      expect(destinationDatabase).not.toHaveBeenCalled();
+      expect(fixture.dependencies.transport).not.toHaveBeenCalled();
+    } finally {
+      await session.close();
+      await fixture.cleanup();
     }
   });
 });

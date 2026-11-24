@@ -7,6 +7,7 @@ export interface VisibleOperation {
   configurationRevision?: number;
   contentRevision?: number;
   error?: string;
+  cleanupWarning?: string;
   recovery?: LicenseWriteRecovery;
   result?: {
     wholeFileHash: string;

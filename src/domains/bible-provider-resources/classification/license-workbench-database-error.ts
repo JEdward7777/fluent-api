@@ -62,6 +62,8 @@ function guidance(
       return `${disconnected} For a trusted local server without TLS, set sslmode=disable and remove sslrootcert=system if present in DATABASE_URL.`;
     return disconnected;
   }
+  if (operation === 'inspect' && !codes.size)
+    return 'Could not read the database inventory or stored classification evidence. Check the selected database and stored data.';
   return 'Check the selected host, port, credentials, TLS setting and database schema.';
 }
 

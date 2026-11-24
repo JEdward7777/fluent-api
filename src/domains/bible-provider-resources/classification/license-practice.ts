@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,7 @@ export interface LicensePractice {
   scratch: string;
   originalHash: string;
   selectedSource: string;
+  discardUnpublishedScratch: () => Promise<void>;
   options: LicenseCommandOptions;
 }
 export interface LicensePracticeCapability {
@@ -49,13 +50,22 @@ export async function createLicensePractice(selectedPath: string | null): Promis
   const cacheDir = join(scratch, 'cache');
   const reportDir = join(scratch, 'reports');
   // No source path, symlink, or browser field can choose a practice write destination.
-  await writeFile(original, originalBytes, { mode: 0o400, flag: 'wx' });
-  await writeFile(input, serializeLicenseArtifact(createLicenseArtifact(checked.artifact)).bytes, {
-    mode: 0o400,
-    flag: 'wx',
-  });
-  await chmod(original, 0o400);
-  await chmod(input, 0o400);
+  try {
+    await writeFile(original, originalBytes, { mode: 0o400, flag: 'wx' });
+    await writeFile(
+      input,
+      serializeLicenseArtifact(createLicenseArtifact(checked.artifact)).bytes,
+      {
+        mode: 0o400,
+        flag: 'wx',
+      }
+    );
+    await chmod(original, 0o400);
+    await chmod(input, 0o400);
+  } catch (error) {
+    await rm(scratch, { recursive: true, force: true });
+    throw error;
+  }
   const options: LicenseCommandOptions = {
     source: 'json',
     destination: 'json',
@@ -83,6 +93,12 @@ export async function createLicensePractice(selectedPath: string | null): Promis
     workflow,
     scratch,
     selectedSource,
+    async discardUnpublishedScratch() {
+      const entries = await readdir(scratch);
+      if (entries.some((name) => name !== 'original.json' && name !== 'working-input.json')) return;
+      await Promise.all([rm(original, { force: true }), rm(input, { force: true })]);
+      await rmdir(scratch);
+    },
     originalHash: createHash('sha256').update(originalBytes).digest('hex'),
     options,
   };

@@ -1,8 +1,12 @@
+import { LicenseDestinationRecheckError } from './license-freshness';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
+import { LicenseSourceReadError } from './license-workflow-inspect';
 import { LicenseWriteUncertainError } from './license-write';
 
 export function licenseWorkbenchBrowserError(error: unknown) {
-  if (error instanceof LicenseWorkbenchDatabaseError) return error.message;
+  if (error instanceof LicenseDestinationRecheckError) return error.message;
+  if (error instanceof LicenseSourceReadError || error instanceof LicenseWorkbenchDatabaseError)
+    return error.message;
   if (error instanceof Error && 'code' in error && error.code === '42P01')
     return 'Configured database schema is missing. Check this connection and apply its migrations before Inspect.';
   if (error instanceof LicenseWriteUncertainError)

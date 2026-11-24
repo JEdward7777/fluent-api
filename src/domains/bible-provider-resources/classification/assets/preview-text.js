@@ -3,7 +3,10 @@ export function licenseWorkbenchPreviewLines(next) {
   return [
     `Configuration ${preview.configurationRevision}; content revision ${preview.contentRevision}.`,
     `Review SHA-256: ${preview.reviewContentHash}. Whole JSON SHA-256: ${preview.wholeFileHash}.`,
-    `Source: ${next.source} ${next.input}. ${next.inspected?.sourceHash ? `Inspected source SHA-256: ${next.inspected.sourceHash}.` : 'Source identity is the frozen database snapshot.'} Destination: ${next.destination}. ${next.databaseTarget}.`,
+    `Source: ${preview.sourceLabel}.${next.inspected?.sourceHash ? ` Inspected source SHA-256: ${next.inspected.sourceHash}.` : ''}`,
+    ...(preview.destinationDatabaseLabel
+      ? [`Destination: ${preview.destinationDatabaseLabel}.`]
+      : []),
     ...preview.targets.map(
       (target) =>
         `${target.role}: ${target.path} (${target.existed ? `will replace SHA-256 ${target.previousHash}` : 'new file'}).`

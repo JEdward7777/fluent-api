@@ -15,6 +15,7 @@ import {
 /** Only public session facts are projected; credentials and target prior bytes stay server-side. */
 export function visibleLicenseWorkbench(input: {
   options: LicenseCommandOptions;
+  loadedOptions?: LicenseCommandOptions;
   workflow?: LicenseWorkflow;
   launchId: string;
   practiceMode: boolean;
@@ -25,6 +26,8 @@ export function visibleLicenseWorkbench(input: {
   sourceHash?: string;
   policyBaseline?: StoredLicenseClassification[];
   databaseTarget: string;
+  loadedDatabaseTarget: string | null;
+  destinationDatabaseTarget: string;
   databaseConnection: WorkbenchDatabase;
   databaseTest: 'untested' | 'passed' | 'failed';
   testingDatabase: boolean;
@@ -48,7 +51,7 @@ export function visibleLicenseWorkbench(input: {
     state: status?.state ?? 'configuring',
     configurationRevision: input.configurationRevision,
     contentRevision: status?.contentRevision ?? 0,
-    readyForInspect: Boolean(options.source && options.destination),
+    readyForInspect: Boolean(options.source),
     source: options.source ?? null,
     destination: options.destination ?? null,
     input: input.practiceMode ? (input.selectedPracticePath ?? 'Bundled example') : options.input,
@@ -71,7 +74,9 @@ export function visibleLicenseWorkbench(input: {
     analysis: visibleWorkbenchAnalysis(workflow?.analyzed),
     preview: licenseWorkbenchPreviewView({
       workflow,
-      options,
+      loadedDatabaseTarget: input.loadedDatabaseTarget,
+      destinationDatabaseTarget: input.destinationDatabaseTarget,
+      options: input.loadedOptions ?? options,
       configurationRevision: input.configurationRevision,
       policyBaseline: input.policyBaseline,
       practiceMode: input.practiceMode,

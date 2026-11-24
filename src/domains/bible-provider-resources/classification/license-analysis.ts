@@ -22,18 +22,28 @@ import { assessedLicenseRow } from './license-assessment';
 import { storedLicenseDecision } from './license-stored-decision';
 
 /** Refresh owned database authority; only unconsumed JSON extensions overlay that source. */
-export async function analyzeDatabaseLicenses(input: {
-  catalog: LicenseArtifact['catalog'];
-  classifications: StoredLicenseClassification[];
-  base?: LicenseArtifact;
-  classify: ReturnType<typeof createLicenseClassifier>;
-  model: string;
-  sampleCount: number;
-  eligibility?: LicenseEligibilityRow[];
-  now?: () => string;
-  /** Checked between distinct keys, after all samples for the current key settle. */
-  shouldStop?: () => boolean;
-}) {
+export async function analyzeDatabaseLicenses(
+  input: (
+    | {
+        loadOnly: true;
+        classify?: never;
+      }
+    | {
+        loadOnly?: false;
+        classify: ReturnType<typeof createLicenseClassifier>;
+      }
+  ) & {
+    catalog: LicenseArtifact['catalog'];
+    classifications: StoredLicenseClassification[];
+    base?: LicenseArtifact;
+    model: string;
+    sampleCount: number;
+    eligibility?: LicenseEligibilityRow[];
+    now?: () => string;
+    /** Checked between distinct keys, after all samples for the current key settle. */
+    shouldStop?: () => boolean;
+  }
+) {
   const known = new Map(input.classifications.map((row) => [row.normalizedText, row]));
   const selected = new Map(input.eligibility?.map((row) => [row.normalizedText, row]));
   const classificationRun: LicenseArtifact['classificationRun'] = {
@@ -67,7 +77,9 @@ export async function analyzeDatabaseLicenses(input: {
     const action = selected.get(normalizedText)?.action ?? (stored ? 'retain' : 'rule');
     if (
       storedDecision &&
-      (action === 'retain' || (action === 'rule' && !selected.get(normalizedText)?.ruleMatches))
+      (input.loadOnly ||
+        action === 'retain' ||
+        (action === 'rule' && !selected.get(normalizedText)?.ruleMatches))
     ) {
       // The database is the source of owned provenance. Missing evidence is absent,
       // even when an older JSON decision/producer happens to match the same core fields.
@@ -86,6 +98,21 @@ export async function analyzeDatabaseLicenses(input: {
             });
       }
       classifications.push(retained);
+      continue;
+    }
+    if (input.loadOnly) {
+      classifications.push({
+        normalizedText,
+        exampleNotice,
+        status: 'unknown',
+        source: 'table',
+        rationale: 'No stored classification for this inventory notice.',
+        samples: [],
+        reviewState: 'unreviewed',
+        decisionAt: null,
+        reviewedBy: null,
+        humanReviewedAt: null,
+      });
       continue;
     }
     if (isLicenseNoticeUnavailable(exampleNotice))
@@ -145,9 +172,9 @@ export class LicenseAnalysisStoppedError extends Error {
 
 /** JSON source is a saved draft; only explicitly selected keys are reassessed. */
 export async function analyzeJsonLicenses(input: {
+  classify: ReturnType<typeof createLicenseClassifier>;
   artifact: LicenseArtifact;
   eligibility: LicenseEligibilityRow[];
-  classify: ReturnType<typeof createLicenseClassifier>;
   model: string;
   sampleCount: number;
   now?: () => string;

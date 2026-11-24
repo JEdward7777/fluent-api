@@ -34,6 +34,8 @@ export function buildLicenseSavePlan(input: {
   inputBytes: string | null;
   outputBytes: string | null;
   database?: LicenseDatabaseSnapshot;
+  overwriteDatabase?: boolean;
+  inspectOutput?: boolean;
 }): LicenseSavePlan {
   const { options, artifact, inputBytes, outputBytes, database } = input;
   if (!options.source || !options.destination) throw new Error('Select source and destination');
@@ -43,6 +45,7 @@ export function buildLicenseSavePlan(input: {
     artifact,
     outputBytes,
     databaseRows: database?.classifications,
+    overwriteDatabase: input.overwriteDatabase,
   });
   const reportingArtifact = destinations.databaseForecast ?? destinations.jsonArtifact ?? artifact;
   const reports = renderLicenseReports(reportingArtifact, {
@@ -74,7 +77,8 @@ export function buildLicenseSavePlan(input: {
       : [{ path: resolve(options.output), previous: outputBytes, role: 'output' }];
   const expectedFiles = [
     ...(options.source === 'json' ? [{ path: resolve(options.input), bytes: inputBytes }] : []),
-    ...(resolve(options.output) !== resolve(options.input) || options.source !== 'json'
+    ...(input.inspectOutput !== false &&
+    (resolve(options.output) !== resolve(options.input) || options.source !== 'json')
       ? [{ path: resolve(options.output), bytes: outputBytes }]
       : []),
   ];
@@ -83,7 +87,8 @@ export function buildLicenseSavePlan(input: {
     ...destinations,
     targets,
     expectedFiles,
-    replace: options.source === 'database' && options.destination !== 'json',
+    replace:
+      (input.overwriteDatabase ?? options.source === 'database') && options.destination !== 'json',
     requiresForceAgreement: false,
     wholeFileHash: output.wholeFileHash,
     reviewContentHash: (destinations.jsonArtifact ?? artifact).reviewContentHash,

@@ -302,6 +302,19 @@ describe('local license workbench server', () => {
         discardReviewedState: false,
         cacheDir: null,
       };
+      for (const key of [
+        'sourceDraftPending',
+        'sourceConnectionRevision',
+        'destinationConnectionRevision',
+        'sourceRevision',
+        'destinationRevision',
+        'aiRevision',
+        'loadRevision',
+        'sourceDatabaseTest',
+        'destinationDatabaseTest',
+        'loadedSource',
+      ])
+        delete changed[key];
       delete changed.step;
       delete changed.launchId;
       delete changed.state;
@@ -330,6 +343,7 @@ describe('local license workbench server', () => {
         body: JSON.stringify(changed),
       });
       expect(stale.status).toBe(409);
+      expect(await stale.text()).toBe('Configuration changed; reload setup before applying');
       const request = { operationId: crypto.randomUUID(), configurationRevision: 2 };
       expect((await api('inspect', 'POST', request)).status).toBe(202);
       let state;
@@ -456,6 +470,7 @@ describe('local license workbench server', () => {
         ...changed,
         configurationRevision: 2,
         discardReviewedState: true,
+        expectedContentRevision: currentState.contentRevision,
         input: '/tmp/02b-source-does-not-exist.json',
       };
       expect((await api('setup', 'POST', invalid)).status).toBe(200);
@@ -473,6 +488,10 @@ describe('local license workbench server', () => {
       });
       expect(failed.error).not.toContain(invalid.input);
       expect((await api('setup')).body.latestOperation.state).toBe('failed');
+      expect((await api(`review/${row.id}`)).body).toMatchObject({
+        reviewedBy: 'Named reviewer',
+        rowNote: 'Distinct retained unknown note.',
+      });
     } finally {
       if (previousKey === undefined) delete process.env.GOOGLE_AI_API_KEY;
       else process.env.GOOGLE_AI_API_KEY = previousKey;
