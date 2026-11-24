@@ -288,6 +288,15 @@ pre {
 .review-filter label {
   flex: 1 1 12rem;
 }
+#review-pager {
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+#review-page-status {
+  flex: 1 1 18rem;
+  margin: 0;
+  font-weight: 600;
+}
 .table-scroll {
   overflow-x: auto;
 }

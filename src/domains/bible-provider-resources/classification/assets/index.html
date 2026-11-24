@@ -222,6 +222,11 @@
               <button type="submit">Search</button>
             </form>
             <p id="review-summary" role="status">Loading review results…</p>
+            <div id="review-pager" class="actions" role="group" aria-label="Review pagination">
+              <p id="review-page-status" role="status" aria-atomic="true"></p>
+              <button type="button" name="previous">Previous page</button
+              ><button type="button" name="next">Next page</button>
+            </div>
             <div class="table-scroll">
               <table>
                 <thead>
@@ -236,10 +241,6 @@
                 </thead>
                 <tbody id="review-rows"></tbody>
               </table>
-            </div>
-            <div id="review-pager" class="actions">
-              <button type="button" name="previous">Previous page</button
-              ><button type="button" name="next">Next page</button>
             </div>
           </div>
           <div id="review-detail" hidden></div>
