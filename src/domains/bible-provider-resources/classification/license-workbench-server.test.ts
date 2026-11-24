@@ -59,6 +59,22 @@ describe('local license workbench server', () => {
     });
     expect(apply.status).toBe(200);
     expect(await apply.text()).not.toContain('secret-api-test');
+    const draft = (databaseConnection: unknown) =>
+      fetch(`${base}/api/database/test`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ configurationRevision: 2, databaseConnection }),
+      });
+    expect((await draft({ ...body.databaseConnection, port: '1' })).status).toBe(400);
+    const rejectedDraft = await draft({ ...body.databaseConnection, password: '' });
+    expect(rejectedDraft.status).toBe(409);
+    expect(await rejectedDraft.text()).toMatch(/database refused the connection/);
+    expect(await (await fetch(`${base}/api/setup`, { headers })).json()).toMatchObject({
+      configurationRevision: 2,
+      databaseTest: 'untested',
+      databaseConnection: { passwordRetained: true },
+    });
+
     const test = await fetch(`${base}/api/database/test`, {
       method: 'POST',
       headers,

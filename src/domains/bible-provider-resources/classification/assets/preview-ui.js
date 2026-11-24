@@ -33,20 +33,24 @@ function clearReportPlan() {
   reportOverwrite.checked = false;
 }
 
-export function renderExactPreview(next, { dirty, practiceBusy, sessionUnconfirmed }) {
+export function renderExactPreview(
+  next,
+  { dirty, practiceBusy, sessionUnconfirmed, settingsBusy }
+) {
   normalPreview.hidden = next.practice || (!next.analysis && !next.saveOutcome);
   if (normalPreview.hidden) return;
   const blocked = hasUnsavedReviewDraft() || sessionUnconfirmed || saveStatusUnconfirmed() || dirty;
   previewButton.disabled =
     blocked ||
     practiceBusy ||
+    settingsBusy ||
     Boolean(next.activeOperationId) ||
     !['reviewing', 'previewed'].includes(next.state);
   const attestation = document.getElementById('attestation');
   attestation.hidden =
     !next.preview || next.preview.review?.status === 'ready' || next.state !== 'previewed';
   for (const element of attestation.elements)
-    element.disabled = blocked || practiceBusy || Boolean(next.activeOperationId);
+    element.disabled = blocked || practiceBusy || settingsBusy || Boolean(next.activeOperationId);
   const preview = next.preview;
   if (preview) suggestReportPath(next.reportDir);
   if (
@@ -60,8 +64,9 @@ export function renderExactPreview(next, { dirty, practiceBusy, sessionUnconfirm
     clearReportPlan();
   reportExport.hidden = !preview;
   document.getElementById('report-inspect').disabled =
-    blocked || practiceBusy || Boolean(next.activeOperationId) || !preview;
-  reportWrite.disabled = blocked || practiceBusy || Boolean(next.activeOperationId) || !reportPlan;
+    blocked || practiceBusy || settingsBusy || Boolean(next.activeOperationId) || !preview;
+  reportWrite.disabled =
+    blocked || practiceBusy || settingsBusy || Boolean(next.activeOperationId) || !reportPlan;
   if (blocked) {
     previewResult.textContent = sessionUnconfirmed
       ? 'Session status is unavailable. Reload before any preview, attestation or export.'
@@ -87,7 +92,10 @@ export function renderExactPreview(next, { dirty, practiceBusy, sessionUnconfirm
   );
 }
 
-export function syncPracticeDraftControls(setup, { dirty, practiceBusy, sessionUnconfirmed }) {
+export function syncPracticeDraftControls(
+  setup,
+  { dirty, practiceBusy, sessionUnconfirmed, settingsBusy }
+) {
   if (!setup?.practice || !setup.analysis) return;
   const blocked = hasUnsavedReviewDraft();
   const busy =
@@ -95,6 +103,7 @@ export function syncPracticeDraftControls(setup, { dirty, practiceBusy, sessionU
     saveStatusUnconfirmed() ||
     dirty ||
     practiceBusy ||
+    settingsBusy ||
     Boolean(setup.activeOperationId);
   document.getElementById('practice-preview').disabled = blocked || busy || setup.state === 'saved';
   document.getElementById('practice-save').disabled = blocked || busy || !setup.preview;

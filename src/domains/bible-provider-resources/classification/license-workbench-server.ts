@@ -17,7 +17,8 @@ import type { LicenseWorkflowDependencies } from './license-workflow.types';
 import { LICENSE_REPORT_HTML_CSP } from '../license-report-html';
 import { describeLicenseReportPath } from './license-reviewer-container';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
-import { operationSchema, setupSchema } from './license-workbench-schema';
+import { DatabaseTestUnavailableError } from './license-workbench-database-tests';
+import { databaseConnectionSchema, operationSchema, setupSchema } from './license-workbench-schema';
 import { LicenseWorkbenchSession } from './license-workbench-session';
 
 const assetDirectory = join(dirname(fileURLToPath(import.meta.url)), 'assets');
@@ -25,6 +26,7 @@ const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/database-test.js', ['database-test.js', 'text/javascript; charset=utf-8']],
   ['/preview-ui.js', ['preview-ui.js', 'text/javascript; charset=utf-8']],
   ['/guide.js', ['guide.js', 'text/javascript; charset=utf-8']],
   ['/help.js', ['help.js', 'text/javascript; charset=utf-8']],
@@ -120,21 +122,22 @@ function createLicenseWorkbenchApp(
   });
   app.post('/api/database/test', async (c) => {
     const parsed = z
-      .object({ configurationRevision: z.number().int().positive() })
+      .object({
+        configurationRevision: z.number().int().positive(),
+        databaseConnection: databaseConnectionSchema.optional(),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.text('Invalid test request', 400);
+    if (!parsed.success)
+      return c.text('Check the entered database host, port, database and username.', 400);
     try {
-      return c.json(await session.testDatabase(parsed.data.configurationRevision));
+      const { configurationRevision, databaseConnection } = parsed.data;
+      return c.json(await session.testDatabase(configurationRevision, databaseConnection));
     } catch (error) {
-      const message = error instanceof Error ? error.message : '';
       return c.text(
         error instanceof LicenseWorkbenchDatabaseError ||
-          message.includes('Configuration changed') ||
-          message.includes('Cannot test') ||
-          message.includes('Practice cannot') ||
-          message.includes('Save outcome uncertain')
-          ? message
+          error instanceof DatabaseTestUnavailableError
+          ? error.message
           : 'Connection failed. Check the selected host, credentials and TLS setting',
         409
       );
@@ -348,6 +351,7 @@ function createLicenseWorkbenchApp(
         | '/'
         | '/app.css'
         | '/app.js'
+        | '/database-test.js'
         | '/preview-ui.js'
         | '/guide.js'
         | '/help.js'

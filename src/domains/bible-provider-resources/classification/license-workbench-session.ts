@@ -21,9 +21,12 @@ import { createLicensePractice } from './license-practice';
 import {
   ownedWorkbenchDatabase,
   selectWorkbenchDatabase,
-  testWorkbenchDatabase,
   workbenchDatabaseIdentity,
 } from './license-workbench-database';
+import {
+  DatabaseTestUnavailableError,
+  LicenseWorkbenchDatabaseTests,
+} from './license-workbench-database-tests';
 import { licenseWorkbenchBrowserError } from './license-workbench-error';
 import { LicenseWorkbenchReports } from './license-workbench-reports';
 import { selectedLicenseRerunOptions } from './license-workbench-rerun';
@@ -31,6 +34,7 @@ import {
   licenseWorkbenchReviewDetail,
   licenseWorkbenchReviewList,
 } from './license-workbench-review-view';
+import { applyLicenseWorkbenchOptions } from './license-workbench-schema';
 import { visibleLicenseWorkbench } from './license-workbench-visible';
 import { LicenseWorkflow } from './license-workflow';
 import { LicenseWriteUncertainError } from './license-write';
@@ -44,9 +48,7 @@ export class LicenseWorkbenchSession {
   private policyBaseline?: StoredLicenseClassification[];
   private databaseTarget = 'Configured environment database; identity checked at Inspect';
   private databaseConnection: WorkbenchDatabase = { mode: 'environment' };
-  private databaseTest: 'untested' | 'passed' | 'failed' = 'untested';
-  private testingDatabase = false;
-  private databaseTestPromise?: Promise<void>;
+  private readonly databaseTests = new LicenseWorkbenchDatabaseTests();
   private closed = false;
   private readonly operations = new Map<string, RecordedOperation>();
   private activeOperationId?: string;
@@ -107,8 +109,8 @@ export class LicenseWorkbenchSession {
       policyBaseline: this.policyBaseline,
       databaseTarget: this.databaseTarget,
       databaseConnection: this.databaseConnection,
-      databaseTest: this.databaseTest,
-      testingDatabase: this.testingDatabase,
+      databaseTest: this.databaseTests.appliedStatus,
+      testingDatabase: this.databaseTests.running,
       saveOutcome: this.latestSaveOperationId ? this.operation(this.latestSaveOperationId) : null,
       activeOperationId: this.activeOperationId,
       latestOperation: this.latestOperationId ? this.operation(this.latestOperationId) : null,
@@ -133,7 +135,10 @@ export class LicenseWorkbenchSession {
       id
     );
   }
-  async selectRerun(body: LicenseRerunSelection) {
+  selectRerun(body: LicenseRerunSelection) {
+    return this.databaseTests.reserve(() => this.configureRerun(body));
+  }
+  private async configureRerun(body: LicenseRerunSelection) {
     if (this.practiceMode) throw new Error('Practice does not reassess saved evidence');
     if (this.activeOperationId || !this.workflow?.analyzed)
       throw new Error('Finish analysis before selecting a row reassessment');
@@ -157,11 +162,13 @@ export class LicenseWorkbenchSession {
     this.resetAfterConfiguration(options);
     return this.visible;
   }
-  async configure(body: z.infer<typeof setupSchema>) {
+  configure(body: z.infer<typeof setupSchema>) {
+    return this.databaseTests.reserve(() => this.configureSettings(body));
+  }
+  private async configureSettings(body: z.infer<typeof setupSchema>) {
     if (body.configurationRevision !== this.visible.configurationRevision)
       throw new Error('Configuration changed; reload setup before applying');
-    if (this.activeOperationId || this.testingDatabase)
-      throw new Error('Cannot configure while an operation runs');
+    if (this.activeOperationId) throw new Error('Cannot configure while an operation runs');
     if (this.practiceMode) {
       if (body.databaseConnection?.mode === 'session')
         throw new Error('Practice cannot configure a database');
@@ -197,21 +204,7 @@ export class LicenseWorkbenchSession {
       this.resetAfterConfiguration(this.options);
       return this.visible;
     }
-    const options: LicenseCommandOptions = {
-      ...this.options,
-      source: body.source ?? undefined,
-      destination: body.destination ?? undefined,
-      input: body.input,
-      output: body.output,
-      model: body.model,
-      sampleCount: body.sampleCount,
-      force: body.force,
-      noCache: body.noCache,
-      cacheDir: body.cacheDir ?? undefined,
-      reportFormats: body.reportFormats,
-      reportDir: body.reportDir ?? undefined,
-      preserveExistingNonUnknowns: body.preserveExistingNonUnknowns,
-    };
+    const options = applyLicenseWorkbenchOptions(this.options, body);
     const nextConnection = selectWorkbenchDatabase(
       this.databaseConnection,
       body.databaseConnection
@@ -226,32 +219,29 @@ export class LicenseWorkbenchSession {
     this.resetAfterConfiguration(options);
     this.databaseConnection = nextConnection;
     this.databaseTarget = workbenchDatabaseIdentity(nextConnection);
-    this.databaseTest = 'untested';
+    this.databaseTests.appliedStatus = 'untested';
     return this.visible;
   }
-  async testDatabase(configurationRevision: number) {
-    if (this.closed) throw new Error('Session is closed');
+  async testDatabase(
+    configurationRevision: number,
+    draft?: z.infer<typeof setupSchema>['databaseConnection']
+  ) {
+    if (this.closed) throw new DatabaseTestUnavailableError('Session is closed');
     if (configurationRevision !== this.configurationRevision)
-      throw new Error('Configuration changed; reload setup before testing');
-    if (this.practiceMode) throw new Error('Practice cannot test a database');
-    if (this.activeOperationId || this.testingDatabase)
-      throw new Error('Cannot test while an operation runs');
+      throw new DatabaseTestUnavailableError('Configuration changed; reload setup before testing');
+    if (this.practiceMode)
+      throw new DatabaseTestUnavailableError('Practice cannot test a database');
+    if (this.activeOperationId)
+      throw new DatabaseTestUnavailableError('Cannot test while an operation runs');
     if (this.workflow?.status.state === 'uncertain')
-      throw new Error('Save outcome uncertain; inspect actual targets in a new process');
-    this.testingDatabase = true;
-    this.databaseTest = 'untested';
-    try {
-      this.databaseTestPromise = testWorkbenchDatabase(this.databaseConnection);
-      await this.databaseTestPromise;
-      this.databaseTest = 'passed';
-    } catch (error) {
-      this.databaseTest = 'failed';
-      throw error;
-    } finally {
-      this.testingDatabase = false;
-      this.databaseTestPromise = undefined;
-    }
-    return this.visible;
+      throw new DatabaseTestUnavailableError(
+        'Save outcome uncertain; inspect actual targets in a new process'
+      );
+    const connection = draft
+      ? selectWorkbenchDatabase(this.databaseConnection, draft)
+      : this.databaseConnection;
+    await this.databaseTests.run(connection, Boolean(draft));
+    return draft ? { tested: true } : this.visible;
   }
   start(kind: VisibleOperation['kind'], body: z.infer<typeof operationSchema>) {
     const fingerprint = JSON.stringify([kind, body.configurationRevision]);
@@ -261,7 +251,7 @@ export class LicenseWorkbenchSession {
         throw new Error('Operation ID was reused with different arguments');
       return { ...prior.snapshot };
     }
-    if (this.activeOperationId || this.testingDatabase)
+    if (this.activeOperationId || this.databaseTests.running)
       throw new Error('Another operation is running');
     if (this.workflow?.status.state === 'uncertain')
       throw new Error('Save outcome uncertain; inspect actual targets in a new process');
@@ -338,7 +328,8 @@ export class LicenseWorkbenchSession {
     edit: LicenseReviewEdit;
     acknowledgeWarning: boolean;
   }) {
-    if (this.activeOperationId) throw new Error('An operation is running; wait before editing');
+    if (this.activeOperationId || this.databaseTests.running)
+      throw new Error('An operation is running; wait before editing');
     if (!this.workflow) throw new Error('Start analysis before editing evidence');
     if (body.configurationRevision !== this.configurationRevision)
       throw new Error('Stale configuration revision');
@@ -366,7 +357,10 @@ export class LicenseWorkbenchSession {
     if (this.activeOperationId) throw new Error('An operation is running');
     if (configurationRevision !== this.configurationRevision)
       throw new Error('Stale configuration revision');
-    return this.workflow.preview(this.workflow.status.configurationRevision, contentRevision);
+    const workflow = this.workflow;
+    return this.databaseTests.reserve(() =>
+      workflow.preview(workflow.status.configurationRevision, contentRevision)
+    );
   }
   attest(body: {
     configurationRevision: number;
@@ -377,7 +371,8 @@ export class LicenseWorkbenchSession {
     responsibility: true;
   }) {
     if (this.practiceMode || !this.workflow) throw new Error('Attestation is unavailable');
-    if (this.activeOperationId) throw new Error('An operation is running');
+    if (this.activeOperationId || this.databaseTests.running)
+      throw new Error('An operation is running');
     if (body.configurationRevision !== this.configurationRevision)
       throw new Error('Stale configuration revision');
     return this.workflow.attest(
@@ -402,7 +397,10 @@ export class LicenseWorkbenchSession {
     if (this.activeOperationId) throw new Error('An operation is running');
     if (this.workflow.status.state === 'uncertain')
       throw new Error('Save outcome uncertain; inspect actual targets in a new process');
-    return this.reports.inspect(this.workflow, this.configurationRevision, body);
+    const workflow = this.workflow;
+    return this.databaseTests.reserve(() =>
+      this.reports.inspect(workflow, this.configurationRevision, body)
+    );
   }
 
   exportReport(body: { planId: string; operationId: string; agreeToOverwrite: boolean }) {
@@ -410,7 +408,10 @@ export class LicenseWorkbenchSession {
     if (this.activeOperationId) throw new Error('An operation is running');
     if (this.workflow.status.state === 'uncertain')
       throw new Error('Save outcome uncertain; inspect actual targets in a new process');
-    return this.reports.export(this.workflow, this.configurationRevision, body);
+    const workflow = this.workflow;
+    return this.databaseTests.reserve(() =>
+      this.reports.export(workflow, this.configurationRevision, body)
+    );
   }
 
   async savePractice(body: {
@@ -440,7 +441,8 @@ export class LicenseWorkbenchSession {
         throw new Error('Operation ID was reused with different arguments');
       return { ...prior.snapshot };
     }
-    if (this.activeOperationId) throw new Error('Another operation is running');
+    if (this.activeOperationId || this.databaseTests.running)
+      throw new Error('Another operation is running');
     if (!this.workflow) throw new Error('Preview before saving');
     if (body.configurationRevision !== this.configurationRevision)
       throw new Error('Stale configuration revision');
@@ -497,11 +499,9 @@ export class LicenseWorkbenchSession {
     return { ...operation };
   }
 
-  close() {
+  async close() {
     this.closed = true;
-    return (async () => {
-      await this.databaseTestPromise?.catch(() => undefined);
-      await this.workflow?.close();
-    })();
+    await this.databaseTests.settle();
+    await this.workflow?.close();
   }
 }

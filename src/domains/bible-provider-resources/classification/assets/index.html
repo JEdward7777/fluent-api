@@ -98,8 +98,7 @@
           <fieldset id="database-settings">
             <legend>Database connection for this session</legend>
             <p>
-              Applies when source or destination uses a database. Test checks the applied connection only. Inspect reads
-              the selected inputs.
+              Applies when source or destination uses a database. Inspect reads the selected inputs.
             </p>
             <div class="fields">
               <label
@@ -139,10 +138,6 @@
               password.
             </p>
           </fieldset>
-          <div class="actions">
-            <button id="database-test" type="button" disabled>Test connection</button>
-            <p id="database-test-result" role="status"></p>
-          </div>
           <details>
             <summary>Advanced settings</summary>
             <div class="fields">
@@ -167,7 +162,18 @@
           <label id="discard-label" hidden
             ><input type="checkbox" name="discardReviewedState" /> Discard unsaved review</label
           >
-          <button type="submit">Apply settings</button>
+          <!-- prettier-ignore -->
+          <p id="settings-actions-help">Test checks the entered connection. Apply updates all review settings.</p>
+          <div
+            class="actions"
+            role="group"
+            aria-label="Review settings actions"
+            aria-describedby="settings-actions-help"
+          >
+            <button id="database-test" type="button" disabled>Test connection</button>
+            <button id="apply-settings" type="submit">Apply settings</button>
+          </div>
+          <p id="database-test-result" role="status"></p>
         </form>
         <details id="cli-details">
           <summary>Equivalent CLI command</summary>

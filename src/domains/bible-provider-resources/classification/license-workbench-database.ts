@@ -100,7 +100,10 @@ function configuredTls(connection: WorkbenchDatabase) {
   }
 }
 
-export async function testWorkbenchDatabase(connection: WorkbenchDatabase): Promise<void> {
+export async function testWorkbenchDatabase(
+  connection: WorkbenchDatabase,
+  operation: 'test' | 'draft-test'
+): Promise<void> {
   try {
     const client = postgres(workbenchDatabaseUrl(connection), {
       max: 1,
@@ -127,7 +130,7 @@ export async function testWorkbenchDatabase(connection: WorkbenchDatabase): Prom
       await client.end({ timeout: 1 });
     }
   } catch (error) {
-    throw new LicenseWorkbenchDatabaseError('test', error, configuredTls(connection));
+    throw new LicenseWorkbenchDatabaseError(operation, error, configuredTls(connection));
   }
 }
 

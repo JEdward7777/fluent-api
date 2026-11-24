@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { parseLicenseCommandOptions } from './license-command-options';
 import {
@@ -8,7 +8,9 @@ import {
   workbenchDatabaseIdentity,
   workbenchDatabaseUrl,
 } from './license-workbench-database';
+import * as database from './license-workbench-database';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
+import { LicenseWorkbenchDatabaseTests } from './license-workbench-database-tests';
 import { licenseWorkbenchBrowserError } from './license-workbench-error';
 import { LicenseWorkbenchSession } from './license-workbench-session';
 
@@ -182,5 +184,89 @@ describe('sanitized database failure guidance', () => {
     expect(new LicenseWorkbenchDatabaseError('test', error('ECONNRESET')).message).not.toContain(
       'Disable TLS'
     );
+  });
+});
+
+describe('draft database tests', () => {
+  it('tests entered credentials without applying them and blocks concurrent Apply and Test', async () => {
+    const pending = Promise.withResolvers<void>();
+    const test = vi.spyOn(database, 'testWorkbenchDatabase').mockReturnValue(pending.promise);
+    const session = new LicenseWorkbenchSession(parsed.options);
+    try {
+      await session.configure({ ...settings(session), databaseConnection: connection });
+      const snapshot = session.visible;
+      const draft = { ...connection, host: 'new-host', password: '' };
+      const request = session.testDatabase(snapshot.configurationRevision, draft);
+      expect(test).toHaveBeenCalledWith(
+        expect.objectContaining({ host: 'new-host', password: '' }),
+        'draft-test'
+      );
+      expect(session.visible.testingDatabase).toBe(true);
+      await expect(session.testDatabase(snapshot.configurationRevision, draft)).rejects.toThrow(
+        'Cannot test'
+      );
+      await expect(
+        session.configure({ ...settings(session), databaseConnection: draft })
+      ).rejects.toThrow('database test');
+      pending.resolve();
+      await expect(request).resolves.toEqual({ tested: true });
+      expect(session.visible).toEqual(snapshot);
+
+      await expect(session.testDatabase(1, draft)).rejects.toThrow('Configuration changed');
+      expect(test).toHaveBeenCalledTimes(1);
+      await session.testDatabase(snapshot.configurationRevision, { ...connection, password: '' });
+      expect(test).toHaveBeenLastCalledWith(
+        expect.objectContaining({ password: secret }),
+        'draft-test'
+      );
+      await session.testDatabase(snapshot.configurationRevision, {
+        ...connection,
+        password: 'new',
+        clearPassword: true,
+      });
+      expect(test).toHaveBeenLastCalledWith(
+        expect.objectContaining({ password: '' }),
+        'draft-test'
+      );
+      await session.testDatabase(snapshot.configurationRevision);
+      expect(session.visible.databaseTest).toBe('passed');
+      test.mockRejectedValueOnce(new Error('fixture rejection'));
+      await expect(
+        session.testDatabase(snapshot.configurationRevision, { mode: 'environment' })
+      ).rejects.toThrow();
+      expect(session.visible.databaseTest).toBe('passed');
+    } finally {
+      pending.resolve();
+      await session.close();
+      test.mockRestore();
+    }
+  });
+
+  it('rejects Test until an async review preparation completes and waits for a live Test on close', async () => {
+    const reservation = Promise.withResolvers<void>();
+    const pending = Promise.withResolvers<void>();
+    const test = vi.spyOn(database, 'testWorkbenchDatabase').mockReturnValue(pending.promise);
+    const checks = new LicenseWorkbenchDatabaseTests();
+    try {
+      const review = checks.reserve(() => reservation.promise);
+      await expect(checks.run({ mode: 'environment' }, true)).rejects.toThrow('Cannot test');
+      expect(test).not.toHaveBeenCalled();
+      reservation.resolve();
+      await review;
+      const active = checks.run({ mode: 'environment' }, true);
+      let closed = false;
+      const closing = checks.settle().then(() => {
+        closed = true;
+      });
+      await Promise.resolve();
+      expect(closed).toBe(false);
+      pending.resolve();
+      await Promise.all([active, closing]);
+      expect(closed).toBe(true);
+    } finally {
+      reservation.resolve();
+      pending.resolve();
+      test.mockRestore();
+    }
   });
 });

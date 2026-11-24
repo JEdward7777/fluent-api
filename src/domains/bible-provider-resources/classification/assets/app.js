@@ -1,3 +1,4 @@
+import { createDraftDatabaseTest } from './database-test.js';
 import { renderGuide as updateGuide } from './guide.js';
 import {
   initReportControls,
@@ -18,49 +19,71 @@ const analyze = document.getElementById('analyze');
 const stop = document.getElementById('stop');
 const inspection = document.getElementById('inspection');
 const databaseTest = document.getElementById('database-test');
-const databaseTestResult = document.getElementById('database-test-result');
-const databaseFields = document.getElementById('session-database-fields');
-const databasePasswordState = document.getElementById('database-password-state');
+const applySettings = document.getElementById('apply-settings');
+const databaseSettings = document.getElementById('database-settings');
+const settingsActionsHelp = document.getElementById('settings-actions-help');
 let setup;
 let dirty = false;
+let applyingSettings = false;
 let practiceBusy = false;
 let sessionUnconfirmed = false;
 const previewButton = document.getElementById('normal-preview-button');
 const attestation = document.getElementById('attestation');
 const reportTarget = document.getElementById('report-target');
+const draftDatabase = createDraftDatabaseTest(
+  form,
+  request,
+  confirmTestRevision,
+  updateDraftControls
+);
 
-function syncDatabaseFields() {
-  const fields = form.elements;
-  const selected = fields.databaseMode.value === 'session';
-  databaseFields.hidden = !selected;
-  for (const key of ['databaseHost', 'databasePort', 'databaseName', 'databaseUsername'])
-    fields[key].required = selected;
+function settingsRequestActive(next = setup) {
+  return applyingSettings || draftDatabase.running || next?.testingDatabase;
+}
 
-  const current = setup?.databaseConnection;
-  const retained = selected && current?.mode === 'session' && current.passwordRetained;
-  const sameConnection =
-    retained &&
-    fields.databaseHost.value.trim() === current.host &&
-    Number(fields.databasePort.value) === current.port &&
-    fields.databaseName.value.trim() === current.database &&
-    fields.databaseUsername.value.trim() === current.username &&
-    fields.databaseTls.value === current.tls;
-  const clearing = fields.databaseClearPassword.checked;
-  fields.databasePassword.placeholder = sameConnection && !clearing ? '••••••••' : '';
-  databasePasswordState.textContent = clearing
-    ? 'Applying these settings clears the password.'
-    : sameConnection
-      ? 'Password retained for this connection. Enter a password to replace it.'
-      : retained
-        ? 'Re-enter the password for the changed connection.'
-        : '';
+function workbenchBusy(next) {
+  return (
+    sessionUnconfirmed ||
+    saveStatusUnconfirmed() ||
+    Boolean(next.activeOperationId) ||
+    ['inspecting', 'analyzing', 'previewing', 'saving', 'exporting', 'reconfiguring'].includes(
+      next.state
+    )
+  );
+}
+
+function syncSettingsActions(next) {
+  const blocked = workbenchBusy(next) || settingsRequestActive(next);
+  databaseTest.disabled = blocked || next.practice || next.state === 'uncertain';
+  applySettings.disabled = blocked;
+  inspect.disabled =
+    blocked || dirty || !next.readyForInspect || !['configuring', 'error'].includes(next.state);
+  analyze.disabled = blocked || dirty || next.state !== 'inspected';
 }
 
 const renderGuide = (next) => updateGuide(next, { dirty, practiceBusy, sessionUnconfirmed });
 
-const previewFlags = () => ({ dirty, practiceBusy, sessionUnconfirmed });
+const previewFlags = () => ({
+  dirty,
+  practiceBusy,
+  sessionUnconfirmed,
+  settingsBusy: settingsRequestActive(),
+});
 const renderExactPreview = (next) => updateExactPreview(next, previewFlags());
 const syncPracticeDraftControls = () => updatePracticeDraftControls(setup, previewFlags());
+
+function syncReviewAvailability(next) {
+  renderExactPreview(next);
+  renderSave(next);
+  syncPracticeDraftControls();
+  setReviewBusy(
+    sessionUnconfirmed ||
+      saveStatusUnconfirmed() ||
+      practiceBusy ||
+      settingsRequestActive(next) ||
+      Boolean(next.activeOperationId)
+  );
+}
 
 async function request(path, method = 'GET', body, responseType = 'json') {
   const response = await fetch(`./api/${path}`, {
@@ -98,6 +121,7 @@ initReview(
 );
 function render(next, populate = false) {
   sessionUnconfirmed = false;
+  if (next.configurationRevision !== setup?.configurationRevision) draftDatabase.invalidate();
   setup = next;
   updateReview(next);
   if (populate) {
@@ -130,7 +154,7 @@ function render(next, populate = false) {
     form.elements.databaseClearPassword.checked = false;
     dirty = false;
   }
-  syncDatabaseFields();
+  draftDatabase.syncFields(setup?.databaseConnection);
   form.hidden = false;
   document.getElementById('practice-banner').hidden = !next.practice;
   document.getElementById('cli-details').hidden = next.practice;
@@ -159,13 +183,6 @@ function render(next, populate = false) {
     next.databaseConnection.mode === 'session'
       ? 'The CLI command below does not transfer this session database or its password. The CLI uses its own environment database connection.'
       : 'The CLI uses its environment database connection.';
-  databaseTestResult.textContent = next.practice
-    ? 'No database in offline practice.'
-    : next.databaseTest === 'passed'
-      ? `Connection passed for ${next.databaseTarget}`
-      : next.databaseTest === 'failed'
-        ? `Connection failed for ${next.databaseTarget}. Check the selected fields and TLS setting.`
-        : `Selected: ${next.databaseTarget}. Test before Inspect if you want to verify access.`;
   const step = ['inspected', 'analyzing'].includes(next.state)
     ? 'Analyze'
     : ['reviewing', 'previewing'].includes(next.state)
@@ -195,15 +212,11 @@ function render(next, populate = false) {
     ...(next.force ? ['--force'] : []),
     ...(next.preserveExistingNonUnknowns ? ['--preserve-existing-non-unknowns'] : []),
   ].join(' ');
-  const busy =
-    sessionUnconfirmed ||
-    saveStatusUnconfirmed() ||
-    Boolean(next.activeOperationId) ||
-    ['inspecting', 'analyzing', 'previewing', 'saving', 'exporting', 'reconfiguring'].includes(
-      next.state
-    );
+  const busy = workbenchBusy(next);
   for (const field of form.elements) field.disabled = busy;
-  databaseTest.disabled = busy || dirty || next.practice || next.testingDatabase;
+  syncSettingsActions(next);
+  databaseTest.hidden = next.practice;
+  settingsActionsHelp.hidden = next.practice;
   if (next.practice) {
     document.getElementById('database-settings').hidden = true;
     for (const key of [
@@ -222,12 +235,6 @@ function render(next, populate = false) {
       form.elements[key].disabled = true;
     form.elements.input.placeholder = 'Bundled example or an absolute saved JSON path';
   }
-  inspect.disabled =
-    busy ||
-    dirty ||
-    !next.readyForInspect ||
-    (next.state !== 'configuring' && next.state !== 'error');
-  analyze.disabled = busy || dirty || next.state !== 'inspected';
   stop.hidden = next.state !== 'analyzing';
   stop.disabled = next.state !== 'analyzing';
   inspection.hidden = !next.inspected;
@@ -251,19 +258,15 @@ function render(next, populate = false) {
   else if (next.latestOperation?.state === 'failed')
     status.textContent = next.latestOperation.error;
   else if (busy) status.textContent = `${next.state}… Reloading keeps the operation.`;
+  else if (dirty) status.textContent = 'Settings changed. Apply settings before inspecting.';
   else
     status.textContent = next.readyForInspect
       ? 'Settings ready. Click Inspect inputs.'
       : 'Choose settings and click Apply settings.';
   const practiceReview = document.getElementById('practice-review');
   practiceReview.hidden = !next.practice || !next.analysis;
-  renderExactPreview(next);
-  renderSave(next);
-  syncPracticeDraftControls();
+  syncReviewAvailability(next);
   renderGuide(next);
-  setReviewBusy(
-    sessionUnconfirmed || saveStatusUnconfirmed() || practiceBusy || Boolean(next.activeOperationId)
-  );
 }
 async function refresh() {
   render(await request('setup'));
@@ -271,24 +274,22 @@ async function refresh() {
     const operation = await request(`operations/${encodeURIComponent(setup.activeOperationId)}`);
     if (operation.state === 'running') window.setTimeout(refresh, 800);
     else render(await request('setup'));
-  }
+  } else if (setup.testingDatabase && !draftDatabase.running) window.setTimeout(refresh, 800);
 }
-form.addEventListener('input', () => {
-  syncDatabaseFields();
+form.addEventListener('input', (event) => {
+  draftDatabase.syncFields(setup?.databaseConnection);
+  if (databaseSettings.contains(event.target)) draftDatabase.invalidate();
   dirty = true;
-  databaseTest.disabled = true;
-  inspect.disabled = true;
-  analyze.disabled = true;
   if (setup) {
-    renderExactPreview(setup);
-    renderSave(setup);
-    syncPracticeDraftControls();
+    syncSettingsActions(setup);
+    syncReviewAvailability(setup);
     renderGuide(setup);
   }
   status.textContent = 'Settings changed. Apply settings before inspecting.';
 });
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (!setup || workbenchBusy(setup) || settingsRequestActive()) return;
   try {
     if (hasUnsavedReviewDraft()) {
       status.textContent = 'Apply or discard the open row edit before changing settings.';
@@ -302,6 +303,9 @@ form.addEventListener('submit', async (event) => {
       status.textContent = 'Check the discard box before replacing reviewed decisions.';
       return;
     }
+    applyingSettings = true;
+    syncSettingsActions(setup);
+    syncReviewAvailability(setup);
     status.textContent = 'Applying settings…';
     render(
       await request('setup', 'POST', {
@@ -319,49 +323,46 @@ form.addEventListener('submit', async (event) => {
         force: values.force.checked,
         noCache: values.noCache.checked,
         preserveExistingNonUnknowns: values.preserve.checked,
-        databaseConnection:
-          values.databaseMode.value === 'environment'
-            ? { mode: 'environment' }
-            : {
-                mode: 'session',
-                host: values.databaseHost.value,
-                port: Number(values.databasePort.value),
-                database: values.databaseName.value,
-                username: values.databaseUsername.value,
-                password: values.databaseClearPassword.checked ? '' : values.databasePassword.value,
-                clearPassword: values.databaseClearPassword.checked,
-                tls: values.databaseTls.value,
-              },
+        databaseConnection: draftDatabase.read(),
       }),
       true
     );
   } catch (error) {
     status.textContent = error.message;
+  } finally {
+    applyingSettings = false;
+    syncSettingsActions(setup);
+    syncReviewAvailability(setup);
   }
 });
-databaseTest.addEventListener('click', async () => {
-  if (!setup || dirty || sessionUnconfirmed || saveStatusUnconfirmed()) return;
-  databaseTest.disabled = true;
-  databaseTestResult.textContent = `Testing ${setup.databaseTarget}…`;
+async function confirmTestRevision(revision) {
   try {
-    render(
-      await request('database/test', 'POST', {
-        configurationRevision: setup.configurationRevision,
-      })
-    );
-  } catch (error) {
-    databaseTestResult.textContent = error.message;
-    try {
-      render(await request('setup'));
-      databaseTestResult.textContent = error.message;
-    } catch {
-      sessionUnconfirmed = true;
-      databaseTest.disabled = true;
+    const latest = await request('setup');
+    if (latest.configurationRevision === revision) {
+      render(latest);
+      return true;
     }
+    status.textContent = 'Review settings changed while testing. Reload before applying settings.';
+  } catch {
+    status.textContent = 'Session status is unavailable. Reload before applying settings.';
   }
+  sessionUnconfirmed = true;
+  return false;
+}
+
+function updateDraftControls() {
+  syncSettingsActions(setup);
+  syncReviewAvailability(setup);
+  if (setup.testingDatabase && !draftDatabase.running && !sessionUnconfirmed)
+    window.setTimeout(refresh, 800);
+}
+
+databaseTest.addEventListener('click', () => {
+  if (!setup || databaseTest.disabled || settingsRequestActive()) return;
+  void draftDatabase.run(setup.configurationRevision);
 });
 async function start(kind) {
-  if (sessionUnconfirmed || saveStatusUnconfirmed()) return;
+  if (sessionUnconfirmed || saveStatusUnconfirmed() || settingsRequestActive()) return;
   try {
     await request(kind, 'POST', {
       operationId: crypto.randomUUID(),
@@ -383,7 +384,14 @@ stop.addEventListener('click', async () => {
   }
 });
 async function practiceAction(path, body) {
-  if (practiceBusy || sessionUnconfirmed || saveStatusUnconfirmed() || dirty) return;
+  if (
+    practiceBusy ||
+    sessionUnconfirmed ||
+    saveStatusUnconfirmed() ||
+    dirty ||
+    settingsRequestActive()
+  )
+    return;
   if (hasUnsavedReviewDraft()) {
     status.textContent = 'Apply or discard the open row edit before previewing or saving.';
     return;
@@ -431,7 +439,7 @@ initSave({
   refresh,
   recover: recoverActionFailure,
   hasDraft: hasUnsavedReviewDraft,
-  isBlocked: () => sessionUnconfirmed || practiceBusy || dirty,
+  isBlocked: () => sessionUnconfirmed || practiceBusy || dirty || settingsRequestActive(),
   setPracticeBusy: (value) => {
     practiceBusy = value;
     setReviewBusy(value);
@@ -478,7 +486,7 @@ if (!token) {
 } else {
   try {
     render(await request('setup'), true);
-    if (setup.activeOperationId) await refresh();
+    if (setup.activeOperationId || setup.testingDatabase) await refresh();
   } catch (error) {
     status.textContent = error.message;
     document.getElementById('guide-next').textContent =

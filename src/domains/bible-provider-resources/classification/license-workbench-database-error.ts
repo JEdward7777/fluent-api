@@ -1,4 +1,4 @@
-type DatabaseFailureOperation = 'test' | 'inspect';
+type DatabaseFailureOperation = 'test' | 'draft-test' | 'inspect';
 
 function databaseErrorCodes(cause: unknown) {
   const pending = [cause];
@@ -15,7 +15,11 @@ function databaseErrorCodes(cause: unknown) {
   return codes;
 }
 
-function guidance(cause: unknown, tls?: 'session' | 'environment') {
+function guidance(
+  operation: DatabaseFailureOperation,
+  cause: unknown,
+  tls?: 'session' | 'environment'
+) {
   const codes = databaseErrorCodes(cause);
   const has = (...values: string[]) => values.some((value) => codes.has(value));
   if (has('DATABASE_URL_MISSING')) return 'Set DATABASE_URL or select a session connection.';
@@ -47,8 +51,13 @@ function guidance(cause: unknown, tls?: 'session' | 'environment') {
   if (has('ECONNRESET', 'CONNECTION_CLOSED', 'ERR_SSL_WRONG_VERSION_NUMBER')) {
     const disconnected =
       'The server closed the connection. Check the host, port and PostgreSQL TLS configuration.';
-    if (tls === 'session')
-      return `${disconnected} If this trusted local PostgreSQL server has TLS disabled, select “Disable TLS (local/trusted connections only)”, re-enter the password, apply settings and retest.`;
+    if (tls === 'session') {
+      const next =
+        operation === 'draft-test'
+          ? 're-enter the password and retest'
+          : 're-enter the password, apply settings and retest';
+      return `${disconnected} If this trusted local PostgreSQL server has TLS disabled, select “Disable TLS (local/trusted connections only)”, ${next}.`;
+    }
     if (tls === 'environment')
       return `${disconnected} For a trusted local server without TLS, set sslmode=disable and remove sslrootcert=system if present in DATABASE_URL.`;
     return disconnected;
@@ -62,8 +71,8 @@ export class LicenseWorkbenchDatabaseError extends Error {
     cause: unknown,
     tls?: 'session' | 'environment'
   ) {
-    const prefix = operation === 'test' ? 'Connection failed.' : 'Database inspection failed.';
-    super(`${prefix} ${guidance(cause, tls)}`, { cause });
+    const prefix = operation === 'inspect' ? 'Database inspection failed.' : 'Connection failed.';
+    super(`${prefix} ${guidance(operation, cause, tls)}`, { cause });
     this.name = 'LicenseWorkbenchDatabaseError';
   }
 }
