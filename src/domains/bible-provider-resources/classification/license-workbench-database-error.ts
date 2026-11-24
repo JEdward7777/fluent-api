@@ -50,7 +50,7 @@ function guidance(cause: unknown, tls?: 'session' | 'environment') {
     if (tls === 'session')
       return `${disconnected} If this trusted local PostgreSQL server has TLS disabled, select “Disable TLS (local/trusted connections only)”, re-enter the password, apply settings and retest.`;
     if (tls === 'environment')
-      return `${disconnected} For a trusted local server without TLS, use sslmode=disable in DATABASE_URL.`;
+      return `${disconnected} For a trusted local server without TLS, set sslmode=disable and remove sslrootcert=system if present in DATABASE_URL.`;
     return disconnected;
   }
   return 'Check the selected host, port, credentials, TLS setting and database schema.';

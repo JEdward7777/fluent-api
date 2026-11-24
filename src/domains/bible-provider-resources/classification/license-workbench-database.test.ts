@@ -178,7 +178,7 @@ describe('sanitized database failure guidance', () => {
     ).toContain('If this trusted local PostgreSQL server has TLS disabled');
     expect(
       new LicenseWorkbenchDatabaseError('inspect', error('ECONNRESET'), 'environment').message
-    ).toContain('a trusted local server without TLS');
+    ).toContain('set sslmode=disable and remove sslrootcert=system if present');
     expect(new LicenseWorkbenchDatabaseError('test', error('ECONNRESET')).message).not.toContain(
       'Disable TLS'
     );
