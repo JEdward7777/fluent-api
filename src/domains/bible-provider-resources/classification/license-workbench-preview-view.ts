@@ -44,10 +44,18 @@ export function licenseWorkbenchPreviewView(input: {
     requiresForceAgreement: preview.plan.requiresForceAgreement,
     conflicts: preview.plan.conflicts,
     json: preview.plan.jsonArtifact
-      ? { operation: options.source === 'json' ? 'overwrite' : 'sync', ...preview.plan.jsonChanges }
+      ? {
+          operation:
+            (preview.plan.overwriteJson ?? options.source === 'json') ? 'overwrite' : 'sync',
+          ...preview.plan.jsonChanges,
+        }
       : null,
     database: preview.plan.databaseArtifact
       ? {
+          identityExplanation:
+            preview.plan.databaseProof?.mode === 'unavailable'
+              ? 'Database identity could not be verified. Sync preserves stronger destination decisions.'
+              : undefined,
           operation: preview.plan.replace ? 'overwrite' : 'sync',
           ...preview.plan.databaseChanges,
         }

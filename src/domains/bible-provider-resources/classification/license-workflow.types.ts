@@ -2,6 +2,7 @@ import type { LlmTransport } from '@/lib/llm/structured-request';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseDatabaseAdapter, LicenseDatabaseSnapshot } from './license-database.types';
+import type { LicenseFileIdentity } from './license-file-identity';
 import type { LicensePracticeCapability } from './license-practice';
 import type { LicensePreflight } from './license-preflight';
 import type { LicenseSavePlan } from './license-save-plan';
@@ -28,6 +29,8 @@ export interface LicenseInspection {
   inspectedAt: string;
   sourceOnly?: true;
   skipOutput?: boolean;
+  inputIdentity?: LicenseFileIdentity;
+  outputIdentity?: LicenseFileIdentity;
   inputBytes: string | null;
   outputBytes: string | null;
   database?: LicenseDatabaseSnapshot;

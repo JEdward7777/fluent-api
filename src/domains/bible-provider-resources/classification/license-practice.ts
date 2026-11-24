@@ -11,6 +11,7 @@ import {
   createLicenseArtifact,
   serializeLicenseArtifact,
 } from '../license-artifact';
+import { inspectLicenseFile, reviewerJsonRoot } from './license-file-identity';
 import { LicenseWorkflow } from './license-workflow';
 
 export interface LicensePractice {
@@ -39,7 +40,10 @@ export function isIssuedLicensePractice(value: unknown): value is LicensePractic
 export async function createLicensePractice(selectedPath: string | null): Promise<LicensePractice> {
   const bundled = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'practice-example.json');
   const selectedSource = selectedPath ? resolve(selectedPath) : bundled;
-  const originalBytes = await readFile(selectedSource, 'utf8');
+  const source = selectedPath
+    ? (await inspectLicenseFile(selectedSource, reviewerJsonRoot())).canonical
+    : bundled;
+  const originalBytes = await readFile(source, 'utf8');
   const checked = checkLicenseArtifactReview(JSON.parse(originalBytes));
   if (checked.status === 'invalid')
     throw new Error(`Practice source is invalid: ${checked.reason}`);

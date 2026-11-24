@@ -7,6 +7,7 @@ import type { LicenseInspection, LicenseWorkflowDependencies } from './license-w
 import { savedLicenseNotices } from '../license-normalizer';
 import { freezeReviewValue } from '../license-review-revision';
 import { analyzeDatabaseLicenses } from './license-analysis';
+import { inspectLicenseFile, matchesLicenseFile, reviewerJsonRoot } from './license-file-identity';
 import { isIssuedLicensePractice } from './license-practice';
 import { inspectLicensePreflight } from './license-preflight';
 import { parseLicenseArtifactBytes } from './license-workflow-freshness';
@@ -78,21 +79,37 @@ export async function inspectLicenseWorkflowInputs(input: {
     }
   }
   if (database) input.onDatabase?.(database);
-  const loaded = await database?.load();
+  const loaded =
+    options.source === 'database' && database?.loadSource
+      ? await database.loadSource()
+      : await database?.load();
   const snapshot = loaded ? freezeReviewValue(loaded) : undefined;
   if (!sourceOnly && options.destination !== 'json' && !snapshot?.tableExists)
     throw new Error(
       'The license_classifications table must exist before a database destination can be used'
     );
-  const inputBytes = options.source === 'json' ? await readJsonSource(fs, options.input) : null;
+  const inputIdentity =
+    options.source === 'json' && fs === licenseFileIo
+      ? await inspectLicenseFile(options.input, reviewerJsonRoot(dependencies.practice))
+      : undefined;
+  const inputBytes =
+    options.source === 'json'
+      ? await readJsonSource(fs, inputIdentity?.canonical ?? options.input)
+      : null;
   if (options.source === 'json' && inputBytes === null)
     throw new Error(`JSON source not found: ${options.input}`);
+  if (inputIdentity && !(await matchesLicenseFile(inputIdentity)))
+    throw new Error('JSON source changed during load');
   const samePath = resolve(options.output) === resolve(options.input);
+  const outputIdentity =
+    !sourceOnly && fs === licenseFileIo
+      ? await inspectLicenseFile(options.output, reviewerJsonRoot(dependencies.practice))
+      : undefined;
   const outputBytes = sourceOnly
     ? null
     : samePath && options.source === 'json'
       ? inputBytes
-      : await fs.read(options.output);
+      : await fs.read(outputIdentity?.canonical ?? options.output);
   const preflight = await inspectLoadedLicensePreflight(options, {
     inputBytes,
     outputBytes,
@@ -104,6 +121,8 @@ export async function inspectLicenseWorkflowInputs(input: {
       configurationRevision: input.configurationRevision,
       inspectedAt: dependencies.now?.() ?? new Date().toISOString(),
       ...(sourceOnly ? { sourceOnly: true as const } : {}),
+      inputIdentity,
+      outputIdentity,
       inputBytes,
       outputBytes,
       preflight,

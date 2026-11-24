@@ -134,18 +134,36 @@ export async function testWorkbenchDatabase(
   }
 }
 
-export async function ownedWorkbenchDatabase(connection: WorkbenchDatabase) {
+export async function ownedWorkbenchDatabase(
+  connection: WorkbenchDatabase,
+  role: 'source' | 'destination' = 'destination'
+) {
   const { createOwnedLicenseDatabaseAdapter } = await import('./license-classifications.service');
   try {
     const adapter = createOwnedLicenseDatabaseAdapter(
       workbenchDatabaseUrl(connection),
-      connection.mode === 'session' ? () => connection.password : undefined
+      connection.mode === 'session' ? () => connection.password : undefined,
+      role
     );
     return {
       ...adapter,
-      async load() {
+      async inspectTarget(challenge?: Parameters<NonNullable<typeof adapter.inspectTarget>>[0]) {
         try {
-          return await adapter.load();
+          return await adapter.inspectTarget!(challenge);
+        } catch (error) {
+          throw new LicenseWorkbenchDatabaseError('inspect', error, configuredTls(connection));
+        }
+      },
+      async loadSource() {
+        try {
+          return await adapter.loadSource!();
+        } catch (error) {
+          throw new LicenseWorkbenchDatabaseError('inspect', error, configuredTls(connection));
+        }
+      },
+      async load(selected?: 'source') {
+        try {
+          return await adapter.load(selected);
         } catch (error) {
           throw new LicenseWorkbenchDatabaseError('inspect', error, configuredTls(connection));
         }

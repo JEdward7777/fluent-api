@@ -258,7 +258,13 @@ describe('license command source/destination and responsibility boundary', () =>
         reviewedAt: null,
       }));
       expect(
-        await runLicenseCommand({ ...f.options, source: 'database', destination }, f.dependencies)
+        await runLicenseCommand(
+          { ...f.options, source: 'database', destination },
+          {
+            ...f.dependencies,
+            database: async () => ({ ...f.adapter, prove: async () => ({ mode: 'same' }) }),
+          }
+        )
       ).toBe(0);
       expect(f.dependencies.transport).not.toHaveBeenCalled();
       expect(

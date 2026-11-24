@@ -13,6 +13,7 @@ import type { LicenseFileIo } from './license-write';
 
 import { freezeReviewValue } from '../license-review-revision';
 import { LicensePolicyDriftError } from './license-database.types';
+import { matchesLicenseFile } from './license-file-identity';
 import {
   LicenseDestinationRecheckError,
   LicenseInspectionStaleError,
@@ -20,6 +21,13 @@ import {
   requireFreshLicenseSources,
 } from './license-freshness';
 import { LicenseFileDriftError, licenseFileIo, writeLicenseDestinations } from './license-write';
+
+export async function requirePreviewFileIdentities(plan: LicensePreview['plan']) {
+  for (const identity of [plan.sourceIdentity, plan.targetIdentity]) {
+    if (identity && !(await matchesLicenseFile(identity)))
+      throw new LicenseFileDriftError(identity.path);
+  }
+}
 
 export class LicenseSavePreflightError extends Error {
   constructor(cause: unknown) {
@@ -77,7 +85,12 @@ export async function writePreviewedLicenseSave(input: {
     throw new LicenseSavePreflightError(error);
   }
   if (input.loadedSource)
-    await requireFreshLicenseDestination(inspection, options, fs ?? licenseFileIo, database);
+    await requireFreshLicenseDestination(
+      inspection,
+      options,
+      fs ?? licenseFileIo,
+      options.destination === 'json' ? undefined : database
+    );
   await writeLicenseDestinations({
     artifact: preview.plan.databaseArtifact ?? analysis.artifact,
     fileArtifact: preview.plan.jsonArtifact,
@@ -85,6 +98,20 @@ export async function writePreviewedLicenseSave(input: {
     database: options.destination !== 'json' ? database : undefined,
     replace: preview.plan.replace,
     force: false,
+    databaseIdentity:
+      preview.plan.targetMarker ||
+      preview.plan.databaseProof ||
+      inspection.database?.relation !== undefined
+        ? {
+            marker: preview.plan.targetMarker,
+            expected: preview.plan.databaseProof,
+            target: inspection.database?.relation,
+            challenge: (input.loadedSource?.database ?? database)?.challenge?.(
+              (input.loadedSource?.inspection ?? inspection).database?.sourceMarker
+            ),
+          }
+        : undefined,
+    checkFileIdentities: () => requirePreviewFileIdentities(preview.plan),
     fs,
     expectedFiles: preview.plan.expectedFiles,
     expectedPolicy:

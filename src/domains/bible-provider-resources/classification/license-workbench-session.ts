@@ -69,7 +69,8 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       candidate = new LicenseWorkflow(this.options, {
         apiKey: this.injected?.apiKey ?? licenseApiKey(),
         database:
-          this.injected?.database ?? (async () => ownedWorkbenchDatabase(this.databaseConnection)),
+          this.injected?.database ??
+          (async () => ownedWorkbenchDatabase(this.databaseConnection, 'source')),
         destinationDatabase:
           this.injected?.destinationDatabase ??
           this.injected?.database ??

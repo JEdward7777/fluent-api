@@ -17,6 +17,7 @@ import { licenseKeyDigest } from './license-eligibility';
 import { inspectLicensePreflight } from './license-preflight';
 import { LicenseWorkflow } from './license-workflow';
 import { parseLicenseArtifactBytes } from './license-workflow-freshness';
+import { requirePreviewFileIdentities } from './license-workflow-save';
 import { licenseFileIo, writeLicenseDestinations } from './license-write';
 
 interface CommandDependencies {
@@ -51,12 +52,7 @@ export async function runLicenseCommand(
     workflow = new LicenseWorkflow(options, {
       apiKey: dependencies.apiKey,
       fs,
-      database:
-        dependencies.database ??
-        (() =>
-          import('./license-classifications.service').then((module) =>
-            module.createLicenseDatabaseAdapter()
-          )),
+      database: dependencies.database,
       transport: dependencies.transport,
       now: dependencies.now,
     });
@@ -192,7 +188,7 @@ export async function runLicenseCommand(
       preview.plan.jsonArtifact
         ? changes(
             'JSON',
-            options.source === 'json' ? 'overwrite' : 'sync',
+            preview.plan.overwriteJson ? 'overwrite' : 'sync',
             preview.plan.jsonChanges
           )
         : 'JSON remains unchanged'
@@ -201,7 +197,7 @@ export async function runLicenseCommand(
       preview.plan.databaseArtifact
         ? changes(
             'Database',
-            options.source === 'database' ? 'overwrite' : 'sync',
+            preview.plan.replace ? 'overwrite' : 'sync',
             preview.plan.databaseChanges
           )
         : 'Database remains unchanged'
@@ -209,6 +205,10 @@ export async function runLicenseCommand(
     await io.write(
       `Planned JSON SHA-256: ${preview.plan.wholeFileHash}; review hash: ${preview.plan.reviewContentHash}`
     );
+    if (preview.plan.databaseProof?.mode === 'unavailable')
+      await io.write(
+        'Database identity could not be verified. Sync preserves stronger destination decisions.'
+      );
     if (preview.plan.conflicts.length) {
       await io.write(`Save conflicts: ${preview.plan.conflicts.join('; ')}`);
       return 3;
@@ -222,6 +222,7 @@ export async function runLicenseCommand(
           replace: false,
           fs,
           expectedFiles: preview.plan.expectedFiles,
+          checkFileIdentities: () => requirePreviewFileIdentities(preview.plan),
         });
       if (options.openReport) {
         const html = preview.reports.reports.find((report) => report.format === 'html');

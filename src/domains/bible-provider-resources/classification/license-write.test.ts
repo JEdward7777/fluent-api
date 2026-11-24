@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { readFile, writeFile } from 'node:fs/promises';
+import { copyFile, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { makeCommandFixture } from './license-command.test-fixtures';
@@ -21,6 +21,33 @@ afterEach(async () => {
 });
 
 describe('bounded file/database compensation', () => {
+  it.each([null, 'prior file'])(
+    'preserves a byte-identical external inode during compensation (prior %s)',
+    async (previous) => {
+      const f = await fixture();
+      if (previous !== null) await writeFile(f.output, previous);
+      let externalInode: bigint | undefined;
+      f.adapter.apply.mockImplementation(async (_artifact, _replace, publish) => {
+        await publish?.();
+        const replacement = `${f.output}.external`;
+        await copyFile(f.output, replacement);
+        await rename(replacement, f.output);
+        externalInode = (await stat(f.output, { bigint: true })).ino;
+        throw new Error('commit failed');
+      });
+      await expect(
+        writeLicenseDestinations({
+          artifact: f.artifact,
+          files: [{ path: f.output, previous }],
+          database: f.adapter,
+          replace: false,
+          expectedFiles: [{ path: f.output, bytes: previous }],
+        })
+      ).rejects.toMatchObject({ recovery: { diverged: true, affectedPaths: [f.output] } });
+      expect((await stat(f.output, { bigint: true })).ino).toBe(externalInode);
+    }
+  );
+
   it('rejects invalid UTF-8 before an exact byte baseline can be recorded', async () => {
     const f = await fixture();
     await writeFile(f.output, Buffer.from([255]));

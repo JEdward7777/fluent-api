@@ -7,11 +7,18 @@ import { hashCanonicalJson } from '@/lib/llm/canonical-json';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type {
+  LicenseDatabaseAdapter,
   LicenseDatabaseSnapshot,
   StoredLicenseClassification,
 } from './license-database.types';
 
 import { catalogLicenseNotices, indexLicenseNoticeExamples } from '../license-normalizer';
+import {
+  availableLicenseRelation,
+  proveLicenseDatabase,
+  sameDatabaseProof,
+  sameLicenseRelation,
+} from './license-database-identity';
 import { selectLicenseMaintenanceRows } from './license-database-projection';
 import { LicensePolicyDriftError } from './license-database.types';
 import { readStoredLicenseClassification } from './license-stored-decision';
@@ -24,7 +31,7 @@ export async function getClassifications(tx?: DbTransaction | LicenseDb) {
 }
 
 export async function loadClassificationSnapshot(
-  database?: LicenseDb,
+  database?: LicenseDb | DbTransaction,
   logging?: Pick<typeof import('@/lib/logger').logger, 'warn'>
 ): Promise<LicenseDatabaseSnapshot> {
   const connection = database ?? (await import('@/db')).db;
@@ -78,13 +85,42 @@ export async function applyClassifications(
   beforeCommit?: () => Promise<void>,
   _force = false,
   expectedPolicy?: StoredLicenseClassification[],
-  database?: LicenseDb
+  database?: LicenseDb,
+  identity?: Parameters<LicenseDatabaseAdapter['apply']>[5]
 ) {
   const connection = database ?? (await import('@/db')).db;
   await connection.transaction(async (tx) => {
+    if (identity) {
+      await tx.execute(sql`SET LOCAL lock_timeout = '3s'`);
+      await tx.execute(sql`SET LOCAL statement_timeout = '6s'`);
+      if (identity.marker) {
+        const [row] = await tx.execute<{ marker: string | null }>(
+          sql`SELECT current_setting('fluent.license_target_preview', true) AS marker`
+        );
+        if (row.marker !== identity.marker)
+          throw new LicensePolicyDriftError(
+            'The previewed database connection changed since preview; prepare a new preview'
+          );
+      }
+      await tx.execute(sql`LOCK TABLE license_classifications IN SHARE ROW EXCLUSIVE MODE`);
+      if (
+        identity.target !== undefined &&
+        !sameLicenseRelation(await availableLicenseRelation(tx), identity.target)
+      )
+        throw new LicensePolicyDriftError(
+          'The database target or its identity proof changed since preview; prepare a new preview'
+        );
+      if (
+        identity.expected &&
+        !sameDatabaseProof(await proveLicenseDatabase(tx, identity.challenge), identity.expected)
+      )
+        throw new LicensePolicyDriftError(
+          'The database target or its identity proof changed since preview; prepare a new preview'
+        );
+    }
     // Serialize initialization/replacement with ordinary table writes, including the
     // empty-table case where no row exists to lock. This enforces --force at apply.
-    if (replace || expectedPolicy)
+    if (!identity && (replace || expectedPolicy))
       await tx.execute(sql`LOCK TABLE license_classifications IN SHARE ROW EXCLUSIVE MODE`);
     const existing = new Map(
       (await getClassifications(tx)).map((row) => [row.normalizedText, row])

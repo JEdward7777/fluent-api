@@ -94,6 +94,7 @@ export function planLicenseSaveDestinations(input: {
   artifact: LicenseArtifact;
   outputBytes: string | null;
   databaseRows?: StoredLicenseClassification[];
+  overwriteJson?: boolean;
   overwriteDatabase?: boolean;
 }): DestinationDecisionPlan {
   const { source, destination, artifact } = input;
@@ -103,7 +104,7 @@ export function planLicenseSaveDestinations(input: {
     conflicts: [],
   };
   if (destination !== 'database') {
-    if (source === 'json') {
+    if (input.overwriteJson ?? source === 'json') {
       result.jsonArtifact = artifact;
       result.jsonChanges.updated = artifact.classifications.map((row) => row.normalizedText);
     } else {

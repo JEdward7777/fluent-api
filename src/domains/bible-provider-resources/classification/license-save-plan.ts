@@ -17,6 +17,11 @@ export interface LicenseSaveTarget {
 }
 
 export interface LicenseSavePlan extends DestinationDecisionPlan {
+  sourceIdentity?: import('./license-file-identity').LicenseFileIdentity;
+  targetIdentity?: import('./license-file-identity').LicenseFileIdentity;
+  targetMarker?: string;
+  databaseProof?: import('./license-database-identity').DatabaseProof;
+  overwriteJson?: boolean;
   targets: LicenseSaveTarget[];
   expectedFiles: { path: string; bytes: string | null }[];
   replace: boolean;
@@ -34,6 +39,7 @@ export function buildLicenseSavePlan(input: {
   inputBytes: string | null;
   outputBytes: string | null;
   database?: LicenseDatabaseSnapshot;
+  overwriteJson?: boolean;
   overwriteDatabase?: boolean;
   inspectOutput?: boolean;
 }): LicenseSavePlan {
@@ -45,6 +51,7 @@ export function buildLicenseSavePlan(input: {
     artifact,
     outputBytes,
     databaseRows: database?.classifications,
+    overwriteJson: input.overwriteJson,
     overwriteDatabase: input.overwriteDatabase,
   });
   const reportingArtifact = destinations.databaseForecast ?? destinations.jsonArtifact ?? artifact;
@@ -85,6 +92,7 @@ export function buildLicenseSavePlan(input: {
   const output = serializeLicenseArtifact(destinations.jsonArtifact ?? artifact);
   return {
     ...destinations,
+    overwriteJson: input.overwriteJson,
     targets,
     expectedFiles,
     replace:

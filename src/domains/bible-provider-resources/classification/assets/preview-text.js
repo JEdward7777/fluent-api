@@ -17,6 +17,7 @@ export function licenseWorkbenchPreviewLines(next) {
     preview.database
       ? `Database ${preview.database.operation}: ${preview.database.inserted.length} inserts, ${preview.database.updated.length} updates, ${preview.database.preserved.length} preserved, ${preview.database.unchanged.length} unchanged; no deletes or resource-cache writes.`
       : 'Database remains unchanged.',
+    ...(preview.database?.identityExplanation ? [preview.database.identityExplanation] : []),
     ...(preview.conflicts ?? []).map((conflict) => `Save conflict: ${conflict}`),
     preview.policy
       ? `Policy diff: ${preview.policy.inserts.length} inserts, ${preview.policy.updates.length} updates, ${preview.policy.deletes.length} deletes.`

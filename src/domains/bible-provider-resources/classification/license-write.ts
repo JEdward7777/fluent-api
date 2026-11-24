@@ -1,15 +1,18 @@
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseDatabaseAdapter, StoredLicenseClassification } from './license-database.types';
+import type { LicenseFileIdentity } from './license-file-identity';
 
 import { checkLicenseArtifactReview, serializeLicenseArtifact } from '../license-artifact';
 import { LicensePolicyDriftError } from './license-database.types';
+import { inspectLicenseFile } from './license-file-identity';
 
 export interface LicenseFileIo {
+  identity?: (path: string) => Promise<LicenseFileIdentity>;
   read: (path: string) => Promise<string | null>;
   write: (path: string, bytes: string) => Promise<void>;
   rename: (from: string, to: string) => Promise<void>;
@@ -46,6 +49,7 @@ export class LicenseWriteUncertainError extends Error {
   }
 }
 export const licenseFileIo: LicenseFileIo = {
+  identity: inspectLicenseFile,
   read: async (path) => {
     try {
       const bytes = await readFile(path);
@@ -78,6 +82,8 @@ export async function writeLicenseDestinations(options: {
   /** Invocation-scoped source and target bytes. Omit to preserve legacy CLI behavior. */
   expectedFiles?: LicenseExpectedFile[];
   expectedPolicy?: StoredLicenseClassification[];
+  databaseIdentity?: Parameters<LicenseDatabaseAdapter['apply']>[5];
+  checkFileIdentities?: () => Promise<void>;
 }) {
   const fs = options.fs ?? licenseFileIo;
   // A DB delta contains only selected keys and is not a standalone JSON artifact.
@@ -102,10 +108,12 @@ export async function writeLicenseDestinations(options: {
     path: string;
     temporary: string;
     previous: string | null;
+    stagedIdentity?: LicenseFileIdentity;
     replaced: boolean;
     retained: boolean;
   }[] = [];
   const requireExpectedFiles = async () => {
+    await options.checkFileIdentities?.();
     for (const file of expected ?? []) {
       const published = staged.some(
         (candidate) => candidate.path === file.path && candidate.replaced
@@ -120,8 +128,15 @@ export async function writeLicenseDestinations(options: {
     for (const file of options.files) {
       await fs.mkdir(dirname(file.path));
       const temporary = `${file.path}.${randomUUID()}.tmp`;
-      staged.push({ ...file, temporary, replaced: false, retained: false });
+      const stagedFile: (typeof staged)[number] = {
+        ...file,
+        temporary,
+        replaced: false,
+        retained: false,
+      };
+      staged.push(stagedFile);
       await fs.write(temporary, bytes);
+      stagedFile.stagedIdentity = await fs.identity?.(temporary);
     }
     await requireExpectedFiles();
     const publish = async () => {
@@ -139,7 +154,8 @@ export async function writeLicenseDestinations(options: {
         options.replace,
         publish,
         options.force,
-        options.expectedPolicy
+        options.expectedPolicy,
+        ...(options.databaseIdentity ? ([options.databaseIdentity] as const) : [])
       );
     else await publish();
   } catch (cause) {
@@ -168,7 +184,20 @@ export async function writeLicenseDestinations(options: {
     for (const file of [...staged].reverse()) {
       if (!file.replaced) continue;
       try {
-        if (expected && (await fs.read(file.path)) !== bytes) {
+        const stillPublished = async () => {
+          if (file.stagedIdentity && fs.identity) {
+            const current = await fs.identity(file.path);
+            const path = join(dirname(file.stagedIdentity.canonical), basename(file.path));
+            if (
+              current.canonical !== path ||
+              current.inode !== file.stagedIdentity.inode ||
+              current.links !== file.stagedIdentity.links
+            )
+              return false;
+          }
+          return !expected || (await fs.read(file.path)) === bytes;
+        };
+        if (!(await stillPublished())) {
           // Preserve the external edit and both known revisions for manual reconciliation.
           await preserveRecovery(file);
           failures.push(file.path);
@@ -177,6 +206,11 @@ export async function writeLicenseDestinations(options: {
         if (file.previous === null) await fs.remove(file.path);
         else {
           await fs.write(file.temporary, file.previous);
+          if (!(await stillPublished())) {
+            await preserveRecovery(file);
+            failures.push(file.path);
+            continue;
+          }
           await fs.rename(file.temporary, file.path);
         }
       } catch {

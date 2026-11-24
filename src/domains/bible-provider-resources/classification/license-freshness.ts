@@ -2,9 +2,13 @@ import { resolve } from 'node:path';
 
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter, LicenseDatabaseSnapshot } from './license-database.types';
+import type { LicenseFileIdentity } from './license-file-identity';
 import type { LicenseFileIo } from './license-write';
 
+import { matchesLicenseFile } from './license-file-identity';
 interface InspectedSources {
+  inputIdentity?: LicenseFileIdentity;
+  outputIdentity?: LicenseFileIdentity;
   sourceOnly?: true;
   skipOutput?: boolean;
   inputBytes: string | null;
@@ -23,6 +27,7 @@ function comparableDatabase(snapshot: LicenseDatabaseSnapshot | undefined) {
   if (!snapshot) return undefined;
   const byBytes = <T>(rows: T[]) => rows.map((row) => JSON.stringify(row)).sort();
   return {
+    relation: snapshot.relation,
     tableExists: snapshot.tableExists,
     classifications: byBytes(snapshot.classifications),
     context: { ...snapshot.context, resources: byBytes(snapshot.context.resources) },
@@ -38,19 +43,28 @@ export async function requireFreshLicenseSources(
   destinationOnly = false
 ) {
   const checkInput = !destinationOnly && options.source === 'json';
-  const inputBytes = checkInput ? await fs.read(options.input) : null;
+  if (checkInput && inspected.inputIdentity && !(await matchesLicenseFile(inspected.inputIdentity)))
+    throw new LicenseInspectionStaleError();
+  if (inspected.outputIdentity && !(await matchesLicenseFile(inspected.outputIdentity)))
+    throw new LicenseInspectionStaleError();
+  const inputBytes = checkInput
+    ? await fs.read(inspected.inputIdentity?.canonical ?? options.input)
+    : null;
   const outputBytes =
     inspected.sourceOnly || inspected.skipOutput
       ? null
       : resolve(options.output) === resolve(options.input) && checkInput
         ? inputBytes
-        : await fs.read(options.output);
+        : await fs.read(inspected.outputIdentity?.canonical ?? options.output);
   if (
     (!destinationOnly && inputBytes !== inspected.inputBytes) ||
     outputBytes !== inspected.outputBytes
   )
     throw new LicenseInspectionStaleError();
-  const database = adapter ? await adapter.load() : undefined;
+  const database =
+    !destinationOnly && options.source === 'database' && adapter?.loadSource
+      ? await adapter?.load('source')
+      : await adapter?.load();
   if (
     JSON.stringify(comparableDatabase(database)) !==
     JSON.stringify(comparableDatabase(inspected.database))
