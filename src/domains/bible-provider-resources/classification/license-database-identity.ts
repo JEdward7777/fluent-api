@@ -28,7 +28,7 @@ export interface DatabaseProof {
   target?: LicenseRelation;
 }
 
-export async function readLicenseRelation(tx: IdentityTransaction): Promise<LicenseRelation> {
+async function readLicenseRelation(tx: IdentityTransaction): Promise<LicenseRelation> {
   const [row] = await tx.execute<{ database: string; relation: string; schema: string }>(sql`
     SELECT d.oid::text AS database, c.oid::text AS relation, n.nspname AS schema
     FROM pg_database d, pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
