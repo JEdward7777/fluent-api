@@ -27,7 +27,7 @@ const help = [
   ],
   [
     '#setup [name="databasePassword"]',
-    'Masked database password. It stays only in server session memory after Apply and is never shown again. A blank field retains it only if the other connection fields are unchanged.',
+    'Dots indicate a retained password. Enter a password to replace it. A blank field retains the password when the connection details and TLS setting stay the same.',
   ],
   [
     '#setup [name="databaseClearPassword"]',

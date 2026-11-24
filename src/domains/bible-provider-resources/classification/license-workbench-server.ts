@@ -16,6 +16,7 @@ import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
 import { LICENSE_REPORT_HTML_CSP } from '../license-report-html';
 import { describeLicenseReportPath } from './license-reviewer-container';
+import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
 import { operationSchema, setupSchema } from './license-workbench-schema';
 import { LicenseWorkbenchSession } from './license-workbench-session';
 
@@ -128,7 +129,8 @@ function createLicenseWorkbenchApp(
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       return c.text(
-        message.includes('Configuration changed') ||
+        error instanceof LicenseWorkbenchDatabaseError ||
+          message.includes('Configuration changed') ||
           message.includes('Cannot test') ||
           message.includes('Practice cannot') ||
           message.includes('Save outcome uncertain')

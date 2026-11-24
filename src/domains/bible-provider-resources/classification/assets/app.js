@@ -20,6 +20,7 @@ const inspection = document.getElementById('inspection');
 const databaseTest = document.getElementById('database-test');
 const databaseTestResult = document.getElementById('database-test-result');
 const databaseFields = document.getElementById('session-database-fields');
+const databasePasswordState = document.getElementById('database-password-state');
 let setup;
 let dirty = false;
 let practiceBusy = false;
@@ -29,10 +30,30 @@ const attestation = document.getElementById('attestation');
 const reportTarget = document.getElementById('report-target');
 
 function syncDatabaseFields() {
-  const selected = form.elements.databaseMode.value === 'session';
+  const fields = form.elements;
+  const selected = fields.databaseMode.value === 'session';
   databaseFields.hidden = !selected;
   for (const key of ['databaseHost', 'databasePort', 'databaseName', 'databaseUsername'])
-    form.elements[key].required = selected;
+    fields[key].required = selected;
+
+  const current = setup?.databaseConnection;
+  const retained = selected && current?.mode === 'session' && current.passwordRetained;
+  const sameConnection =
+    retained &&
+    fields.databaseHost.value.trim() === current.host &&
+    Number(fields.databasePort.value) === current.port &&
+    fields.databaseName.value.trim() === current.database &&
+    fields.databaseUsername.value.trim() === current.username &&
+    fields.databaseTls.value === current.tls;
+  const clearing = fields.databaseClearPassword.checked;
+  fields.databasePassword.placeholder = sameConnection && !clearing ? '••••••••' : '';
+  databasePasswordState.textContent = clearing
+    ? 'Applying these settings clears the password.'
+    : sameConnection
+      ? 'Password retained for this connection. Enter a password to replace it.'
+      : retained
+        ? 'Re-enter the password for the changed connection.'
+        : '';
 }
 
 const renderGuide = (next) => updateGuide(next, { dirty, practiceBusy, sessionUnconfirmed });
@@ -107,9 +128,9 @@ function render(next, populate = false) {
     }
     form.elements.databasePassword.value = '';
     form.elements.databaseClearPassword.checked = false;
-    syncDatabaseFields();
     dirty = false;
   }
+  syncDatabaseFields();
   form.hidden = false;
   document.getElementById('practice-banner').hidden = !next.practice;
   document.getElementById('cli-details').hidden = next.practice;
@@ -307,7 +328,7 @@ form.addEventListener('submit', async (event) => {
                 port: Number(values.databasePort.value),
                 database: values.databaseName.value,
                 username: values.databaseUsername.value,
-                password: values.databasePassword.value,
+                password: values.databaseClearPassword.checked ? '' : values.databasePassword.value,
                 clearPassword: values.databaseClearPassword.checked,
                 tls: values.databaseTls.value,
               },

@@ -8,6 +8,7 @@ import {
   workbenchDatabaseIdentity,
   workbenchDatabaseUrl,
 } from './license-workbench-database';
+import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
 import { licenseWorkbenchBrowserError } from './license-workbench-error';
 import { LicenseWorkbenchSession } from './license-workbench-session';
 
@@ -92,8 +93,22 @@ describe('session database connection', () => {
   it('does not reuse a password for a changed identity and validates URL escaping', () => {
     const selected = selectWorkbenchDatabase({ mode: 'environment' }, connection);
     expect(selected.mode).toBe('session');
+    for (const change of [
+      { host: 'localhost' },
+      { port: 5432 },
+      { database: 'another-db' },
+      { username: 'another-user' },
+      { tls: 'disable' as const },
+    ]) {
+      expect(
+        selectWorkbenchDatabase(selected, { ...connection, ...change, password: '' })
+      ).toMatchObject({ password: '' });
+    }
     expect(
-      selectWorkbenchDatabase(selected, { ...connection, host: 'localhost', password: '' })
+      selectWorkbenchDatabase(selected, { ...connection, password: 'replacement' })
+    ).toMatchObject({ password: 'replacement' });
+    expect(
+      selectWorkbenchDatabase(selected, { ...connection, password: 'filled', clearPassword: true })
     ).toMatchObject({ password: '' });
     const url = new URL(workbenchDatabaseUrl(selected));
     expect(decodeURIComponent(url.password)).toBe(secret);
@@ -108,24 +123,64 @@ describe('session database connection', () => {
       await expect(adapter.load()).rejects.toThrow(/^Database inspection failed/);
       const message = await adapter.load().catch(licenseWorkbenchBrowserError);
       expect(message).toBe(
-        'Database inspection failed. Check the selected host, credentials, TLS setting and schema.'
+        'Database inspection failed. The database refused the connection. Check the host, port and whether PostgreSQL is listening.'
       );
     } finally {
       await adapter.close?.();
     }
   });
 
-  it('tests applied settings only, gives generic failures and rejects stale revisions', async () => {
+  it('tests applied settings only, reports a refusal and rejects stale revisions', async () => {
     const session = new LicenseWorkbenchSession(parsed.options);
     try {
       await session.configure({ ...settings(session), databaseConnection: connection });
       await expect(session.testDatabase(1)).rejects.toThrow('Configuration changed');
-      await expect(session.testDatabase(2)).rejects.toThrow('Connection failed');
+      await expect(session.testDatabase(2)).rejects.toThrow('The database refused the connection.');
       expect(session.visible.databaseTest).toBe('failed');
       expect(JSON.stringify(session.visible)).not.toContain(secret);
       expect(JSON.stringify(session.visible)).not.toContain('ECONNREFUSED');
     } finally {
       await session.close();
     }
+  });
+});
+
+describe('sanitized database failure guidance', () => {
+  const error = (code: string) =>
+    Object.assign(new Error(`postgres://reader:${secret}@host`), { code });
+
+  it.each([
+    ['ERR_TLS_CERT_ALTNAME_INVALID', 'TLS certificate verification failed'],
+    ['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'trusted certificate chain'],
+    ['28P01', 'rejected authentication'],
+    ['28000', 'access settings'],
+    ['3D000', 'could not find the selected database'],
+    ['42P01', 'required database schema is missing'],
+    ['ENOTFOUND', 'hostname could not be resolved'],
+    ['ECONNREFUSED', 'database refused the connection'],
+    ['ETIMEDOUT', 'connection timed out'],
+    ['CONNECT_TIMEOUT', 'connection timed out'],
+    ['DATABASE_URL_MISSING', 'Set DATABASE_URL'],
+    ['ERR_UNKNOWN', 'Check the selected host, port, credentials'],
+  ])('gives fixed guidance for %s without disclosing the driver error', (code, expected) => {
+    const cause = new Error('wrapped SQL', {
+      cause: new AggregateError([error(code)], 'connection attempts failed'),
+    });
+    const failure = new LicenseWorkbenchDatabaseError('test', cause);
+    expect(failure.message).toContain(expected);
+    expect(failure.message).not.toContain(secret);
+    expect(failure.message).not.toContain('wrapped SQL');
+  });
+
+  it('suggests disabling TLS only conditionally for a trusted local server after a reset', () => {
+    expect(
+      new LicenseWorkbenchDatabaseError('test', error('ECONNRESET'), 'session').message
+    ).toContain('If this trusted local PostgreSQL server has TLS disabled');
+    expect(
+      new LicenseWorkbenchDatabaseError('inspect', error('ECONNRESET'), 'environment').message
+    ).toContain('a trusted local server without TLS');
+    expect(new LicenseWorkbenchDatabaseError('test', error('ECONNRESET')).message).not.toContain(
+      'Disable TLS'
+    );
   });
 });

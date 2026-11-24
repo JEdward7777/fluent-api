@@ -117,7 +117,7 @@
               <label>Username <input name="databaseUsername" autocomplete="username" maxlength="128" /></label>
               <label
                 >Password
-                <input name="databasePassword" type="password" autocomplete="current-password" maxlength="1024"
+                <input name="databasePassword" type="password" autocomplete="current-password" maxlength="1024" aria-describedby="database-password-state"
               /></label>
               <label><input name="databaseClearPassword" type="checkbox" /> Clear retained password</label>
               <label
@@ -127,11 +127,12 @@
                   <option value="disable">Disable TLS (local/trusted connections only)</option>
                 </select>
               </label>
+              <p id="database-password-state" aria-live="polite"></p>
             </div>
             <p id="database-password-note">
-              Password stays in this server session only. After Apply, the field clears. A blank field retains the
-              password only when the other connection fields are unchanged. Check Clear retained password or choose the
-              environment connection to remove it.
+              The workbench keeps the password in server session memory. Dots indicate that the password is retained.
+              A blank field retains it when the connection details and TLS setting stay the same. Select Clear retained
+              password or switch to the environment connection to remove it when you apply settings.
             </p>
             <p>
               Connection settings last for this server session. Your browser may offer to remember the username and

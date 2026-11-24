@@ -244,9 +244,9 @@ export class LicenseWorkbenchSession {
       this.databaseTestPromise = testWorkbenchDatabase(this.databaseConnection);
       await this.databaseTestPromise;
       this.databaseTest = 'passed';
-    } catch {
+    } catch (error) {
       this.databaseTest = 'failed';
-      throw new Error('Connection failed. Check the selected host, credentials and TLS setting');
+      throw error;
     } finally {
       this.testingDatabase = false;
       this.databaseTestPromise = undefined;

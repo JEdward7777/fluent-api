@@ -146,6 +146,13 @@ button:disabled {
   border: 1px solid #d7e0e6;
   border-radius: 0.35rem;
 }
+#database-password-state {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+#database-password-state:empty {
+  display: none;
+}
 #session-database-fields label:has(input[type='checkbox']) {
   display: flex;
   align-items: center;

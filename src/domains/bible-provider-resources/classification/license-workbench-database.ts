@@ -4,6 +4,8 @@ import postgres from 'postgres';
 
 import type { setupSchema } from './license-workbench-schema';
 
+import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
+
 export type WorkbenchDatabase =
   | { mode: 'environment' }
   | {
@@ -57,7 +59,10 @@ export function visibleWorkbenchDatabase(connection: WorkbenchDatabase) {
 export function workbenchDatabaseUrl(connection: WorkbenchDatabase): string {
   if (connection.mode === 'environment') {
     const value = process.env.DATABASE_URL;
-    if (!value) throw new Error('No environment database connection is configured');
+    if (!value)
+      throw Object.assign(new Error('No environment database connection is configured'), {
+        code: 'DATABASE_URL_MISSING',
+      });
     return value;
   }
   const url = new URL('postgres://localhost');
@@ -81,36 +86,48 @@ export function workbenchDatabaseIdentity(connection: WorkbenchDatabase): string
   }
 }
 
-export async function testWorkbenchDatabase(connection: WorkbenchDatabase): Promise<void> {
-  const client = postgres(workbenchDatabaseUrl(connection), {
-    max: 1,
-    connect_timeout: 5,
-    idle_timeout: 5,
-    ...(connection.mode === 'session' ? { password: () => connection.password } : {}),
-  });
-  let timer: ReturnType<typeof setTimeout> | undefined;
+function configuredTls(connection: WorkbenchDatabase) {
+  if (connection.mode === 'session')
+    return connection.tls === 'verify-full' ? 'session' : undefined;
   try {
-    await Promise.race([
-      client`select 1`,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Database test timed out')), 8000);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    await client.end({ timeout: 1 });
+    const query = new URL(workbenchDatabaseUrl(connection)).searchParams;
+    const ssl = query.get('sslmode') || query.get('ssl') || process.env.PGSSL;
+    return (ssl && !['disable', 'false'].includes(ssl)) || query.get('sslrootcert') === 'system'
+      ? 'environment'
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
 
-export class LicenseWorkbenchDatabaseInspectionError extends Error {
-  constructor(cause: unknown) {
-    super(
-      'Database inspection failed. Check the selected host, credentials, TLS setting and schema.',
-      {
-        cause,
-      }
-    );
-    this.name = 'LicenseWorkbenchDatabaseInspectionError';
+export async function testWorkbenchDatabase(connection: WorkbenchDatabase): Promise<void> {
+  try {
+    const client = postgres(workbenchDatabaseUrl(connection), {
+      max: 1,
+      connect_timeout: 5,
+      idle_timeout: 5,
+      ...(connection.mode === 'session' ? { password: () => connection.password } : {}),
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        client`select 1`,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                Object.assign(new Error('Database test timed out'), { code: 'CONNECT_TIMEOUT' })
+              ),
+            8000
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      await client.end({ timeout: 1 });
+    }
+  } catch (error) {
+    throw new LicenseWorkbenchDatabaseError('test', error, configuredTls(connection));
   }
 }
 
@@ -127,11 +144,11 @@ export async function ownedWorkbenchDatabase(connection: WorkbenchDatabase) {
         try {
           return await adapter.load();
         } catch (error) {
-          throw new LicenseWorkbenchDatabaseInspectionError(error);
+          throw new LicenseWorkbenchDatabaseError('inspect', error, configuredTls(connection));
         }
       },
     };
   } catch (error) {
-    throw new LicenseWorkbenchDatabaseInspectionError(error);
+    throw new LicenseWorkbenchDatabaseError('inspect', error, configuredTls(connection));
   }
 }
