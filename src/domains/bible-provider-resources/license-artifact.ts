@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { LicenseArtifact, LicenseClassification } from './license-artifact.schemas';
 
 import { computeLicenseReviewHash } from './license-artifact.hash';
+import { preserveReplacedReview } from './license-artifact.history';
 import {
   LICENSE_ARTIFACT_SCHEMA_VERSION,
   LICENSE_REVIEW_HASH_DOMAIN_VERSION,
@@ -76,8 +77,6 @@ export function checkLicenseArtifactReview(value: unknown) {
   else if (artifact.attestation.reviewContentHash !== artifact.reviewContentHash)
     reasons.push('The attestation is bound to another revision');
   if (artifact.reviewState === 'incomplete') reasons.push('The revision is marked incomplete');
-  if (artifact.classifications.some((row) => row.status === 'unknown' && !row.rowNote))
-    reasons.push('Every retained unknown classification requires a human row note');
   if (reasons.length) {
     delete artifact.attestation;
     artifact.reviewState = 'incomplete';
@@ -106,6 +105,9 @@ export function reviseLicenseArtifact(
         previous.rationale !== row.rationale);
     if (changedDecision && row.source !== 'manual') {
       // A refresh cannot inherit a prior human note or unrelated automatic evidence.
+      preserveReplacedReview(previous, row);
+      delete row.reviewComment;
+      delete row.rowNoteProvenance;
       if (row.rowNote === previous.rowNote) delete row.rowNote;
       if (row.source === 'table') {
         row.samples = [];
@@ -167,13 +169,22 @@ export function overrideLicenseClassification(
       (candidate) => candidate.normalizedText === normalizedText
     );
     if (!row) throw new Error('No exact normalized classification exists');
+    preserveReplacedReview(row, row);
+    delete row.reviewComment;
     if (row.source !== 'manual')
       row.automaticDecision = { source: row.source, status: row.status, rationale: row.rationale };
+    if (row.reviewState === 'human_reviewed') {
+      row.reviewState = row.automaticDecision?.source === 'gemini' ? 'llm_reviewed' : 'unreviewed';
+      row.decisionAt = null;
+      row.reviewedBy = null;
+      row.humanReviewedAt = null;
+    }
     warning = licenseOverrideWarning(row, status);
     row.status = status;
     row.source = 'manual';
     row.rationale = reason;
     delete row.rowNote;
+    delete row.rowNoteProvenance;
     if (status === 'unknown') row.rowNote = unknownNote ?? reason;
   });
   return { artifact, warning };
@@ -184,27 +195,58 @@ export function recordHumanLicenseDecision(
   value: unknown,
   normalizedText: string,
   status: LicenseClassification['status'],
-  rationale: string,
+  review: string | { reviewComment?: string },
   reviewedBy: string,
   decisionAt: string
 ): LicenseArtifact {
-  if (!rationale.trim() || !reviewedBy.trim())
-    throw new Error('Human review requires a rationale and named reviewer');
+  if (!reviewedBy.trim()) throw new Error('Human review requires a named reviewer');
+  if (typeof review === 'string' && !review.trim())
+    throw new Error('A human override requires a nonempty rationale');
   return reviseLicenseArtifact(value, (draft) => {
     const row = draft.classifications.find(
       (candidate) => candidate.normalizedText === normalizedText
     );
     if (!row) throw new Error('No exact normalized classification exists');
+    preserveReplacedReview(row, row);
+    delete row.reviewComment;
     if (row.source !== 'manual')
       row.automaticDecision = { source: row.source, status: row.status, rationale: row.rationale };
-    if (row.status !== status) delete row.rowNote;
+    delete row.rowNote;
+    delete row.rowNoteProvenance;
     row.status = status;
     row.source = 'manual';
-    row.rationale = rationale;
+    // String input is the legacy disposition contract. New reviews keep their
+    // optional authored text separate from the original proposal's rationale.
+    row.rationale = typeof review === 'string' ? review : '';
+    if (typeof review !== 'string' && review.reviewComment?.trim())
+      row.reviewComment = review.reviewComment;
     row.reviewState = 'human_reviewed';
     row.decisionAt = decisionAt;
     row.reviewedBy = reviewedBy;
     row.humanReviewedAt = decisionAt;
+  });
+}
+
+/** Legacy note-only edits do not change the decision's reviewer or clock. */
+export function recordAnonymousLicenseNote(value: unknown, normalizedText: string, note: string) {
+  if (!note.trim()) throw new Error('A human note must be nonempty');
+  return reviseLicenseArtifact(value, (draft) => {
+    const row = draft.classifications.find(
+      (candidate) => candidate.normalizedText === normalizedText
+    );
+    if (!row) throw new Error('No exact normalized classification exists');
+    if (row.status !== 'unknown')
+      throw new Error('Human row notes are for retained unknown classifications');
+    if (row.rowNote === note) return;
+    if (row.rowNoteProvenance && row.rowNote)
+      row.rowNoteProvenance.priorAnonymousNotes.push(row.rowNote);
+    else
+      row.rowNoteProvenance = {
+        originalRowNote: row.rowNote ?? null,
+        priorAnonymousNotes: [],
+        author: null,
+      };
+    row.rowNote = note;
   });
 }
 

@@ -13,8 +13,8 @@ describe('tracked v2 candidate migration', () => {
     const upgraded = parseLicenseArtifact(legacy);
     const checked = checkLicenseArtifactReview(upgraded);
     expect(checked.status === 'invalid' ? checked.reason : 'valid').toBe('valid');
-    expect(upgraded.schemaVersion).toBe(3);
-    expect(upgraded.hashDomainVersion).toBe(3);
+    expect(upgraded.schemaVersion).toBe(4);
+    expect(upgraded.hashDomainVersion).toBe(4);
     expect(upgraded.classifications).toHaveLength(523);
     expect(new Set(upgraded.classifications.map((row) => row.normalizedText)).size).toBe(523);
     expect(upgraded.classifications.filter((row) => row.status === 'unknown')).toHaveLength(294);
@@ -29,7 +29,7 @@ describe('tracked v2 candidate migration', () => {
       )
     ).toBe(true);
     expect(upgraded.attestation).toBeUndefined();
-    expect(upgraded.historicalAttestation).toBeUndefined();
+    expect(upgraded.historicalAttestations).toBeUndefined();
     const roundTrip = parseLicenseArtifact(JSON.parse(serializeLicenseArtifact(upgraded).bytes));
     expect(roundTrip.reviewContentHash).toBe(upgraded.reviewContentHash);
     const after = await readFile(LICENSE_CLASSIFICATIONS_PATH);
@@ -50,16 +50,18 @@ describe('tracked v2 candidate migration', () => {
     const upgraded = parseLicenseArtifact(legacy);
     expect(upgraded.attestation).toBeUndefined();
     expect(checkLicenseArtifactReview(upgraded).status).toBe('review-required');
-    expect(upgraded.historicalAttestation).toEqual({
-      schemaVersion: 2,
-      hashDomainVersion: 2,
-      ...(legacy.attestation as object),
-    });
+    expect(upgraded.historicalAttestations).toEqual([
+      {
+        schemaVersion: 2,
+        hashDomainVersion: 2,
+        ...(legacy.attestation as object),
+      },
+    ]);
     expect(upgraded.classifications.every((row) => row.reviewState !== 'human_reviewed')).toBe(
       true
     );
     const roundTrip = parseLicenseArtifact(JSON.parse(serializeLicenseArtifact(upgraded).bytes));
-    expect(roundTrip.historicalAttestation).toEqual(upgraded.historicalAttestation);
+    expect(roundTrip.historicalAttestations).toEqual(upgraded.historicalAttestations);
     expect(roundTrip.attestation).toBeUndefined();
     const mismatched = structuredClone(legacy);
     mismatched.attestation = {
@@ -72,7 +74,7 @@ describe('tracked v2 candidate migration', () => {
     expect((await readFile(LICENSE_CLASSIFICATIONS_PATH)).equals(before)).toBe(true);
   }, 20000);
 
-  it('rejects a v2 owned-content edit before assigning a v3 hash', async () => {
+  it('rejects a v2 owned-content edit before assigning a v4 hash', async () => {
     const legacy = JSON.parse(await readFile(LICENSE_CLASSIFICATIONS_PATH, 'utf8')) as {
       classifications: Array<{ rationale: string }>;
     };

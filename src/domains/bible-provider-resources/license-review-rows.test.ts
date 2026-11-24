@@ -119,6 +119,11 @@ describe('cLI row navigation and named review', () => {
       io,
     });
     expect(result.artifact.classifications[2].rowNote).toBe('Clarifying note.');
+    expect(result.artifact.classifications[2].rowNoteProvenance).toEqual({
+      originalRowNote: original.classifications[2].rowNote,
+      priorAnonymousNotes: [],
+      author: null,
+    });
     expect(result.artifact.classifications[2].reviewState).toBe(
       original.classifications[2].reviewState
     );

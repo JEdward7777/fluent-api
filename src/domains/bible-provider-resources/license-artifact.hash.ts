@@ -4,6 +4,7 @@ import type {
   LegacyLicenseArtifact,
   LicenseArtifact,
   LicenseClassification,
+  V3LicenseArtifact,
 } from './license-artifact.schemas';
 
 // Explicit, locale-independent ordering. Every sort operates on newly mapped arrays.
@@ -28,8 +29,8 @@ function ownedContract(run: LicenseArtifact['classificationRun']) {
   };
 }
 
-/** This projection is shared by artifact hashing and cross-storage conflict checks. */
-export function ownedLicenseClassification(row: LicenseClassification, includeDecisionAt = true) {
+/** Frozen v3 projection. New owned fields belong in a separately versioned projection. */
+function ownedV3Classification(row: LicenseClassification, includeDecisionAt: boolean) {
   return {
     normalizedText: row.normalizedText,
     exampleNotice: row.exampleNotice,
@@ -83,14 +84,18 @@ export function ownedLicenseClassification(row: LicenseClassification, includeDe
   };
 }
 
-/**
- * Hash-domain version 3: row review facts are owned alongside decision evidence.
- * Attestation, review markers/hash, acquisition/file times, cache diagnostics and every
- * passthrough extension are excluded. Promoting an extension requires a domain-version change.
- */
-function hashOwnedArtifact(
-  artifact: LicenseArtifact | LegacyLicenseArtifact,
-  legacy: boolean
+/** Domain 4 binds the current comment and ordered, strictly shaped prior reviews. */
+export function ownedLicenseClassification(row: LicenseClassification, includeDecisionAt = true) {
+  return {
+    ...ownedV3Classification(row, includeDecisionAt),
+    reviewComment: row.reviewComment ?? null,
+    reviewHistory: row.reviewHistory ?? [],
+    rowNoteProvenance: row.rowNoteProvenance ?? null,
+  };
+}
+
+export function computeLicenseReviewHash(
+  artifact: LicenseArtifact | LegacyLicenseArtifact | V3LicenseArtifact
 ): string {
   return hashCanonicalJson({
     schemaVersion: artifact.schemaVersion,
@@ -112,8 +117,9 @@ function hashOwnedArtifact(
       ),
     classifications: artifact.classifications
       .map((row) => {
-        const owned = ownedLicenseClassification(row);
-        if (!legacy) return owned;
+        if (artifact.schemaVersion === 4) return ownedLicenseClassification(row);
+        const owned = ownedV3Classification(row, true);
+        if (artifact.schemaVersion === 3) return owned;
         const {
           reviewState: _reviewState,
           decisionAt: _decisionAt,
@@ -125,13 +131,4 @@ function hashOwnedArtifact(
       })
       .sort((left, right) => compare(left.normalizedText, right.normalizedText)),
   });
-}
-
-/** Exact v2 owned projection; verify it before any version or attestation conversion. */
-export function computeLegacyLicenseReviewHash(artifact: LegacyLicenseArtifact): string {
-  return hashOwnedArtifact(artifact, true);
-}
-
-export function computeLicenseReviewHash(artifact: LicenseArtifact): string {
-  return hashOwnedArtifact(artifact, false);
 }

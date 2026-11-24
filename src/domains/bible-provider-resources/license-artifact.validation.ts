@@ -11,15 +11,31 @@ function unique(values: string[], label: string) {
 }
 const modelKey = (provider: string, model: string) => JSON.stringify([provider, model]);
 
-function validateEvidence(row: LicenseClassification, artifact: LicenseArtifact) {
+type ReviewFacts = Pick<
+  LicenseClassification,
+  'source' | 'reviewState' | 'reviewedBy' | 'decisionAt' | 'humanReviewedAt' | 'rowNoteProvenance'
+> & {
+  rationale: string | null;
+  reviewComment?: string | null;
+  rowNote?: string | null;
+};
+
+function validateReviewFacts(row: ReviewFacts) {
+  if (row.source !== 'manual' && !row.rationale?.trim())
+    throw new Error('Automatic decisions require a rationale');
+  if (row.reviewState === 'llm_reviewed' && (row.source === 'table' || row.source === 'rule'))
+    throw new Error('LLM review requires complete model evidence');
+  if (row.rowNoteProvenance && !row.rowNote)
+    throw new Error('Anonymous note provenance requires its current note');
+  if (row.reviewComment != null && row.reviewState !== 'human_reviewed')
+    throw new Error('A current review comment requires a human review');
   if (
     row.reviewState === undefined ||
     row.decisionAt === undefined ||
     row.reviewedBy === undefined ||
     row.humanReviewedAt === undefined
   )
-    throw new Error('V3 classification review fields are required');
-  const proposal = row.source === 'manual' ? row.automaticDecision : row;
+    throw new Error('Classification review fields are required');
   if (row.reviewState === 'human_reviewed') {
     if (!row.reviewedBy || !row.humanReviewedAt || row.decisionAt !== row.humanReviewedAt)
       throw new Error('Human review requires a named reviewer and matching event time');
@@ -29,7 +45,18 @@ function validateEvidence(row: LicenseClassification, artifact: LicenseArtifact)
     if (time !== null && new Date(time).toISOString() !== time)
       throw new Error('Decision times must use canonical millisecond UTC precision');
   }
-  if (row.reviewState === 'llm_reviewed' && proposal?.source !== 'gemini')
+}
+
+function validateEvidence(row: LicenseClassification, artifact: LicenseArtifact) {
+  validateReviewFacts(row);
+  for (const prior of row.reviewHistory ?? []) validateReviewFacts(prior);
+  const proposal = row.source === 'manual' ? row.automaticDecision : row;
+  // The live manual record also has its underlying proposal available for validation.
+  if (
+    row.source === 'manual' &&
+    row.reviewState === 'llm_reviewed' &&
+    proposal?.source !== 'gemini'
+  )
     throw new Error('LLM review requires complete model evidence');
   // A human can decide before any automatic assessment; no fake proposal is needed.
   if (!proposal && row.source === 'manual' && row.samples.length === 0 && !row.rule) return;

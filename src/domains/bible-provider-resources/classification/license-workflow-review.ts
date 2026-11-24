@@ -3,6 +3,7 @@ import type { LicenseReviewEdit } from './license-workflow.types';
 
 import {
   licenseOverrideWarning,
+  recordAnonymousLicenseNote,
   recordHumanLicenseDecision,
   reviseLicenseArtifact,
 } from '../license-artifact';
@@ -36,18 +37,7 @@ export function applyLicenseReviewEdit(
       });
     }
   } else {
-    if (!edit.note.trim()) throw new Error('A human note must be nonempty');
-    const row = before.classifications.find(
-      (candidate) => candidate.normalizedText === edit.normalizedText
-    );
-    if (!row) throw new Error('No exact normalized classification exists');
-    if (row.status !== 'unknown')
-      throw new Error('Human row notes are for retained unknown classifications');
-    revised = reviseLicenseArtifact(before, (draft) => {
-      draft.classifications.find(
-        (candidate) => candidate.normalizedText === edit.normalizedText
-      )!.rowNote = edit.note;
-    });
+    revised = recordAnonymousLicenseNote(before, edit.normalizedText, edit.note);
   }
   return { artifact: freezeLicenseRevision(revised), warning };
 }

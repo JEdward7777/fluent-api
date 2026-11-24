@@ -159,8 +159,8 @@ describe('database refresh and recorded evidence contracts', () => {
       sampleCount: 3,
     });
     expect(transport).toHaveBeenCalledTimes(3);
-    expect(artifact.schemaVersion).toBe(3);
-    expect(artifact.hashDomainVersion).toBe(3);
+    expect(artifact.schemaVersion).toBe(4);
+    expect(artifact.hashDomainVersion).toBe(4);
     expect(artifact.classificationRun.models[0].model).toBe('new-model');
     const retained = artifact.classifications.find(
       (row) =>

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 3,
+  "hashDomainVersion": 3,
+  "normalizerVersion": 1,
+  "classificationRun": {
+    "prompt": "Prompt",
+    "promptHash": "e7a1eb4ba474cdfca0e6bba255bfc9d3850fdd3f0ed95f7d57e9971ef55f119d",
+    "ruleSetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "responseSchema": {},
+    "models": [
+      {
+        "provider": "fixture",
+        "model": "fixture",
+        "settings": {},
+        "sampleCount": 2
+      }
+    ]
+  },
+  "catalog": [],
+  "classifications": [
+    {
+      "normalizedText": "sample notice",
+      "exampleNotice": "Sample notice",
+      "status": "unknown",
+      "source": "manual",
+      "rationale": "Historic rationale",
+      "rowNote": "Distinct note",
+      "samples": [],
+      "reviewComment": {
+        "extension": 1
+      },
+      "rowNoteProvenance": "legacy-extension",
+      "reviewHistory": "legacy-extension",
+      "migrationExtensions": {
+        "already": true
+      },
+      "extra": ["retained"],
+      "reviewState": "human_reviewed",
+      "reviewedBy": "Original author",
+      "decisionAt": "2026-11-17T12:34:56.789Z",
+      "humanReviewedAt": "2026-11-17T12:34:56.789Z"
+    }
+  ],
+  "historicalAttestations": {
+    "extension": true
+  },
+  "migrationExtensions": "older envelope",
+  "reviewContentHash": "843ec7f8d747b30335c2c21d076ad2fde3709d7364c76f4d8e83b87cd0c8e8cf",
+  "attestation": {
+    "reviewedBy": "Whole file signer",
+    "reviewedAt": "2026-11-17T12:34:56.789Z",
+    "reviewReason": "Reviewed file",
+    "reviewContentHash": "843ec7f8d747b30335c2c21d076ad2fde3709d7364c76f4d8e83b87cd0c8e8cf"
+  },
+  "historicalAttestation": {
+    "reviewedBy": "Earlier signer",
+    "reviewedAt": "2026-11-17T12:34:56.789Z",
+    "reviewReason": "Reviewed file",
+    "reviewContentHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "schemaVersion": 2,
+    "hashDomainVersion": 2
+  }
+}

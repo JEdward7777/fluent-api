@@ -4,8 +4,8 @@ import type { LicenseReviewIo } from './license-review.types';
 
 import {
   licenseOverrideWarning,
+  recordAnonymousLicenseNote,
   recordHumanLicenseDecision,
-  reviseLicenseArtifact,
 } from './license-artifact';
 import { computeLicenseImpact } from './license-impact';
 import { freezeLicenseRevision } from './license-review-revision';
@@ -135,13 +135,7 @@ export async function reviewLicenseRows(
         if (note.trim())
           artifact = edit
             ? edit({ kind: 'unknown-note', normalizedText: row.normalizedText, note })
-            : freezeLicenseRevision(
-                reviseLicenseArtifact(artifact, (draft) => {
-                  draft.classifications.find(
-                    (entry) => entry.normalizedText === row.normalizedText
-                  )!.rowNote = note;
-                })
-              );
+            : freezeLicenseRevision(recordAnonymousLicenseNote(artifact, row.normalizedText, note));
       }
       continue;
     }

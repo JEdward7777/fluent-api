@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "hashDomainVersion": 2,
+  "normalizerVersion": 1,
+  "classificationRun": {
+    "prompt": "Prompt",
+    "promptHash": "e7a1eb4ba474cdfca0e6bba255bfc9d3850fdd3f0ed95f7d57e9971ef55f119d",
+    "ruleSetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "responseSchema": {},
+    "models": [
+      {
+        "provider": "fixture",
+        "model": "fixture",
+        "settings": {},
+        "sampleCount": 2
+      }
+    ]
+  },
+  "catalog": [],
+  "classifications": [
+    {
+      "normalizedText": "sample notice",
+      "exampleNotice": "Sample notice",
+      "status": "unknown",
+      "source": "manual",
+      "rationale": "Historic rationale",
+      "rowNote": "Distinct note",
+      "samples": [],
+      "reviewComment": {
+        "extension": 1
+      },
+      "rowNoteProvenance": "legacy-extension",
+      "reviewHistory": "legacy-extension",
+      "migrationExtensions": {
+        "already": true
+      },
+      "extra": ["retained"],
+      "reviewState": "custom",
+      "reviewedBy": "extension-only"
+    }
+  ],
+  "historicalAttestation": "unowned singular",
+  "historicalAttestations": {
+    "extension": true
+  },
+  "migrationExtensions": "older envelope",
+  "reviewContentHash": "2dddb78bf6e294d9c6f1284df70955cd6bb792dd6eaa6e5dfbccc5e41022d754",
+  "attestation": {
+    "reviewedBy": "Whole file signer",
+    "reviewedAt": "2026-11-17T12:34:56.789Z",
+    "reviewReason": "Reviewed file",
+    "reviewContentHash": "2dddb78bf6e294d9c6f1284df70955cd6bb792dd6eaa6e5dfbccc5e41022d754"
+  }
+}

@@ -7,6 +7,9 @@ import { hashCanonicalJson } from '@/lib/llm/canonical-json';
 import type { LicenseClassification } from '../license-artifact.schemas';
 import type { createLicenseClassifier } from '../license-classifier';
 
+import { preserveReplacedReview } from '../license-artifact.history';
+import { licenseClassificationSchema } from '../license-artifact.schemas';
+
 type Proposal = Awaited<ReturnType<ReturnType<typeof createLicenseClassifier>>>;
 
 function identity(
@@ -72,11 +75,9 @@ export function assessedLicenseRow(input: {
     humanReviewedAt: null,
   };
   if (previous) {
+    preserveReplacedReview(previous, row);
     for (const [key, value] of Object.entries(previous)) {
-      if (
-        !(key in row) &&
-        !['rule', 'automaticDecision', 'rowNote', 'evidenceContract'].includes(key)
-      )
+      if (!Object.hasOwn(licenseClassificationSchema.shape, key))
         Object.defineProperty(row, key, {
           value: structuredClone(value),
           enumerable: true,
