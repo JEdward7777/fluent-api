@@ -12,7 +12,6 @@ import type {
   LicenseSaveRequest,
   LicenseSaveResult,
   LicenseWorkflowDependencies,
-  LicenseWorkflowState,
 } from './license-workflow.types';
 
 import { attestLicenseArtifact, serializeLicenseArtifact } from '../license-artifact';
@@ -30,7 +29,7 @@ import {
 } from './license-workflow-inspect';
 import { LicenseOperationRegistry } from './license-workflow-operations';
 import { exportPreviewedLicenseReport } from './license-workflow-report-export';
-import { applyLicenseReviewEdit } from './license-workflow-review';
+import { applyLicenseReviewEdit, LicenseWorkflowReview } from './license-workflow-review';
 import {
   destinationSaveFailure,
   licenseSaveFingerprint,
@@ -41,20 +40,14 @@ import { LicenseFileDriftError } from './license-write';
 
 export type { LicenseReviewEdit } from './license-workflow.types';
 
-export class LicenseWorkflow {
+export class LicenseWorkflow extends LicenseWorkflowReview {
   private options: LicenseCommandOptions;
   private dependencies: LicenseWorkflowDependencies;
   private database?: LicenseDatabaseAdapter;
   private readonly destination = new LicenseWorkflowDestination();
   private inspection?: LicenseInspection;
-  private analysis?: LicenseAnalysis;
-  private previewResult?: LicensePreview;
   private previewPromise?: Promise<LicensePreview>;
   private configurationRevision = 1;
-  private contentRevision = 0;
-  private state: LicenseWorkflowState = 'configuring';
-  private closing = false;
-  private busyDone?: Promise<void>;
   private finishBusy?: () => void;
   private closePromise?: Promise<void>;
   private readonly saveOperations = new Map<string, LicenseSaveOperation>();
@@ -62,6 +55,7 @@ export class LicenseWorkflow {
   private stopAnalysisRequested = false;
 
   constructor(options: LicenseCommandOptions, dependencies: LicenseWorkflowDependencies) {
+    super();
     this.options = freezeReviewValue(options);
     this.dependencies = dependencies;
   }
@@ -72,9 +66,6 @@ export class LicenseWorkflow {
       configurationRevision: this.configurationRevision,
       contentRevision: this.contentRevision,
     });
-  }
-  get analyzed() {
-    return this.analysis;
   }
   get reviewDatabaseContext() {
     return this.inspection?.database?.context;
@@ -113,8 +104,7 @@ export class LicenseWorkflow {
       if (preflight && this.inspection)
         this.inspection = freezeReviewValue({ ...this.inspection, preflight });
       this.options = freezeReviewValue(options);
-      this.previewResult = undefined;
-      if (this.analysis && this.state !== 'inspected') this.state = 'reviewing';
+      this.invalidateConfiguredPreview();
       return this.inspection;
     } finally {
       this.endBusy();
@@ -144,6 +134,7 @@ export class LicenseWorkflow {
       this.previewResult = undefined;
       this.configurationRevision++;
       this.contentRevision = 0;
+      this.resetDrafts();
       this.state = 'configuring';
       return this.status;
     } catch (error) {
@@ -208,6 +199,8 @@ export class LicenseWorkflow {
 
   private async analyzeOnce(expectedRevision: number): Promise<LicenseAnalysis> {
     this.requireRevision(expectedRevision);
+    if (this.reviewDrafts.size)
+      throw new Error('Revert pending session edits before using this operation');
     if (this.state !== 'inspected' || !this.inspection)
       throw new Error('Inspect inputs before starting analysis');
     const inspection = this.inspection;
@@ -252,6 +245,8 @@ export class LicenseWorkflow {
     this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
     if (!this.analysis || !['inspected', 'reviewing', 'previewed'].includes(this.state))
       throw new Error(`Cannot edit review while ${this.state}`);
+    if (this.reviewDrafts.size)
+      throw new Error('Revert pending session edits before using this operation');
     const before = this.analysis.artifact;
     const { artifact, warning } = applyLicenseReviewEdit(
       before,
@@ -275,6 +270,8 @@ export class LicenseWorkflow {
     expectedContentRevision: number
   ): Promise<LicensePreview> {
     this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
+    if (this.reviewDrafts.size)
+      throw new Error('Revert pending session edits before using this operation');
     if (this.state === 'previewing' && this.previewPromise) return this.previewPromise;
     if (
       !this.analysis ||

@@ -218,6 +218,8 @@ export class LicenseWorkbenchConfiguration {
     return this.reserve(() => this.configureRerun(body));
   }
   private async configureRerun(body: LicenseRerunSelection) {
+    if (this.workflow?.reviewDrafts.size)
+      throw new Error('Revert pending session edits before legacy reassessment');
     if (this.practiceMode) throw new Error('Practice does not reassess saved evidence');
     this.requireSelectedSourceLoaded();
     if (this.activeOperationId || !this.workflow?.analyzed)

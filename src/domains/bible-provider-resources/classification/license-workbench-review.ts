@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseDatabaseContext } from '../license-impact';
+import type { LicenseReviewDrafts } from './license-review-drafts';
 
 import { licenseOverrideWarning } from '../license-artifact';
 import { computeLicenseImpact } from '../license-impact';
@@ -15,7 +16,8 @@ export interface LicenseReviewQuery {
 }
 
 const pageSize = 25;
-const rowId = (normalizedText: string) => createHash('sha256').update(normalizedText).digest('hex');
+export const licenseReviewRowId = (normalizedText: string) =>
+  createHash('sha256').update(normalizedText).digest('hex');
 
 function savedVariants(artifact: LicenseArtifact, normalizedText: string) {
   return [
@@ -40,7 +42,8 @@ export function listLicenseWorkbenchReview(
   artifact: LicenseArtifact,
   query: LicenseReviewQuery,
   database?: LicenseDatabaseContext,
-  preserveExistingNonUnknowns = false
+  preserveExistingNonUnknowns = false,
+  drafts?: Pick<LicenseReviewDrafts, 'values'>
 ) {
   const search = query.search.toLocaleLowerCase();
   const impact = computeLicenseImpact(artifact, database, preserveExistingNonUnknowns);
@@ -50,14 +53,16 @@ export function listLicenseWorkbenchReview(
       const variants = savedVariants(artifact, row.normalizedText);
       const votes = { allowed: 0, forbidden: 0, unknown: 0 };
       for (const sample of row.samples) votes[sample.result.decision]++;
+      const values = drafts?.values(row);
       return {
-        id: rowId(row.normalizedText),
+        id: licenseReviewRowId(row.normalizedText),
         normalizedText: row.normalizedText,
         preview: displayLicenseNotice(row.exampleNotice).slice(0, 240),
         status: row.status,
         reviewState: row.reviewState,
         reviewedBy: row.reviewedBy,
         decisionAt: row.decisionAt,
+        ...values,
         source: row.source,
         votes,
         sampleCount: row.samples.length,
@@ -68,6 +73,7 @@ export function listLicenseWorkbenchReview(
           row.exampleNotice,
           row.rationale,
           row.rowNote ?? '',
+          (values ? values.reviewComment : row.reviewComment) ?? '',
           ...variants,
           ...affected.flatMap((bible) => [
             bible.name,
@@ -109,9 +115,12 @@ export function getLicenseWorkbenchReviewDetail(
   artifact: LicenseArtifact,
   id: string,
   database?: LicenseDatabaseContext,
-  preserveExistingNonUnknowns = false
+  preserveExistingNonUnknowns = false,
+  drafts?: Pick<LicenseReviewDrafts, 'values'>
 ) {
-  const row = artifact.classifications.find((entry) => rowId(entry.normalizedText) === id);
+  const row = artifact.classifications.find(
+    (entry) => licenseReviewRowId(entry.normalizedText) === id
+  );
   if (!row) return null;
   const impact = computeLicenseImpact(artifact, database, preserveExistingNonUnknowns);
   const affected = impact.rows.filter((bible) => bible.normalizedText === row.normalizedText);
@@ -153,6 +162,7 @@ export function getLicenseWorkbenchReviewDetail(
       forbidden: licenseOverrideWarning(row, 'forbidden'),
       unknown: licenseOverrideWarning(row, 'unknown'),
     },
+    ...drafts?.values(row),
     id,
   };
 }

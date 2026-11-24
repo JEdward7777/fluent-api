@@ -16,13 +16,15 @@ export function licenseWorkbenchReviewList(
   const analysis = workflow?.analyzed;
   if (!analysis) throw new Error('Start analysis before reviewing evidence');
   return {
+    epoch: workflow?.reviewDrafts.epoch,
     configurationRevision,
     contentRevision: analysis.contentRevision,
     ...listLicenseWorkbenchReview(
       analysis.artifact,
       query,
       workflow?.reviewDatabaseContext,
-      options.preserveExistingNonUnknowns
+      options.preserveExistingNonUnknowns,
+      workflow?.reviewDrafts
     ),
   };
 }
@@ -39,8 +41,14 @@ export function licenseWorkbenchReviewDetail(
     analysis.artifact,
     id,
     workflow?.reviewDatabaseContext,
-    options.preserveExistingNonUnknowns
+    options.preserveExistingNonUnknowns,
+    workflow?.reviewDrafts
   );
   if (!detail) throw new Error('Review row was not found');
-  return { ...detail, configurationRevision, contentRevision: analysis.contentRevision };
+  return {
+    ...detail,
+    epoch: workflow?.reviewDrafts.epoch,
+    configurationRevision,
+    contentRevision: analysis.contentRevision,
+  };
 }

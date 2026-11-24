@@ -3,6 +3,7 @@ import type { z } from 'zod';
 import { createHash } from 'node:crypto';
 
 import type { LicensePractice } from './license-practice';
+import type { DraftCommand } from './license-review-drafts';
 import type { VisibleOperation } from './license-workbench-operation.types';
 import type { operationSchema } from './license-workbench-schema';
 import type { LicenseReviewEdit } from './license-workflow.types';
@@ -163,6 +164,21 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
   stop() {
     if (!this.workflow) throw new Error('No analysis is running');
     return this.workflow.requestStopAnalysis();
+  }
+  mutateDraft(body: DraftCommand) {
+    if (!this.workflow)
+      return {
+        id: body.id,
+        mutationId: body.mutationId,
+        epoch: null,
+        contentRevision: 0,
+        conflict: true as const,
+        values: null,
+      };
+    return this.workflow.mutateDraft(
+      body,
+      !this.closed && !this.preparing && !this.activeOperationId && !this.testing
+    );
   }
   editReview(body: {
     configurationRevision: number;

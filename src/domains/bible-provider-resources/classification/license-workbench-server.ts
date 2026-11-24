@@ -15,6 +15,7 @@ import type { LicenseReviewerContainer } from './license-reviewer-container';
 import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
 import { LICENSE_REPORT_HTML_CSP } from '../license-report-html';
+import { draftCommandSchema } from './license-review-drafts';
 import { describeLicenseReportPath } from './license-reviewer-container';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
 import { DatabaseTestUnavailableError } from './license-workbench-database-tests';
@@ -190,6 +191,16 @@ function createLicenseWorkbenchApp(
       contentRevision: z.number().int().positive(),
     })
     .strict();
+  app.post('/api/review/draft', async (c) => {
+    const parsed = draftCommandSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid draft command', 400);
+    try {
+      const result = session.mutateDraft(parsed.data);
+      return c.json(result, result.conflict ? 409 : 200);
+    } catch {
+      return c.text('Review row unavailable', 409);
+    }
+  });
   app.post('/api/review/edit', async (c) => {
     const parsed = revisionSchema
       .extend({

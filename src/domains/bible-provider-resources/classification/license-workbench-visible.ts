@@ -71,7 +71,7 @@ export function visibleLicenseWorkbench(input: {
     databaseTest: input.databaseTest,
     testingDatabase: input.testingDatabase,
     inspected: visibleWorkbenchInspection(inspected, input.sourceHash),
-    analysis: visibleWorkbenchAnalysis(workflow?.analyzed),
+    analysis: visibleWorkbenchAnalysis(workflow?.analyzed, workflow?.reviewDrafts.size ?? 0),
     preview: licenseWorkbenchPreviewView({
       workflow,
       loadedDatabaseTarget: input.loadedDatabaseTarget,

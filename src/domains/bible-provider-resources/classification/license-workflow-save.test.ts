@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { checkLicenseArtifactReview } from '../license-artifact';
 import { makeCommandFixture } from './license-command.test-fixtures';
+import { licenseReviewRowId } from './license-workbench-review';
 import { LicenseWorkflow } from './license-workflow';
 import { licenseFileIo } from './license-write';
 
@@ -26,6 +27,52 @@ async function readyWorkflow(attested = true) {
 }
 
 describe('shared workflow exact-preview Save', () => {
+  it.each(['saved', 'inspected'])(
+    'retains destination changes across draft revert from %s',
+    async (state) => {
+      const f = await fixture();
+      const workflow = new LicenseWorkflow(f.options, {
+        ...f.dependencies,
+        destinationDatabase: f.dependencies.database,
+      });
+      try {
+        await workflow.inspect(1);
+        if (state === 'saved') {
+          await workflow.preview(1, 1);
+          await workflow.save({
+            operationId: 'save-before-draft',
+            configurationRevision: 1,
+            contentRevision: 1,
+            agreeToReplace: false,
+          });
+        }
+        const command = {
+          epoch: workflow.reviewDrafts.epoch,
+          id: licenseReviewRowId(f.artifact.classifications[0].normalizedText),
+          contentRevision: 1,
+          mutationId: crypto.randomUUID(),
+        };
+        expect(workflow.mutateDraft({ ...command, kind: 'mark' }, true).conflict).toBe(false);
+        const output = `${f.dir}/changed-output.json`;
+        await workflow.configureLoadedSettings({ ...f.options, output }, true, false);
+        expect(
+          workflow.mutateDraft(
+            { ...command, kind: 'revert', contentRevision: 2, mutationId: crypto.randomUUID() },
+            true
+          ).conflict
+        ).toBe(false);
+        expect(workflow.status.state).toBe(state === 'saved' ? 'reviewing' : 'inspected');
+        expect(workflow.previewed).toBeUndefined();
+        expect((await workflow.preview(1, 3)).plan.targets).toContainEqual({
+          role: 'output',
+          path: output,
+          previous: null,
+        });
+      } finally {
+        await workflow.close();
+      }
+    }
+  );
   it('saves incomplete JSON with bound hash and does not repeat a matching operation ID', async () => {
     const { f, workflow, preview } = await readyWorkflow(false);
     expect(checkLicenseArtifactReview(workflow.analyzed!.artifact).status).toBe('review-required');

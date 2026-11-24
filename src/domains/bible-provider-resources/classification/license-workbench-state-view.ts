@@ -27,8 +27,15 @@ export function visibleWorkbenchInspection(
   };
 }
 
-export function visibleWorkbenchAnalysis(analysis: LicenseAnalysis | undefined) {
+export function visibleWorkbenchAnalysis(
+  analysis: LicenseAnalysis | undefined,
+  pendingReviews: number
+) {
   return analysis
-    ? { rows: analysis.artifact.classifications.length, contentRevision: analysis.contentRevision }
+    ? {
+        pendingReviews,
+        rows: analysis.artifact.classifications.length,
+        contentRevision: analysis.contentRevision,
+      }
     : null;
 }
