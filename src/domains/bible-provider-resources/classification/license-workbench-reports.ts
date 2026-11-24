@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 
 import type { LicenseWorkflow } from './license-workflow';
 
@@ -11,8 +12,21 @@ interface ReportPlan {
   contentRevision: number;
   format: 'html' | 'markdown';
   path: string;
+  parent: string | undefined;
   previous: string | null;
   priorHash: string | null;
+}
+
+const reportParent = (path: string) => realpath(dirname(path)).catch(() => undefined);
+
+async function reportEntryExists(path: string) {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return false;
+  }
 }
 
 export class LicenseWorkbenchReports {
@@ -36,7 +50,7 @@ export class LicenseWorkbenchReports {
   async inspect(
     workflow: LicenseWorkflow,
     configurationRevision: number,
-    body: Omit<ReportPlan, 'id' | 'previous' | 'priorHash'>
+    body: Omit<ReportPlan, 'id' | 'parent' | 'previous' | 'priorHash'>
   ) {
     if (!workflow.previewed)
       throw new Error('Normal exact preview is required before report target inspection');
@@ -50,10 +64,15 @@ export class LicenseWorkbenchReports {
     const path = resolve(body.path);
     if (workflow.previewed.plan.expectedFiles.some((file) => file.path === path))
       throw new Error('Report target must differ from source and artifact paths');
-    const previous = await licenseFileIo.read(path);
+    const [parent, previous] = await Promise.all([reportParent(path), licenseFileIo.read(path)]);
+    if (previous === null && (await reportEntryExists(path)))
+      throw new Error(
+        'The report path already exists without readable report bytes. Choose a different path.'
+      );
     const plan: ReportPlan = {
       ...body,
       path,
+      parent,
       id: randomUUID(),
       previous,
       priorHash: previous === null ? null : createHash('sha256').update(previous).digest('hex'),
@@ -62,6 +81,7 @@ export class LicenseWorkbenchReports {
     return {
       id: plan.id,
       path: plan.path,
+      parent: plan.parent,
       format: plan.format,
       existed: previous !== null,
       priorHash: plan.priorHash,
@@ -89,8 +109,14 @@ export class LicenseWorkbenchReports {
       plan.contentRevision !== workflow.status.contentRevision
     )
       throw new Error('Report plan is stale; inspect its target again');
-    const result = workflow
-      .exportReport({
+    const result = (async () => {
+      if ((await reportParent(plan.path)) !== plan.parent)
+        throw new Error('The report target directory changed after inspection.');
+      if (plan.previous === null && (await reportEntryExists(plan.path)))
+        throw new Error('The report target appeared after inspection.');
+      if (this.plans.get(plan.id) !== plan)
+        throw new Error('Report plan is stale; inspect its target again');
+      const saved = await workflow.exportReport({
         operationId: body.operationId,
         configurationRevision: workflow.status.configurationRevision,
         contentRevision: plan.contentRevision,
@@ -98,8 +124,9 @@ export class LicenseWorkbenchReports {
         path: plan.path,
         expectedPreviousBytes: plan.previous,
         agreeToOverwrite: body.agreeToOverwrite,
-      })
-      .then((saved) => ({ ...saved, configurationRevision: plan.configurationRevision }));
+      });
+      return { ...saved, configurationRevision: plan.configurationRevision };
+    })();
     this.operations.set(body.operationId, { fingerprint, result });
     return result;
   }

@@ -293,9 +293,9 @@
             <label><input name="responsibility" type="checkbox" required /> I reviewed.</label>
             <button type="submit">Attest exact review hash</button>
           </form>
-          <div id="report-export" hidden>
+          <div id="report-export">
             <h3>Export a report separately</h3>
-            <p>Inspect the target before export. Export does not Save policy or JSON.</p>
+            <p>Choose a format and path. Export writes only the report.</p>
             <label
               >Format
               <select id="report-format">
@@ -304,13 +304,11 @@
               </select></label
             >
             <label>Report path <input id="report-path" required /></label>
-            <button id="report-inspect" type="button">Inspect report target</button>
+            <!-- prettier-ignore -->
+            <button id="report-write" type="button" aria-describedby="report-target" disabled>Export report</button>
             <p id="report-target" role="status"></p>
-            <label id="report-agreement" hidden
-              ><input id="report-overwrite" type="checkbox" /> Overwrite this report.</label
-            >
-            <button id="report-write" type="button" disabled>Export inspected report</button>
             <div id="report-actions" hidden>
+              <p id="report-exported-file"></p>
               <button id="report-open" type="button">Open report</button>
               <button id="report-download" type="button">Download report</button>
             </div>
@@ -340,6 +338,15 @@
         <p id="alternatives-note">Both writes file and database targets.</p>
       </section>
     </main>
+    <!-- prettier-ignore -->
+    <dialog id="report-confirm" aria-labelledby="report-confirm-title" aria-describedby="report-confirm-path">
+      <h2 id="report-confirm-title">Overwrite this report?</h2>
+      <p id="report-confirm-path"></p>
+      <div class="actions">
+        <button id="report-cancel" type="button" autofocus>Cancel</button>
+        <button id="report-confirm-write" type="button">Overwrite report</button>
+      </div>
+    </dialog>
     <dialog id="report-dialog" aria-label="Exported report">
       <button id="report-close" type="button" autofocus>Close report</button>
       <!-- prettier-ignore -->

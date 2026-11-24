@@ -2,10 +2,10 @@ import { createAnalysisProgress, workflowStatus } from './analysis-progress.js';
 import { createDraftDatabaseTest } from './database-test.js';
 import { renderGuide as updateGuide } from './guide.js';
 import {
-  initReportControls,
   renderExactPreview as updateExactPreview,
   syncPracticeDraftControls as updatePracticeDraftControls,
 } from './preview-ui.js';
+import { initReportControls, invalidateReportSelection } from './report-controls.js';
 import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
 import { initSave, renderSave, saveStatusUnconfirmed } from './save.js';
 import { pendingSettings, populateSettings, readSettings } from './settings-draft.js';
@@ -35,7 +35,6 @@ let sessionUnconfirmed = false;
 
 const previewButton = document.getElementById('normal-preview-button');
 const attestation = document.getElementById('attestation');
-const reportTarget = document.getElementById('report-target');
 const draftDatabase = createDraftDatabaseTest(
   form,
   request,
@@ -406,6 +405,8 @@ async function practiceAction(path, body) {
     return;
   }
   practiceBusy = true;
+  invalidateReportSelection();
+  renderExactPreview(setup);
   setReviewBusy(true);
   renderGuide(setup);
   let failure;
@@ -423,12 +424,10 @@ async function practiceAction(path, body) {
     else render(setup);
   }
 }
-async function recoverActionFailure(message, report = false) {
+async function recoverActionFailure(message) {
   try {
     render(await request('setup'));
     status.textContent = `${message} ${setup.state === 'configuring' ? 'Inspect inputs again.' : 'Check the current session before retrying.'}`;
-    if (report && setup.preview)
-      reportTarget.textContent = `${message} Inspect the actual report target before retrying.`;
   } catch {
     sessionUnconfirmed = true;
     if (setup) {
@@ -452,6 +451,8 @@ initSave({
     sessionUnconfirmed || practiceBusy || Boolean(pending()) || settingsRequestActive(),
   setPracticeBusy: (value) => {
     practiceBusy = value;
+    if (value) invalidateReportSelection();
+    if (setup) renderExactPreview(setup);
     setReviewBusy(value);
     if (setup) syncPracticeDraftControls();
     if (setup) renderGuide(setup);

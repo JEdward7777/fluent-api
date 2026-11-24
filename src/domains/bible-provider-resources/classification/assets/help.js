@@ -101,12 +101,8 @@ const help = [
     '#attestation [name="responsibility"]',
     'Confirm personal review of this exact evidence before signing its review hash.',
   ],
-  [
-    '#report-format',
-    'Select HTML or Markdown for a separate report export. This does not Save policy or reviewed JSON.',
-  ],
-  ['#report-path', 'Local target path for a separate report. Inspect this target before export.'],
-  ['#report-overwrite', 'Agree to replace the inspected report file at this exact path.'],
+  ['#report-format', 'Choose HTML or Markdown for the exported report.'],
+  ['#report-path', 'Enter the destination path on the machine running the reviewer.'],
   [
     '#save-replacement-agreement',
     'Agree to replace policy at the inspected database target for this exact preview. Save cannot be canceled.',

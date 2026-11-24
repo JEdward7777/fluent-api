@@ -1,5 +1,5 @@
 import { realpath } from 'node:fs/promises';
-import { isAbsolute, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 const LICENSE_REVIEWER_REPORT_ROOT = '/reports';
 
@@ -8,12 +8,19 @@ export interface LicenseReviewerContainer {
   engine?: 'Docker' | 'Podman';
 }
 
-export async function describeLicenseReportPath(path: string, container: LicenseReviewerContainer) {
+export async function describeLicenseReportPath(
+  path: string,
+  container: LicenseReviewerContainer,
+  inspected?: { parent: string | undefined }
+) {
   const hostRoot = container.hostReports;
   if (hostRoot) {
-    const target = await realpath(path).catch(() => undefined);
-    if (target) {
-      const suffix = relative(LICENSE_REVIEWER_REPORT_ROOT, target);
+    const parent = inspected
+      ? inspected.parent
+      : await realpath(dirname(path)).catch(() => undefined);
+    if (parent) {
+      // The writer replaces the final directory entry, even when it is a symlink.
+      const suffix = relative(LICENSE_REVIEWER_REPORT_ROOT, join(parent, basename(path)));
       if (suffix && suffix !== '..' && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix)) {
         const separator = hostRoot.includes('\\') ? '\\' : '/';
         const hostPath = [hostRoot.replace(/[\\/]+$/, ''), ...suffix.split(sep)].join(separator);

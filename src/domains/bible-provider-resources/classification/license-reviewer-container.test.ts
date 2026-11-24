@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { expect, it } from 'vitest';
 
 import { makeCommandFixture } from './license-command.test-fixtures';
-import { licenseReviewerContainerArgs } from './license-reviewer-container';
+import {
+  describeLicenseReportPath,
+  licenseReviewerContainerArgs,
+} from './license-reviewer-container';
 import { startLicenseWorkbenchServer } from './license-workbench-server';
 
 it('defaults to fixed-port web and keeps terminal launch and practice separate', () => {
@@ -24,6 +27,17 @@ it('defaults to fixed-port web and keeps terminal launch and practice separate',
     '--practice',
   ]);
   expect(() => licenseReviewerContainerArgs(['--port=9500'], {})).toThrow(/container launcher/);
+});
+
+it('labels the inspected parent and the selected directory entry for overwrite confirmation', async () => {
+  const container = { hostReports: 'C:\\review-output' };
+  const selectedPath = '/reports/current/alias.html';
+  await expect(
+    describeLicenseReportPath(selectedPath, container, { parent: '/reports/approved' })
+  ).resolves.toBe('Docker host path: C:\\review-output\\approved\\alias.html');
+  await expect(
+    describeLicenseReportPath(selectedPath, container, { parent: '/tmp/outside' })
+  ).resolves.toBe(`Container path: ${selectedPath}`);
 });
 
 it('preserves loopback Host, Origin and token gates for reports in container mode', async () => {
@@ -79,7 +93,9 @@ it('preserves loopback Host, Origin and token gates for reports in container mod
     const path = join(fixture.dir, 'output.html');
     const inspected = await api('report/inspect', { ...revision, path, format: 'html' });
     expect(inspected.status).toBe(200);
-    const { id: planId } = await inspected.json();
+    const inspectedPlan = await inspected.json();
+    expect(inspectedPlan).toMatchObject({ displayPath: `Container path: ${path}`, existed: false });
+    const planId = inspectedPlan.id;
     const operationId = crypto.randomUUID();
     const exported = await api('report/export', { planId, operationId, agreeToOverwrite: false });
     expect(exported.status).toBe(200);

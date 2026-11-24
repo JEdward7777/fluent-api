@@ -303,6 +303,7 @@ pre {
 #practice-location,
 #practice-preview-result,
 #preview-result,
+#report-exported-file,
 #report-target,
 #save-result,
 #status {
@@ -449,6 +450,14 @@ td button {
   max-width: none;
   border: 1px solid #9db8c7;
   border-radius: 0.6rem;
+}
+#report-confirm {
+  width: min(32rem, calc(100% - 2rem));
+  border: 1px solid #9db8c7;
+  border-radius: 0.6rem;
+}
+#report-confirm-path {
+  overflow-wrap: anywhere;
 }
 #report-dialog iframe {
   display: block;

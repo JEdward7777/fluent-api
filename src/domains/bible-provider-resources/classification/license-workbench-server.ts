@@ -31,6 +31,7 @@ const assets = new Map([
   ['/preview-ui.js', ['preview-ui.js', 'text/javascript; charset=utf-8']],
   ['/guide.js', ['guide.js', 'text/javascript; charset=utf-8']],
   ['/help.js', ['help.js', 'text/javascript; charset=utf-8']],
+  ['/report-controls.js', ['report-controls.js', 'text/javascript; charset=utf-8']],
   ['/review.js', ['review.js', 'text/javascript; charset=utf-8']],
   ['/review-edit-feedback.js', ['review-edit-feedback.js', 'text/javascript; charset=utf-8']],
   ['/review-pagination.js', ['review-pagination.js', 'text/javascript; charset=utf-8']],
@@ -285,7 +286,13 @@ function createLicenseWorkbenchApp(
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.text('Invalid report target', 400);
     try {
-      return c.json(await session.inspectReport(parsed.data));
+      const { parent, ...plan } = await session.inspectReport(parsed.data);
+      return c.json({
+        ...plan,
+        displayPath: container
+          ? await describeLicenseReportPath(plan.path, container, { parent })
+          : plan.path,
+      });
     } catch (error) {
       return c.text(error instanceof Error ? error.message : 'Report inspection failed', 409);
     }
@@ -372,6 +379,7 @@ function createLicenseWorkbenchApp(
         | '/preview-ui.js'
         | '/guide.js'
         | '/help.js'
+        | '/report-controls.js'
         | '/review.js'
         | '/review-edit-feedback.js'
         | '/review-pagination.js'
