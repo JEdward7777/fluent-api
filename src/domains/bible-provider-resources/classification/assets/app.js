@@ -7,6 +7,7 @@ import {
 } from './preview-ui.js';
 import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
 import { initSave, renderSave, saveStatusUnconfirmed } from './save.js';
+import { pendingSettings, populateSettings, readSettings } from './settings-draft.js';
 
 const launchedToken = window.location.hash.slice(1);
 if (launchedToken) window.sessionStorage.setItem('license-workbench-token', launchedToken);
@@ -21,10 +22,12 @@ const stop = document.getElementById('stop');
 const inspection = document.getElementById('inspection');
 const databaseTest = document.getElementById('database-test');
 const applySettings = document.getElementById('apply-settings');
+const restoreSettings = document.getElementById('restore-settings');
+const settingsChangeStatus = document.getElementById('settings-change-status');
 const databaseSettings = document.getElementById('database-settings');
 const settingsActionsHelp = document.getElementById('settings-actions-help');
 let setup;
-let dirty = false;
+let dirty = '';
 let applyingSettings = false;
 let practiceBusy = false;
 let sessionUnconfirmed = false;
@@ -37,6 +40,16 @@ const draftDatabase = createDraftDatabaseTest(
   confirmTestRevision,
   updateDraftControls
 );
+
+const readDraft = () => readSettings(form, draftDatabase.read());
+const pending = () => (setup ? pendingSettings(setup, readDraft()) : '');
+
+function showPending(changes) {
+  dirty = changes;
+  settingsChangeStatus.textContent = dirty
+    ? `Pending settings changes: ${dirty}. Restore applied settings to keep the current review.`
+    : '';
+}
 
 function settingsRequestActive(next = setup) {
   return applyingSettings || draftDatabase.running || next?.testingDatabase;
@@ -57,6 +70,7 @@ function syncSettingsActions(next) {
   const blocked = workbenchBusy(next) || settingsRequestActive(next);
   databaseTest.disabled = blocked || next.practice || next.state === 'uncertain';
   applySettings.disabled = blocked;
+  restoreSettings.disabled = blocked;
   inspect.disabled =
     blocked || dirty || !next.readyForInspect || !['configuring', 'error'].includes(next.state);
   analyze.disabled = blocked || dirty || next.state !== 'inspected';
@@ -84,6 +98,17 @@ function syncReviewAvailability(next) {
       settingsRequestActive(next) ||
       Boolean(next.activeOperationId)
   );
+}
+
+function checkPendingSettings() {
+  const changes = pending();
+  if (changes !== dirty) {
+    showPending(changes);
+    syncSettingsActions(setup);
+    syncReviewAvailability(setup);
+    renderGuide(setup);
+  }
+  return Boolean(changes);
 }
 
 async function request(path, method = 'GET', body, responseType = 'json') {
@@ -125,36 +150,7 @@ function render(next, populate = false) {
   if (next.configurationRevision !== setup?.configurationRevision) draftDatabase.invalidate();
   setup = next;
   updateReview(next);
-  if (populate) {
-    for (const key of [
-      'source',
-      'destination',
-      'input',
-      'output',
-      'model',
-      'cacheDir',
-      'reportFormats',
-      'reportDir',
-    ])
-      form.elements[key].value = next[key] ?? '';
-    form.elements.samples.value = next.sampleCount;
-    for (const key of ['force', 'noCache']) form.elements[key].checked = next[key];
-    form.elements.preserve.checked = next.preserveExistingNonUnknowns;
-    form.elements.databaseMode.value = next.databaseConnection.mode;
-    if (next.databaseConnection.mode === 'session') {
-      for (const [control, key] of [
-        ['databaseHost', 'host'],
-        ['databasePort', 'port'],
-        ['databaseName', 'database'],
-        ['databaseUsername', 'username'],
-        ['databaseTls', 'tls'],
-      ])
-        form.elements[control].value = next.databaseConnection[key];
-    }
-    form.elements.databasePassword.value = '';
-    form.elements.databaseClearPassword.checked = false;
-    dirty = false;
-  }
+  if (populate) populateSettings(form, next);
   draftDatabase.syncFields(setup?.databaseConnection);
   form.hidden = false;
   document.getElementById('practice-banner').hidden = !next.practice;
@@ -178,6 +174,7 @@ function render(next, populate = false) {
       ? `Scratch: ${next.scratch}. Original SHA-256: ${next.originalHash}. Restart with --practice for a fresh session; discard this directory when finished. Practice output is never imported into a real session automatically.`
       : 'Scratch is allocated after Inspect. Restart with --practice for a fresh session; discard the scratch directory when finished. Practice output is never imported into a real session automatically.';
   }
+  showPending(pending());
   document.getElementById('discard-label').hidden = !next.analysis;
   document.getElementById('database-target').textContent = next.databaseTarget;
   document.getElementById('cli-connection-note').textContent =
@@ -259,7 +256,7 @@ function render(next, populate = false) {
   else if (next.latestOperation?.state === 'failed')
     status.textContent = next.latestOperation.error;
   else if (busy) status.textContent = `${next.state}… Reloading keeps the operation.`;
-  else if (dirty) status.textContent = 'Settings changed. Apply settings before inspecting.';
+  else if (dirty) status.textContent = 'Apply the changes or restore the applied settings.';
   else
     status.textContent = next.readyForInspect
       ? 'Settings ready. Click Inspect inputs.'
@@ -280,17 +277,22 @@ async function refresh() {
 form.addEventListener('input', (event) => {
   draftDatabase.syncFields(setup?.databaseConnection);
   if (databaseSettings.contains(event.target)) draftDatabase.invalidate();
-  dirty = true;
-  if (setup) {
-    syncSettingsActions(setup);
-    syncReviewAvailability(setup);
-    renderGuide(setup);
-  }
-  status.textContent = 'Settings changed. Apply settings before inspecting.';
+  checkPendingSettings();
+});
+form.addEventListener('change', checkPendingSettings);
+document.addEventListener('focusin', checkPendingSettings);
+document.addEventListener('pointerdown', checkPendingSettings, true);
+restoreSettings.addEventListener('click', () => {
+  if (!setup || restoreSettings.disabled) return;
+  populateSettings(form, setup);
+  draftDatabase.syncFields(setup.databaseConnection);
+  draftDatabase.invalidate();
+  checkPendingSettings();
+  status.textContent = 'Applied settings restored.';
 });
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!setup || workbenchBusy(setup) || settingsRequestActive()) return;
+  if (!setup || workbenchBusy(setup) || settingsRequestActive() || !checkPendingSettings()) return;
   try {
     if (hasUnsavedReviewDraft()) {
       status.textContent = 'Apply or discard the open row edit before changing settings.';
@@ -301,7 +303,8 @@ form.addEventListener('submit', async (event) => {
     const values = form.elements;
     const discardReviewedState = Boolean(setup.analysis && values.discardReviewedState.checked);
     if (setup.analysis && !discardReviewedState) {
-      status.textContent = 'Check the discard box before replacing reviewed decisions.';
+      status.textContent =
+        'Restore applied settings to keep this review. To replace its settings, check Discard unsaved review and apply.';
       return;
     }
     applyingSettings = true;
@@ -312,19 +315,7 @@ form.addEventListener('submit', async (event) => {
       await request('setup', 'POST', {
         configurationRevision: setup.configurationRevision,
         discardReviewedState,
-        source: values.source.value || null,
-        destination: values.destination.value || null,
-        input: values.input.value,
-        output: values.output.value,
-        model: values.model.value,
-        sampleCount: Number(values.samples.value),
-        cacheDir: values.cacheDir.value || null,
-        reportFormats: values.reportFormats.value,
-        reportDir: values.reportDir.value || null,
-        force: values.force.checked,
-        noCache: values.noCache.checked,
-        preserveExistingNonUnknowns: values.preserve.checked,
-        databaseConnection: draftDatabase.read(),
+        ...readDraft(),
       }),
       true
     );
@@ -363,7 +354,13 @@ databaseTest.addEventListener('click', () => {
   void draftDatabase.run(setup.configurationRevision);
 });
 async function start(kind) {
-  if (sessionUnconfirmed || saveStatusUnconfirmed() || settingsRequestActive()) return;
+  if (
+    sessionUnconfirmed ||
+    saveStatusUnconfirmed() ||
+    settingsRequestActive() ||
+    checkPendingSettings()
+  )
+    return;
   try {
     await request(kind, 'POST', {
       operationId: crypto.randomUUID(),
@@ -389,7 +386,7 @@ async function practiceAction(path, body) {
     practiceBusy ||
     sessionUnconfirmed ||
     saveStatusUnconfirmed() ||
-    dirty ||
+    checkPendingSettings() ||
     settingsRequestActive()
   )
     return;
@@ -440,7 +437,8 @@ initSave({
   refresh,
   recover: recoverActionFailure,
   hasDraft: hasUnsavedReviewDraft,
-  isBlocked: () => sessionUnconfirmed || practiceBusy || dirty || settingsRequestActive(),
+  isBlocked: () =>
+    sessionUnconfirmed || practiceBusy || Boolean(pending()) || settingsRequestActive(),
   setPracticeBusy: (value) => {
     practiceBusy = value;
     setReviewBusy(value);
@@ -458,7 +456,7 @@ previewButton.addEventListener('click', () => {
 attestation.addEventListener('submit', (event) => {
   event.preventDefault();
   if (
-    dirty ||
+    checkPendingSettings() ||
     sessionUnconfirmed ||
     saveStatusUnconfirmed() ||
     !setup.preview ||
@@ -474,7 +472,7 @@ attestation.addEventListener('submit', (event) => {
     responsibility: true,
   });
 });
-initReportControls(request, () => setup, recoverActionFailure, token);
+initReportControls(request, () => setup, recoverActionFailure, token, checkPendingSettings);
 document.getElementById('practice-preview').addEventListener('click', () => {
   void practiceAction('practice/preview', {
     configurationRevision: setup.configurationRevision,

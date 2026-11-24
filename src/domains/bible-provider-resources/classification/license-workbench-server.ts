@@ -34,6 +34,7 @@ const assets = new Map([
   ['/review-navigation.js', ['review-navigation.js', 'text/javascript; charset=utf-8']],
   ['/review-rerun.js', ['review-rerun.js', 'text/javascript; charset=utf-8']],
   ['/save.js', ['save.js', 'text/javascript; charset=utf-8']],
+  ['/settings-draft.js', ['settings-draft.js', 'text/javascript; charset=utf-8']],
   ['/preview-text.js', ['preview-text.js', 'text/javascript; charset=utf-8']],
 ] as const);
 
@@ -359,6 +360,7 @@ function createLicenseWorkbenchApp(
         | '/review.js'
         | '/review-navigation.js'
         | '/save.js'
+        | '/settings-draft.js'
         | '/preview-text.js'
     );
     if (!asset) return c.text('Not found', 404);

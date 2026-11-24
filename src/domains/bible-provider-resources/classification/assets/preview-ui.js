@@ -73,7 +73,7 @@ export function renderExactPreview(
       : saveStatusUnconfirmed()
         ? 'Save acknowledgment is unresolved. Inspect actual targets before another mutation.'
         : dirty
-          ? 'Apply settings and inspect again before preview, attestation or Save.'
+          ? `Pending settings changes: ${dirty}. Restore applied settings to keep the current review, or apply the changes and inspect again.`
           : 'Apply this row edit or discard it before preview or attestation.';
     return;
   }
@@ -114,7 +114,13 @@ export function syncPracticeDraftControls(
       : 'Preview the exact edited revision before saving.';
 }
 
-export function initReportControls(request, getSetup, recoverActionFailure, token) {
+export function initReportControls(
+  request,
+  getSetup,
+  recoverActionFailure,
+  token,
+  settingsPending
+) {
   reportPath.addEventListener('input', clearReportPlan);
   reportFormat.addEventListener('input', () => {
     suggestReportPath(getSetup()?.reportDir);
@@ -165,7 +171,7 @@ export function initReportControls(request, getSetup, recoverActionFailure, toke
   });
   document.getElementById('report-inspect').addEventListener('click', async () => {
     const setup = getSetup();
-    if (hasUnsavedReviewDraft() || !setup.preview) return;
+    if (settingsPending() || hasUnsavedReviewDraft() || !setup.preview) return;
     try {
       reportPlan = await request('report/inspect', 'POST', {
         configurationRevision: setup.configurationRevision,
@@ -182,7 +188,7 @@ export function initReportControls(request, getSetup, recoverActionFailure, toke
     }
   });
   reportWrite.addEventListener('click', async () => {
-    if (!reportPlan || hasUnsavedReviewDraft()) return;
+    if (settingsPending() || !reportPlan || hasUnsavedReviewDraft()) return;
     if (reportPlan.existed && !reportOverwrite.checked) {
       reportTarget.textContent = 'Agree to overwrite the existing report separately from Save.';
       reportOverwrite.focus();

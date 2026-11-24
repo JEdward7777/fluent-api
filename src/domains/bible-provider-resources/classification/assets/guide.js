@@ -49,8 +49,8 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed }) {
   } else if (dirty) {
     step = 'settings';
     message = next.analysis
-      ? 'Next: Check Discard unsaved review, then click Apply settings to replace these settings.'
-      : 'Next: Click Apply settings to record your changed choices.';
+      ? `Pending settings changes: ${dirty}. Choose Restore applied settings to keep this review.`
+      : `Pending settings changes: ${dirty}. Apply the changes or restore the applied settings.`;
   } else if (next.state === 'saved') {
     message = next.practice
       ? 'Done: Incomplete JSON was saved to private scratch. See its path below.'
