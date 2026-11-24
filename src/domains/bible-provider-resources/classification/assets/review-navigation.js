@@ -90,8 +90,12 @@ export function initReviewNavigation(form, onNavigate, mayTraverse) {
     if (target.index === entry.index) return;
     if (
       !mayTraverse() ||
-      // eslint-disable-next-line no-alert -- Confirm browser traversal before discarding the editor.
-      (!discardConfirmed && dirty && !window.confirm('Discard unsaved edits to this row?'))
+      (!discardConfirmed &&
+        dirty &&
+        // eslint-disable-next-line no-alert -- Confirm browser traversal before discarding the editor.
+        !window.confirm(
+          'Discard unsaved row edits? Cancel to stay and apply the decision or update the note.'
+        ))
     ) {
       pending = { index: entry.index, repair: true };
       repairTraversal();

@@ -1,3 +1,4 @@
+import { reviewEditFeedback, validateReviewEdit } from './review-edit-feedback.js';
 import { initReviewNavigation } from './review-navigation.js';
 import { initReviewPagination } from './review-pagination.js';
 import { reviewRerunActions } from './review-rerun.js';
@@ -164,9 +165,9 @@ function reviewEditor(item) {
   const reviewer = node('input');
   reviewer.name = 'reviewedBy';
   reviewer.type = 'text';
-  reviewer.required = false;
   reviewer.maxLength = 200;
   reviewer.value = item.reviewedBy ?? '';
+  const initialReviewer = reviewer.value;
   const note = node('textarea');
   note.name = 'note';
   note.rows = 3;
@@ -177,8 +178,6 @@ function reviewEditor(item) {
   const reasonLabel = node('label', 'Reason for decision');
   reasonLabel.append(reason);
   const reviewerLabel = node('label', 'Human reviewer name');
-  reviewerLabel.title =
-    'Name the person who makes this decision. The server records its event time.';
   reviewerLabel.append(reviewer);
   const noteLabel = node(
     'label',
@@ -195,6 +194,7 @@ function reviewEditor(item) {
   );
   const error = node('p', editMessage);
   error.setAttribute('role', 'status');
+  const feedback = reviewEditFeedback(error);
   const apply = node('button', 'Apply reasoned decision');
   apply.type = 'submit';
   apply.value = 'disposition';
@@ -210,7 +210,7 @@ function reviewEditor(item) {
   noteHelp.append(saveNote);
   actions.append(applyHelp, noteHelp);
   editor.append(heading, decisionLabel, reviewerLabel, reasonLabel, warning, agreement, noteLabel);
-  editor.append(actions, help, error);
+  editor.append(actions, error, help);
   const update = () => {
     const message = item.overrideWarnings[decision.value];
     warning.hidden = !message;
@@ -228,33 +228,33 @@ function reviewEditor(item) {
   updateEditorControls = update;
   decision.addEventListener('change', update);
   editor.addEventListener('input', () => setDraftDirty(true));
+  editor.addEventListener('input', feedback.onInput);
   editor.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (editBusy) return;
     const kind = event.submitter?.value ?? 'disposition';
     const message = item.overrideWarnings[decision.value];
+    feedback.clear();
     if (
       kind === 'unknown-note' &&
-      (decision.value !== item.status || reason.value !== initialReason)
+      (decision.value !== item.status ||
+        reason.value !== initialReason ||
+        reviewer.value !== initialReviewer)
     ) {
-      error.textContent =
-        'The decision or reason has an unapplied draft. Apply it first, or restore those fields before updating only the unknown note.';
-      error.tabIndex = -1;
-      error.focus();
+      feedback.showNoteConflict(decision, reason, reviewer);
       return;
     }
     if (kind === 'disposition' && decision.value !== 'unknown' && note.value !== initialNote) {
-      error.textContent =
-        'A non-unknown decision cannot retain the changed human note. Restore the note or discard this draft before applying the decision.';
       noteLabel.hidden = false;
-      error.tabIndex = -1;
-      error.focus();
+      feedback.show('Restore the note before applying a decision other than unknown.', note);
       return;
     }
+    if (!validateReviewEdit(kind, reviewer, reason, note, feedback)) return;
     if (kind === 'disposition' && message && !agree.checked) {
-      error.textContent =
-        'Acknowledge the automatic-decision warning before applying this override.';
-      agree.focus();
+      feedback.show(
+        'Acknowledge the automatic-decision warning before applying this override.',
+        agree
+      );
       return;
     }
     const edit =
@@ -289,9 +289,7 @@ function reviewEditor(item) {
         editMessage = '';
       }
     } catch (failure) {
-      error.textContent = failure.message;
-      error.tabIndex = -1;
-      error.focus();
+      feedback.show(failure.message);
     } finally {
       editBusy = false;
       update();
@@ -317,12 +315,19 @@ async function openDetail(id) {
     discard.type = 'button';
     const keep = node('button', 'Keep editing');
     keep.type = 'button';
-    discardPrompt.append(node('p', 'This row has unsaved form edits.'), discard, keep);
+    discardPrompt.append(
+      node(
+        'p',
+        'This row has unsaved edits. Choose Keep editing, then apply the decision or update the note to keep your changes.'
+      ),
+      discard,
+      keep
+    );
     back.addEventListener('click', () => {
       if (editBusy) return;
       if (editDirty) {
         discardPrompt.hidden = false;
-        discard.focus();
+        keep.focus();
       } else navigation.backToResults();
     });
     discard.addEventListener('click', () => navigation.backToResults(true));

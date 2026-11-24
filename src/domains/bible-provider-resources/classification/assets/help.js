@@ -137,7 +137,7 @@ const help = [
   ],
   [
     '.review-editor [name="editKind"][value="unknown-note"]',
-    'Change only the follow-up note. Apply or undo any decision or reason edits first.',
+    'Change only the follow-up note. Apply or undo any decision, reason or reviewer name edits first.',
   ],
 ];
 

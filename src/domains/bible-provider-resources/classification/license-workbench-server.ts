@@ -32,6 +32,7 @@ const assets = new Map([
   ['/guide.js', ['guide.js', 'text/javascript; charset=utf-8']],
   ['/help.js', ['help.js', 'text/javascript; charset=utf-8']],
   ['/review.js', ['review.js', 'text/javascript; charset=utf-8']],
+  ['/review-edit-feedback.js', ['review-edit-feedback.js', 'text/javascript; charset=utf-8']],
   ['/review-pagination.js', ['review-pagination.js', 'text/javascript; charset=utf-8']],
   ['/review-navigation.js', ['review-navigation.js', 'text/javascript; charset=utf-8']],
   ['/review-rerun.js', ['review-rerun.js', 'text/javascript; charset=utf-8']],
@@ -45,6 +46,17 @@ function sameToken(actual: string | undefined, expected: string) {
   const received = Buffer.from(actual);
   const secret = Buffer.from(expected);
   return received.length === secret.length && timingSafeEqual(received, secret);
+}
+
+function reviewEditError(issues: z.ZodIssue[]) {
+  const hasField = (field: string) =>
+    issues.some(({ path }) => path.length === 2 && path[0] === 'edit' && path[1] === field);
+  if (hasField('reviewedBy')) return 'Enter a human reviewer name of 1 to 200 characters.';
+  if (hasField('reason')) return 'Enter a reason for the decision.';
+  if (hasField('note')) return 'Enter a note before updating the unknown note.';
+  if (hasField('unknownNote')) return 'Enter an unknown note or leave it out of the decision.';
+  if (hasField('status')) return 'Choose an allowed, forbidden or unknown decision.';
+  return 'Invalid review edit. Check the row and try again.';
 }
 
 function createLicenseWorkbenchApp(
@@ -201,7 +213,7 @@ function createLicenseWorkbenchApp(
         ]),
       })
       .safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.text('Invalid review edit', 400);
+    if (!parsed.success) return c.text(reviewEditError(parsed.error.issues), 400);
     try {
       const result = session.editReview(parsed.data);
       return c.json({ setup: session.visible, warning: result.warning });
@@ -361,6 +373,7 @@ function createLicenseWorkbenchApp(
         | '/guide.js'
         | '/help.js'
         | '/review.js'
+        | '/review-edit-feedback.js'
         | '/review-pagination.js'
         | '/review-navigation.js'
         | '/save.js'
