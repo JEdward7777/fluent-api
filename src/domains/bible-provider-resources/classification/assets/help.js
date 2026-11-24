@@ -131,10 +131,19 @@ const help = [
     '.review-editor input[type="checkbox"]',
     'Acknowledge the warning before overriding an automatic all-rights-reserved decision.',
   ],
+  [
+    '.review-editor [name="editKind"][value="disposition"]',
+    'Record the decision and reason under your name and mark the entry human-reviewed, even if the decision stays the same.',
+  ],
+  [
+    '.review-editor [name="editKind"][value="unknown-note"]',
+    'Change only the follow-up note. Apply or undo any decision or reason edits first.',
+  ],
 ];
 
 function describe(control, description, index) {
-  const label = control.closest('label');
+  const action = control.closest('.action-help');
+  const label = action ?? control.closest('label');
   if (!label || label.classList.contains('field-help-label')) return;
   const id = `field-help-${index}`;
   if (!document.getElementById(id)) {
@@ -146,20 +155,22 @@ function describe(control, description, index) {
   }
   label.classList.add('field-help-label');
   label.dataset.help = description;
-  label.tabIndex = 0;
-  label.setAttribute('aria-describedby', id);
-  const labelName = [...label.childNodes]
-    .filter(
-      (child) =>
-        child.nodeType === Node.TEXT_NODE ||
-        (child.nodeType === Node.ELEMENT_NODE && child.nodeName === 'SPAN')
-    )
-    .map((child) => child.textContent)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!control.hasAttribute('aria-label') && !control.hasAttribute('aria-labelledby'))
-    control.setAttribute('aria-label', labelName);
+  if (!action) {
+    label.tabIndex = 0;
+    label.setAttribute('aria-describedby', id);
+    const labelName = [...label.childNodes]
+      .filter(
+        (child) =>
+          child.nodeType === Node.TEXT_NODE ||
+          (child.nodeType === Node.ELEMENT_NODE && child.nodeName === 'SPAN')
+      )
+      .map((child) => child.textContent)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!control.hasAttribute('aria-label') && !control.hasAttribute('aria-labelledby'))
+      control.setAttribute('aria-label', labelName);
+  }
   control.setAttribute(
     'aria-describedby',
     [control.getAttribute('aria-describedby'), id].filter(Boolean).join(' ')
@@ -195,7 +206,7 @@ function describe(control, description, index) {
     );
   };
   label.addEventListener('pointerup', (event) => {
-    if (event.pointerType === 'touch') {
+    if (!action && event.pointerType === 'touch') {
       alignTooltip();
       label.classList.add('help-touch-open');
     }
@@ -204,7 +215,8 @@ function describe(control, description, index) {
     alignTooltip();
     label.classList.remove('help-dismissed');
   });
-  label.addEventListener('pointerleave', () => label.classList.remove('help-dismissed'));
+  if (!action)
+    label.addEventListener('pointerleave', () => label.classList.remove('help-dismissed'));
   label.addEventListener('focusin', () => {
     alignTooltip();
     label.classList.remove('help-dismissed');
@@ -234,12 +246,12 @@ function initFieldHelp() {
         label.classList.remove('help-touch-open');
         label.classList.add('help-dismissed');
       }
-      if (document.activeElement?.matches('.field-help-label')) document.activeElement.blur();
+      if (document.activeElement?.matches('label.field-help-label')) document.activeElement.blur();
     }
   });
   const repositionOpenHelp = () => {
     for (const label of document.querySelectorAll('.field-help-label'))
-      if (label.matches(':hover, :focus-visible, .help-touch-open'))
+      if (label.matches(':hover, :focus-visible, :has(> button:focus-visible), .help-touch-open'))
         label.dispatchEvent(new Event('field-help-position'));
   };
   window.addEventListener('scroll', repositionOpenHelp, true);

@@ -129,7 +129,7 @@ function reviewEditor(item) {
   const heading = node('h4', 'Human review');
   const help = node(
     'p',
-    'Name the person making this row decision and give a rationale. Confirming the current status is a new human review event. An unknown note is optional and can be updated separately. Saving an edit invalidates the prior preview.'
+    'Applying a reasoned decision records a new human review, even if the decision stays the same. For an unknown entry, updating the note keeps the existing decision, reason, reviewer and review time. After an edit changes the review, Preview again and Save to write it.'
   );
   const decision = node('select');
   decision.name = 'status';
@@ -184,26 +184,20 @@ function reviewEditor(item) {
   saveNote.value = 'unknown-note';
   saveNote.name = 'editKind';
   const actions = node('div', undefined, 'actions');
-  actions.append(apply, saveNote);
-  editor.append(
-    heading,
-    help,
-    decisionLabel,
-    reviewerLabel,
-    reasonLabel,
-    warning,
-    agreement,
-    noteLabel,
-    actions,
-    error
-  );
+  const applyHelp = node('span', undefined, 'action-help');
+  const noteHelp = node('span', undefined, 'action-help');
+  applyHelp.append(apply);
+  noteHelp.append(saveNote);
+  actions.append(applyHelp, noteHelp);
+  editor.append(heading, decisionLabel, reviewerLabel, reasonLabel, warning, agreement, noteLabel);
+  editor.append(actions, help, error);
   const update = () => {
     const message = item.overrideWarnings[decision.value];
     warning.hidden = !message;
     warning.textContent = message ?? '';
     agreement.hidden = !message;
     noteLabel.hidden = decision.value !== 'unknown' && note.value === initialNote;
-    saveNote.hidden = item.status !== 'unknown' || decision.value !== 'unknown';
+    noteHelp.hidden = item.status !== 'unknown' || decision.value !== 'unknown';
     const locked =
       editBusy ||
       externalBusy ||

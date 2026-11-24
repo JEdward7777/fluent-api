@@ -176,10 +176,12 @@ label {
 }
 .field-help-label {
   position: relative;
+}
+label.field-help-label {
   padding-right: 1.6rem;
   cursor: help;
 }
-.field-help-label::after {
+label.field-help-label::after {
   content: 'ⓘ';
   position: absolute;
   right: 0;
@@ -221,6 +223,7 @@ label {
 }
 .field-help-label:not(.help-dismissed):hover::before,
 .field-help-label:not(.help-dismissed):focus-visible::before,
+.action-help:not(.help-dismissed):has(> button:focus-visible)::before,
 .field-help-label:not(.help-dismissed).help-touch-open::before {
   display: block;
 }
