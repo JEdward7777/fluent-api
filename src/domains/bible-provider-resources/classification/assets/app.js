@@ -11,7 +11,8 @@ import { initSave, renderSave, saveStatusUnconfirmed } from './save.js';
 const launchedToken = window.location.hash.slice(1);
 if (launchedToken) window.sessionStorage.setItem('license-workbench-token', launchedToken);
 const token = launchedToken || window.sessionStorage.getItem('license-workbench-token');
-window.history.replaceState(null, '', window.location.pathname + window.location.search);
+if (launchedToken)
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
 const status = document.getElementById('status');
 const form = document.getElementById('setup');
 const inspect = document.getElementById('inspect');

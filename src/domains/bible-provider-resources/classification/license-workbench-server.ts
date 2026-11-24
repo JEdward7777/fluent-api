@@ -31,6 +31,7 @@ const assets = new Map([
   ['/guide.js', ['guide.js', 'text/javascript; charset=utf-8']],
   ['/help.js', ['help.js', 'text/javascript; charset=utf-8']],
   ['/review.js', ['review.js', 'text/javascript; charset=utf-8']],
+  ['/review-navigation.js', ['review-navigation.js', 'text/javascript; charset=utf-8']],
   ['/review-rerun.js', ['review-rerun.js', 'text/javascript; charset=utf-8']],
   ['/save.js', ['save.js', 'text/javascript; charset=utf-8']],
   ['/preview-text.js', ['preview-text.js', 'text/javascript; charset=utf-8']],
@@ -356,6 +357,7 @@ function createLicenseWorkbenchApp(
         | '/guide.js'
         | '/help.js'
         | '/review.js'
+        | '/review-navigation.js'
         | '/save.js'
         | '/preview-text.js'
     );

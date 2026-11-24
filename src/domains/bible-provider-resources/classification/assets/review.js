@@ -1,3 +1,4 @@
+import { initReviewNavigation } from './review-navigation.js';
 import { reviewRerunActions } from './review-rerun.js';
 
 const section = document.getElementById('review');
@@ -6,26 +7,34 @@ const rows = document.getElementById('review-rows');
 const summary = document.getElementById('review-summary');
 const detail = document.getElementById('review-detail');
 const pager = document.getElementById('review-pager');
+const results = document.getElementById('review-results');
+const heading = document.getElementById('review-heading');
+const viewStatus = document.getElementById('review-view-status');
 let request;
 let submitEdit;
 let selectRerun;
 let onDraftChange = () => {};
 let currentSetup;
-let selectedId = null;
 let loadedRevision = null;
-let page = 1;
+let renderedView;
 let listRequest = 0;
 let detailRequest = 0;
-let viewEpoch = 0;
 let editBusy = false;
 let externalBusy = false;
 let editDirty = false;
 let editMessage = '';
 let updateEditorControls = () => {};
+const navigation = initReviewNavigation(
+  form,
+  pager,
+  () => updateReview(currentSetup),
+  () => !editBusy
+);
 
 function setDraftDirty(value) {
   if (editDirty === value) return;
   editDirty = value;
+  navigation.setDirty(value);
   onDraftChange(value);
 }
 
@@ -57,29 +66,28 @@ function expandable(heading, value) {
   wrapper.append(node('summary', heading), node('pre', value));
   return wrapper;
 }
-function queryPath() {
-  const params = new URLSearchParams({
-    search: form.elements.search.value,
-    status: form.elements.status.value,
-    source: form.elements.source.value,
-    page: String(page),
-  });
-  return `review?${params}`;
+function currentRevision(result) {
+  return `${result.configurationRevision}:${result.contentRevision}` === loadedRevision;
 }
-async function loadRows() {
+async function loadRows(view, focusRow) {
   const sequence = ++listRequest;
-  const epoch = viewEpoch;
   try {
-    const result = await request(queryPath());
-    if (sequence !== listRequest || epoch !== viewEpoch) return;
-    page = result.page;
+    const { search, status, source, page: requestedPage } = view;
+    const result = await request(
+      `review?${new URLSearchParams({ search, status, source, page: requestedPage })}`
+    );
+    if (sequence !== listRequest) return;
+    if (!currentRevision(result))
+      throw new Error('Review changed. Reload to see the current results.');
+    const { page } = result;
+    navigation.setPage(view, page);
     rows.replaceChildren();
     for (const item of result.rows) {
       const tr = node('tr');
       const action = node('button', item.preview || '(empty original notice)');
       action.type = 'button';
       action.dataset.rowId = item.id;
-      action.addEventListener('click', () => void openDetail(item.id));
+      action.addEventListener('click', () => navigation.openRow(item.id));
       const preview = node('td');
       preview.append(action, node('small', `Row ID: ${item.id}`));
       preview.dataset.label = 'Original notice preview';
@@ -120,8 +128,16 @@ async function loadRows() {
       empty.append(node('td', 'No matching classifications. Change search or filters.'));
       rows.append(empty);
     }
+    if (focusRow && !view.row)
+      (rows.querySelector(`[data-row-id="${focusRow}"]`) ?? form.elements.search).focus();
   } catch (error) {
-    if (sequence === listRequest && epoch === viewEpoch) summary.textContent = error.message;
+    if (sequence === listRequest) {
+      rows.replaceChildren();
+      summary.textContent =
+        error.message === 'Start analysis before reviewing evidence'
+          ? 'Review is no longer available. Reload to see the current setup.'
+          : error.message;
+    }
   }
 }
 function reviewEditor(item) {
@@ -282,11 +298,11 @@ function reviewEditor(item) {
 }
 async function openDetail(id) {
   const sequence = ++detailRequest;
-  const epoch = viewEpoch;
   try {
     const item = await request(`review/${encodeURIComponent(id)}`);
-    if (sequence !== detailRequest || epoch !== viewEpoch) return;
-    selectedId = id;
+    if (sequence !== detailRequest) return;
+    if (!currentRevision(item))
+      throw new Error('Review changed. Reload to see the current results.');
     detail.replaceChildren();
     const title = node('h3', 'Classification evidence');
     const back = node('button', 'Back to results');
@@ -298,22 +314,14 @@ async function openDetail(id) {
     const keep = node('button', 'Keep editing');
     keep.type = 'button';
     discardPrompt.append(node('p', 'This row has unsaved form edits.'), discard, keep);
-    const returnToResults = () => {
-      setDraftDirty(false);
-      editMessage = '';
-      selectedId = null;
-      detail.hidden = true;
-      document.getElementById('review-results').hidden = false;
-      const origin = rows.querySelector(`[data-row-id="${id}"]`);
-      (origin ?? form.elements.search).focus();
-    };
     back.addEventListener('click', () => {
+      if (editBusy) return;
       if (editDirty) {
         discardPrompt.hidden = false;
         discard.focus();
-      } else returnToResults();
+      } else navigation.backToResults();
     });
-    discard.addEventListener('click', returnToResults);
+    discard.addEventListener('click', () => navigation.backToResults(true));
     keep.addEventListener('click', () => {
       discardPrompt.hidden = true;
       back.focus();
@@ -406,15 +414,17 @@ async function openDetail(id) {
       );
       detail.append(sampleSection);
     }
-    document.getElementById('review-results').hidden = true;
+    viewStatus.hidden = true;
     detail.hidden = false;
     back.focus();
   } catch (error) {
-    if (sequence === detailRequest && epoch === viewEpoch) {
-      selectedId = null;
-      detail.hidden = true;
-      document.getElementById('review-results').hidden = false;
-      summary.textContent = error.message;
+    if (sequence === detailRequest) {
+      navigation.forgetRow();
+      viewStatus.hidden = false;
+      viewStatus.textContent =
+        error.message === 'Review row was not found'
+          ? 'This row is no longer available. Showing results.'
+          : 'Could not open this row. Check the results or reload the review.';
     }
   }
 }
@@ -424,24 +434,6 @@ export function initReview(fetchReview, sendEdit, draftChanged, onRerun = async 
   submitEdit = sendEdit;
   selectRerun = onRerun;
   onDraftChange = draftChanged;
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    page = 1;
-    void loadRows();
-  });
-  for (const key of ['status', 'source'])
-    form.elements[key].addEventListener('change', () => {
-      page = 1;
-      void loadRows();
-    });
-  pager.querySelector('[name="previous"]').addEventListener('click', () => {
-    page--;
-    void loadRows();
-  });
-  pager.querySelector('[name="next"]').addEventListener('click', () => {
-    page++;
-    void loadRows();
-  });
 }
 
 export function setReviewBusy(busy) {
@@ -452,43 +444,52 @@ export function setReviewBusy(busy) {
 
 export function updateReview(setup) {
   currentSetup = setup;
+  const view = navigation.sync(setup);
+  const previous = renderedView;
+  renderedView = view;
   updateEditorControls();
   for (const button of detail.querySelectorAll('[data-rerun]'))
     button.disabled =
       Boolean(setup.activeOperationId) || !['reviewing', 'previewed'].includes(setup.state);
   section.hidden = !setup.analysis;
   if (!setup.analysis) {
-    viewEpoch++;
     listRequest++;
     detailRequest++;
-    if (loadedRevision !== null) form.reset();
+    if (loadedRevision !== null || previous !== view) form.reset();
     loadedRevision = null;
-    selectedId = null;
     setDraftDirty(false);
     editMessage = '';
     updateEditorControls = () => {};
-    page = 1;
     rows.replaceChildren();
     summary.textContent = 'Start analysis to review evidence.';
     detail.replaceChildren();
     detail.hidden = true;
-    document.getElementById('review-results').hidden = false;
+    results.hidden = false;
+    viewStatus.hidden = true;
     return;
   }
   const revision = `${setup.configurationRevision}:${setup.contentRevision}`;
-  if (loadedRevision !== revision) {
-    viewEpoch++;
+  if (loadedRevision !== revision || previous !== view) {
     listRequest++;
     detailRequest++;
-    const reopenId = selectedId;
+    const focusRow = previous?.row;
+    if (['search', 'status', 'source', 'page'].some((key) => previous?.[key] !== view[key]))
+      rows.replaceChildren();
+    if (previous !== view) {
+      for (const key of ['search', 'status', 'source']) form.elements[key].value = view[key];
+      setDraftDirty(false);
+      editMessage = '';
+    }
     loadedRevision = revision;
     detail.replaceChildren();
     detail.hidden = true;
-    document.getElementById('review-results').hidden = false;
-    if (reopenId) void openDetail(reopenId);
-    void loadRows();
-    if (!reopenId) {
-      const heading = document.getElementById('review-heading');
+    results.hidden = Boolean(view.row);
+    viewStatus.hidden = !view.row;
+    viewStatus.textContent = view.row ? 'Loading classification evidence…' : '';
+    updateEditorControls = () => {};
+    if (view.row) void openDetail(view.row);
+    void loadRows(view, focusRow);
+    if (!view.row && !focusRow && previous === view) {
       heading.tabIndex = -1;
       heading.focus();
     }
