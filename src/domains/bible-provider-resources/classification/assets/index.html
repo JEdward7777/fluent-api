@@ -13,7 +13,7 @@
       <header>
         <p class="eyebrow">Local developer tool</p>
         <h1>License workbench</h1>
-        <p>Inspect a source to prepare free evidence and review its classifications.</p>
+        <p>Load a source to prepare free evidence and review its classifications.</p>
       </header>
       <nav aria-label="Workflow stages">
         <ol>
@@ -59,12 +59,14 @@
             >
             <label data-stage="load">Input JSON path <input name="input" required /></label>
             <label data-stage="save">Output JSON path <input name="output" required /></label>
-            <label data-stage="ai"
-              >Model <input name="model" required pattern="google:[^ :]+"
-            /></label>
-            <label data-stage="ai"
-              >Samples <input name="samples" type="number" min="2" step="1" required
-            /></label>
+            <label data-stage="ai">
+              <span>Model</span>
+              <input name="model" required pattern="google:[^ :]+" />
+            </label>
+            <label data-stage="ai">
+              <span>Samples</span>
+              <input name="samples" type="number" min="2" step="1" required />
+            </label>
           </div>
           <p id="database-target" class="notice"></p>
           <!-- prettier-ignore -->
@@ -121,9 +123,10 @@
           <details data-stage="ai save" open>
             <summary>Advanced settings</summary>
             <div class="fields">
-              <label data-stage="ai"
-                >Cache directory <input name="cacheDir" placeholder="Default cache"
-              /></label>
+              <label data-stage="ai">
+                <span>Cache directory</span>
+                <input name="cacheDir" placeholder="Default cache" />
+              </label>
               <label data-stage="save"
                 >Report formats
                 <select name="reportFormats">
@@ -133,21 +136,22 @@
                   <option value="markdown,html">Markdown and HTML</option>
                 </select></label
               >
-              <label data-stage="save"
-                >Report directory <input name="reportDir" placeholder="Default"
-              /></label>
-              <label data-stage="ai"
-                ><input type="checkbox" name="noCache" /> Ignore cached requests</label
-              >
+              <label data-stage="save">
+                <span>Report directory</span>
+                <input name="reportDir" placeholder="Default" />
+              </label>
+              <label data-stage="ai">
+                <input type="checkbox" name="noCache" />
+                <span>Ignore cached requests</span>
+              </label>
               <input type="checkbox" name="force" hidden />
-              <label data-stage="save"
-                ><input type="checkbox" name="preserve" /> Preserve status</label
-              >
+              <label data-stage="save">
+                <input type="checkbox" name="preserve" />
+                <span>Preserve status</span>
+              </label>
             </div>
           </details>
-          <p data-stage="load">
-            Paths are local to the server process. Load reads the selected source.
-          </p>
+          <p data-stage="load">Use paths on the workbench server.</p>
           <p data-stage="save">Existing output is checked before Save.</p>
           <label data-stage="load" id="discard-label" hidden
             ><input type="checkbox" name="discardReviewedState" /> Discard unsaved review</label
@@ -172,19 +176,11 @@
           <p id="cli-connection-note">
             Use these settings in terminal review. The CLI uses its environment database connection.
           </p>
-          <p>For database sources, CLI plan-only may request uncached samples shown at Inspect.</p>
+          <p>For database sources, CLI plan-only may request uncached samples in the estimate.</p>
           <p>It may write JSON too, while leaving policy untouched.</p>
           <pre id="cli-command"></pre>
         </details>
-        <p
-          id="status"
-          tabindex="-1"
-          class="stage-status"
-          aria-label="Workflow status"
-          role="status"
-        >
-          Connecting to the local session…
-        </p>
+        <p id="status" tabindex="-1" aria-label="Workflow status" role="status">Connecting…</p>
         <p class="stage-links" aria-label="Session activity">
           <a id="source-test-status" href="?stage=load" hidden></a>
           <a id="destination-test-status" href="?stage=save" hidden></a>
@@ -192,23 +188,23 @@
           <a id="save-ready" href="?stage=save" hidden></a>
         </p>
         <div data-stage="load ai" id="inspection" hidden></div>
-        <label data-stage="ai" id="paid-human" hidden
-          ><input type="checkbox" /> <span></span
-        ></label>
+        <label data-stage="ai" id="paid-human" hidden>
+          <input type="checkbox" />
+          <span></span>
+        </label>
         <div id="analysis-actions" class="actions">
-          <button data-stage="load" id="inspect" type="button" disabled>Load source</button
-          ><button data-stage="load ai" id="analyze" type="button" disabled>
-            Prepare free evidence</button
-          ><button data-stage="ai" id="paid" type="button" hidden>Run paid classification</button
-          ><button data-stage="ai" id="stop" type="button" hidden>Stop after current key</button>
+          <button data-stage="load" id="inspect" type="button" disabled>Load source</button>
+          <button data-stage="load ai" id="analyze" aria-describedby="analysis-help" disabled>
+            Prepare free evidence
+          </button>
+          <button data-stage="ai" id="paid" type="button" hidden>Run paid classification</button>
+          <button data-stage="ai" id="stop" type="button" hidden>Stop after current key</button>
         </div>
         <div data-stage="load ai" id="analysis-progress" role="status">
           <span class="analysis-spinner" aria-hidden="true" hidden></span>
           <span id="analysis-progress-text"></span>
         </div>
-        <p data-stage="load" id="inspect-help">
-          Inspect reads selected files, database and request cache as needed.
-        </p>
+        <p data-stage="load" id="inspect-help">Load reads the selected source and request cache.</p>
         <p data-stage="ai" id="analysis-help">Free preparation sends zero model requests.</p>
         <section data-stage="review" id="review" hidden aria-labelledby="review-heading">
           <h2 id="review-heading">Review classification evidence</h2>
@@ -289,7 +285,7 @@
         </label>
         <div data-stage="save" id="practice-review" hidden>
           <h2>Practice output</h2>
-          <p>Edit a classification above, then preview the scratch output.</p>
+          <p>Preview the scratch JSON before saving it.</p>
           <div class="actions">
             <button id="practice-preview" type="button">Preview scratch output</button
             ><button id="practice-save" type="button" disabled>Save incomplete scratch JSON</button>
@@ -347,7 +343,7 @@
           <p id="source-resolution-status" role="status"></p>
         </section>
         <p data-stage="save" id="session-save-status" role="status" hidden></p>
-        <button data-stage="save" id="reconcile-save" type="button" hidden>
+        <button data-stage="save" id="reconcile-save" aria-describedby="session-save-status" hidden>
           Check actual Save targets
         </button>
         <p data-stage="save" id="save-result" role="status" hidden></p>
@@ -359,15 +355,9 @@
             <li><strong>JSON → JSON:</strong> overwrite JSON from the current draft.</li>
             <li><strong>Database → JSON:</strong> sync JSON; database stays unchanged.</li>
             <li><strong>JSON → database:</strong> sync by rank; retain omissions.</li>
-            <li>
-              <strong>Database → database:</strong> overwrite selected rows; retain omissions.
-            </li>
-            <li>
-              <strong>JSON → both:</strong> overwrite JSON and independently sync the database.
-            </li>
-            <li>
-              <strong>Database → both:</strong> sync JSON and overwrite selected database rows.
-            </li>
+            <li><strong>Database → database:</strong> overwrite selected rows only.</li>
+            <li><strong>JSON → both:</strong> overwrite JSON and sync the database.</li>
+            <li><strong>Database → both:</strong> sync JSON and overwrite selected rows.</li>
           </ul>
           <p id="alternatives-note">Both writes file and database targets.</p>
         </details>

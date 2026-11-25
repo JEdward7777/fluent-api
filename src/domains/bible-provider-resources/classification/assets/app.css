@@ -76,7 +76,7 @@ nav small {
 .stage-hidden {
   display: none !important;
 }
-.stage-status {
+#status {
   border-inline-start: 0.25rem solid #245773;
   padding-inline-start: 0.65rem;
 }
@@ -476,16 +476,16 @@ td button {
 .stage-links:not(:has(a:not([hidden]))) {
   display: none;
 }
-.stage-status[data-state='error'],
+#status[data-state='error'],
 #database-test-result[data-state='error'] {
   border-inline-start: 0.25rem solid #a63730;
   background: #fff3ef;
   padding: 0.5rem;
 }
-.stage-status[data-state='busy'] {
+#status[data-state='busy'] {
   border-color: #af7713;
   background: #fff9e8;
 }
-.stage-status[data-state='ready'] {
+#status[data-state='ready'] {
   border-color: #357753;
 }

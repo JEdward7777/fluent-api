@@ -2,7 +2,7 @@
 const help = [
   [
     '#setup [name="source"]',
-    'Choose saved JSON evidence or the configured database to inspect. Practice reads saved JSON or its bundled example only.',
+    'Choose saved JSON evidence or the configured database to load. Practice reads saved JSON or its bundled example only.',
   ],
   [
     '#setup [name="destination"]',
@@ -52,7 +52,7 @@ const help = [
   ],
   [
     '#setup [name="input"]',
-    'Local path to the saved JSON source, read when you inspect inputs. Practice can use the bundled example.',
+    'Local path to the saved JSON source, read when you load the source. Practice can use the bundled example.',
   ],
   [
     '#setup [name="output"]',
@@ -72,11 +72,11 @@ const help = [
   ],
   [
     '#setup [name="reportFormats"]',
-    'Optional report formats for analysis output. A separately inspected report can also be exported after preview.',
+    'Report formats for the equivalent CLI command. In the workbench, choose a format and path when exporting a report.',
   ],
   [
     '#setup [name="reportDir"]',
-    'Local directory for reports produced during normal analysis. Practice does not write reports.',
+    'Directory for reports produced by the equivalent CLI command. In the workbench, Export uses the report path you enter.',
   ],
   [
     '#setup [name="noCache"]',
