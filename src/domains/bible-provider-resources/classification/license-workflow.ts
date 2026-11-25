@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type {
@@ -43,6 +45,7 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
   private database?: LicenseDatabaseAdapter;
   private readonly destination = new LicenseWorkflowDestination();
   protected inspection?: LicenseInspection;
+  private previewReviewer = '';
   private previewPromise?: Promise<LicensePreview>;
   private closePromise?: Promise<void>;
   private readonly saveOperations = new Map<string, LicenseSaveOperation>();
@@ -237,21 +240,29 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
 
   async preview(
     expectedConfigurationRevision: number,
-    expectedContentRevision: number
+    expectedContentRevision: number,
+    reviewedBy = ''
   ): Promise<LicensePreview> {
     this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
-    if (this.reviewDrafts.size)
-      throw new Error('Revert pending session edits before using this operation');
-    if (this.state === 'previewing' && this.previewPromise) return this.previewPromise;
+    const reviewer = this.reviewDrafts.size ? reviewedBy.trim() : '';
+    if (this.state === 'previewing' && this.previewPromise) {
+      if (this.previewReviewer !== reviewer) throw new Error('Another reviewer preview is running');
+      return this.previewPromise;
+    }
     if (
+      this.busyDone ||
       !this.analysis ||
       !this.inspection ||
       !['inspected', 'reviewing', 'previewed'].includes(this.state)
     )
       throw new Error(`Cannot preview while ${this.state}`);
+    this.previewResult = undefined;
+    this.state = 'reviewing';
+    const candidate = this.saveCandidate(this.analysis, reviewer);
+    this.previewReviewer = reviewer;
     this.state = 'previewing';
     this.beginBusy();
-    this.previewPromise = this.performPreview(this.inspection, this.analysis);
+    this.previewPromise = this.performPreview(this.inspection, candidate);
     return this.previewPromise;
   }
 
@@ -268,6 +279,9 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
         this.database
       );
       this.previewResult = freezeReviewValue({
+        token: randomUUID(),
+        candidate: analysis,
+        reviewer: this.previewReviewer,
         configurationRevision: this.configurationRevision,
         contentRevision: this.contentRevision,
         plan,
@@ -277,7 +291,7 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
       return this.previewResult;
     } catch (error) {
       this.previewResult = undefined;
-      if (error instanceof LicenseInspectionStaleError) {
+      if (error instanceof LicenseInspectionStaleError && !this.reviewDrafts.size) {
         this.inspection = undefined;
         this.analysis = undefined;
         this.state = 'configuring';
@@ -302,9 +316,17 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
     if (this.operations.get(frozenRequest.operationId))
       throw new Error('License operation ID was reused with different arguments');
     this.requireContentRevision(frozenRequest.configurationRevision, frozenRequest.contentRevision);
-    if (this.state !== 'previewed' || !this.previewResult || !this.analysis || !this.inspection)
+    if (
+      this.busyDone ||
+      this.state !== 'previewed' ||
+      !this.previewResult ||
+      !this.analysis ||
+      !this.inspection
+    )
       throw new Error('Preview this exact revision before saving');
     const preview = this.previewResult;
+    if (frozenRequest.previewToken !== preview.token)
+      throw new Error('Stale preview token; preview again before saving');
     if (
       preview.configurationRevision !== frozenRequest.configurationRevision ||
       preview.contentRevision !== frozenRequest.contentRevision
@@ -314,7 +336,7 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
       throw new Error(`Save conflicts: ${preview.plan.conflicts.join('; ')}`);
     this.state = 'saving';
     this.beginBusy();
-    const promise = this.performSave(frozenRequest, preview, this.inspection, this.analysis);
+    const promise = this.performSave(frozenRequest, preview, this.inspection);
     this.saveOperations.set(frozenRequest.operationId, { fingerprint, promise });
     this.operations.track(
       frozenRequest.operationId,
@@ -323,6 +345,7 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
         frozenRequest.configurationRevision,
         frozenRequest.contentRevision,
         frozenRequest.agreeToReplace,
+        frozenRequest.previewToken,
       ],
       promise
     );
@@ -332,27 +355,37 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
   private async performSave(
     request: LicenseSaveRequest,
     preview: LicensePreview,
-    inspection: LicenseInspection,
-    analysis: LicenseAnalysis
+    inspection: LicenseInspection
   ): Promise<LicenseSaveResult> {
     try {
       const result = await writePreviewedLicenseSave({
         request,
         preview,
-        analysis,
         options: this.options,
         ...this.destination.publication(inspection, this.database),
         fs: this.dependencies.fs,
       });
+      if (this.reviewDrafts.size) {
+        this.analysis = preview.candidate;
+        this.acceptPreparedRows(
+          preview.candidate.artifact.classifications.map((row) => row.normalizedText)
+        );
+      }
       this.state = 'saved';
       return result;
     } catch (error) {
-      if (inspection.sourceOnly && destinationSaveFailure(error, this.options)) {
+      if (
+        error instanceof LicenseSavePreflightError ||
+        (this.reviewDrafts.size &&
+          (error instanceof LicenseInspectionStaleError ||
+            error instanceof LicenseFileDriftError ||
+            error instanceof LicensePolicyDriftError)) ||
+        (inspection.sourceOnly && destinationSaveFailure(error, this.options))
+      ) {
         this.previewResult = undefined;
         this.state = 'reviewing';
       } else if (
         error instanceof LicenseInspectionStaleError ||
-        error instanceof LicenseSavePreflightError ||
         error instanceof LicenseFileDriftError ||
         error instanceof LicensePolicyDriftError
       ) {
@@ -406,10 +439,13 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
       this.state = 'previewed';
       return result;
     } catch (error) {
-      if (error instanceof LicenseDestinationRecheckError) {
+      if (
+        error instanceof LicenseDestinationRecheckError ||
+        (this.reviewDrafts.size && error instanceof LicenseInspectionStaleError)
+      ) {
         this.previewResult = undefined;
         this.state = 'reviewing';
-      } else if (error instanceof LicenseInspectionStaleError) {
+      } else if (error instanceof LicenseInspectionStaleError && !this.reviewDrafts.size) {
         this.inspection = undefined;
         this.analysis = undefined;
         this.previewResult = undefined;

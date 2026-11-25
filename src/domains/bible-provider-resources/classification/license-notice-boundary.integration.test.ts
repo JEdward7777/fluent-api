@@ -282,6 +282,7 @@ it('keeps an orphaned empty key unavailable in production preflight, analysis, J
     expect(preview.plan.conflicts).toEqual([]);
     expect(preview.reports.reports[0].bytes).toContain('Original notice unavailable');
     await workflow.save({
+      previewToken: workflow.previewed!.token,
       operationId: 'orphan-empty-key',
       configurationRevision: 1,
       contentRevision: 1,

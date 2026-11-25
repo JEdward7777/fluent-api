@@ -1,7 +1,7 @@
 import { licenseWorkbenchPreviewLines } from './preview-text.js';
 import { renderReportControls } from './report-controls.js';
 import { hasUnsavedReviewDraft } from './review.js';
-import { saveStatusUnconfirmed } from './save.js';
+import { reviewerMatchesPreview, saveStatusUnconfirmed } from './save.js';
 
 const normalPreview = document.getElementById('normal-preview');
 const previewButton = document.getElementById('normal-preview-button');
@@ -12,7 +12,10 @@ export function renderExactPreview(
 ) {
   normalPreview.hidden = next.practice || (!next.analysis && !next.saveOutcome);
   const blocked = hasUnsavedReviewDraft() || sessionUnconfirmed || saveStatusUnconfirmed() || dirty;
-  renderReportControls(next, blocked || practiceBusy || settingsBusy);
+  renderReportControls(
+    next,
+    blocked || practiceBusy || settingsBusy || !reviewerMatchesPreview(next)
+  );
   if (normalPreview.hidden) return;
   previewButton.disabled =
     blocked ||
@@ -22,7 +25,10 @@ export function renderExactPreview(
     !['reviewing', 'previewed'].includes(next.state);
   const attestation = document.getElementById('attestation');
   attestation.hidden =
-    !next.preview || next.preview.review?.status === 'ready' || next.state !== 'previewed';
+    !next.preview ||
+    Boolean(next.analysis?.pendingReviews) ||
+    next.preview.review?.status === 'ready' ||
+    next.state !== 'previewed';
   for (const element of attestation.elements)
     element.disabled = blocked || practiceBusy || settingsBusy || Boolean(next.activeOperationId);
   const preview = next.preview;
@@ -65,7 +71,13 @@ export function syncPracticeDraftControls(
     settingsBusy ||
     Boolean(setup.activeOperationId);
   document.getElementById('practice-preview').disabled = blocked || busy || setup.state === 'saved';
-  document.getElementById('practice-save').disabled = blocked || busy || !setup.preview;
+  document.getElementById('practice-save').disabled =
+    blocked ||
+    busy ||
+    setup.state !== 'previewed' ||
+    !setup.preview ||
+    Boolean(setup.preview.conflicts?.length) ||
+    !reviewerMatchesPreview(setup);
   document.getElementById('practice-preview-result').textContent = blocked
     ? 'Apply this row edit or use Back to results to discard it before previewing or saving.'
     : setup.preview

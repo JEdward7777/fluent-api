@@ -1,7 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { checkLicenseArtifactReview } from '../license-artifact';
+import {
+  checkLicenseArtifactReview,
+  recordHumanLicenseDecision,
+  serializeLicenseArtifact,
+} from '../license-artifact';
 import { makeCommandFixture } from './license-command.test-fixtures';
 import { licenseReviewRowId } from './license-workbench-review';
 import { LicenseWorkflow } from './license-workflow';
@@ -27,6 +31,71 @@ async function readyWorkflow(attested = true) {
 }
 
 describe('shared workflow exact-preview Save', () => {
+  it('keeps a tied event in conflict and retries a definitely unwritten candidate without redating it', async () => {
+    const f = await fixture();
+    const instant = '2026-11-02T00:00:00.000Z';
+    const now = vi.fn(() => instant);
+    const read = vi.fn(licenseFileIo.read);
+    const workflow = new LicenseWorkflow(f.options, {
+      ...f.dependencies,
+      destinationDatabase: f.dependencies.database,
+      fs: { ...licenseFileIo, read },
+      now,
+    });
+    try {
+      const key = f.artifact.classifications[0].normalizedText;
+      const tied = recordHumanLicenseDecision(
+        f.artifact,
+        key,
+        'unknown',
+        'Concurrent decision',
+        'Other reviewer',
+        instant
+      );
+      await writeFile(f.output, serializeLicenseArtifact(tied).bytes);
+      await workflow.inspect(1);
+      const mark = workflow.mutateDraft(
+        {
+          kind: 'mark',
+          id: licenseReviewRowId(key),
+          epoch: workflow.reviewDrafts.epoch,
+          contentRevision: workflow.status.contentRevision,
+          mutationId: crypto.randomUUID(),
+        },
+        true
+      );
+      now.mockClear();
+      const revision = mark.contentRevision;
+      const conflict = await workflow.preview(1, revision, 'Sam');
+      expect(conflict.plan.conflicts.join(' ')).toContain(key);
+      const request = {
+        operationId: 'tied',
+        previewToken: conflict.token,
+        configurationRevision: 1,
+        contentRevision: revision,
+        agreeToReplace: false,
+      };
+      expect(() => workflow.save(request)).toThrow('Save conflicts');
+      await workflow.configureLoadedSettings(
+        { ...f.options, output: `${f.dir}/other.json` },
+        true,
+        false
+      );
+      const preview = await workflow.preview(1, revision, 'Sam');
+      const failedRequest = { ...request, operationId: 'failed', previewToken: preview.token };
+      read.mockRejectedValueOnce(new Error('temporary read failure'));
+      await expect(workflow.save(failedRequest)).rejects.toThrow('recheck inspected inputs');
+      expect(workflow.reviewDrafts.size).toBe(1);
+      const retry = await workflow.preview(1, revision, 'Sam');
+      expect(retry.candidate.artifact).toEqual(conflict.candidate.artifact);
+      expect(now).toHaveBeenCalledOnce();
+      await expect(workflow.save(failedRequest)).rejects.toThrow('recheck inspected inputs');
+      await workflow.save({ ...request, operationId: 'retry', previewToken: retry.token });
+      expect(now).toHaveBeenCalledOnce();
+    } finally {
+      await workflow.close();
+    }
+  });
   it('saves edited JSON A to B, then counts the physical difference and publishes to A', async () => {
     const f = await fixture(false);
     const dependencies = { ...f.dependencies, destinationDatabase: f.dependencies.database };
@@ -47,7 +116,11 @@ describe('shared workflow exact-preview Save', () => {
       );
       const request = { configurationRevision: 1, contentRevision: 2, agreeToReplace: false };
       expect((await workflow.preview(1, 2)).plan.jsonChanges.inserted).toHaveLength(3);
-      await workflow.save({ ...request, operationId: 'save-copy' });
+      await workflow.save({
+        ...request,
+        previewToken: workflow.previewed!.token,
+        operationId: 'save-copy',
+      });
       expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
       const options = { ...f.options, output: f.input };
       await workflow.configureLoadedSettings(options, true, false);
@@ -59,7 +132,11 @@ describe('shared workflow exact-preview Save', () => {
         metadataChanges: [],
       });
       expect(preview.plan.jsonChanges.unchanged).toHaveLength(2);
-      await workflow.save({ ...request, operationId: 'save-original' });
+      await workflow.save({
+        ...request,
+        previewToken: workflow.previewed!.token,
+        operationId: 'save-original',
+      });
       expect(await readFile(f.input, 'utf8')).toBe(await readFile(f.output, 'utf8'));
       const reloaded = new LicenseWorkflow(options, dependencies);
       try {
@@ -88,6 +165,7 @@ describe('shared workflow exact-preview Save', () => {
         if (state === 'saved') {
           await workflow.preview(1, 1);
           await workflow.save({
+            previewToken: workflow.previewed!.token,
             operationId: 'save-before-draft',
             configurationRevision: 1,
             contentRevision: 1,
@@ -126,6 +204,7 @@ describe('shared workflow exact-preview Save', () => {
     expect(checkLicenseArtifactReview(workflow.analyzed!.artifact).status).toBe('review-required');
     expect(preview.plan.targets).toEqual([{ path: f.output, previous: null, role: 'output' }]);
     const request = {
+      previewToken: workflow.previewed!.token,
       operationId: 'save-json-1',
       configurationRevision: 1,
       contentRevision: 1,
@@ -135,6 +214,7 @@ describe('shared workflow exact-preview Save', () => {
     expect(retry).toEqual(first);
     expect(
       await workflow.save({
+        previewToken: workflow.previewed!.token,
         agreeToReplace: false,
         contentRevision: 1,
         operationId: 'save-json-1',
@@ -164,6 +244,7 @@ describe('shared workflow exact-preview Save', () => {
     await workflow.startAnalysis(1);
     await workflow.preview(1, 1);
     const firstRequest = {
+      previewToken: workflow.previewed!.token,
       operationId: 'original-save',
       configurationRevision: 1,
       contentRevision: 1,
@@ -175,6 +256,7 @@ describe('shared workflow exact-preview Save', () => {
     await workflow.startAnalysis(2);
     await workflow.preview(2, 1);
     await workflow.save({
+      previewToken: workflow.previewed!.token,
       operationId: 'later-save',
       configurationRevision: 2,
       contentRevision: 1,
@@ -196,6 +278,7 @@ describe('shared workflow exact-preview Save', () => {
       await writeFile(changed === 'input' ? f.input : f.output, 'external edit');
       await expect(
         workflow.save({
+          previewToken: workflow.previewed!.token,
           operationId: `save-${changed}`,
           configurationRevision: 1,
           contentRevision: 1,
@@ -228,6 +311,7 @@ describe('shared workflow exact-preview Save', () => {
     expect(preview.plan.requiresForceAgreement).toBe(false);
     expect(preview.plan.databaseChanges.preserved).toContain('existing policy');
     const result = await workflow.save({
+      previewToken: workflow.previewed!.token,
       operationId: 'mixed-import',
       configurationRevision: 1,
       contentRevision: 1,
@@ -251,6 +335,7 @@ describe('shared workflow exact-preview Save', () => {
     const preview = await workflow.preview(1, 1);
     expect(preview.plan.databaseChanges.inserted.length).toBeGreaterThan(0);
     await workflow.save({
+      previewToken: workflow.previewed!.token,
       operationId: 'empty-db-source',
       configurationRevision: 1,
       contentRevision: 1,
@@ -276,6 +361,7 @@ describe('shared workflow exact-preview Save', () => {
     const preview = await workflow.preview(1, 2);
     expect(preview.plan.targets.map((target) => target.path)).toEqual([f.output]);
     await workflow.save({
+      previewToken: workflow.previewed!.token,
       operationId: 'json-output-only',
       configurationRevision: 1,
       contentRevision: 2,
@@ -317,6 +403,7 @@ describe('shared workflow exact-preview Save', () => {
     await workflow.preview(1, 1);
     hold = true;
     const request = {
+      previewToken: workflow.previewed!.token,
       operationId: 'approved-before-await',
       configurationRevision: 1,
       contentRevision: 1,
@@ -350,6 +437,7 @@ describe('shared workflow exact-preview Save', () => {
     await workflow.preview(1, 1);
     await expect(
       workflow.save({
+        previewToken: workflow.previewed!.token,
         operationId: 'lost-acknowledgement',
         configurationRevision: 1,
         contentRevision: 1,
@@ -380,13 +468,14 @@ describe('shared workflow exact-preview Save', () => {
     failRead = true;
     await expect(
       workflow.save({
+        previewToken: workflow.previewed!.token,
         operationId: 'preflight-read-failed',
         configurationRevision: 1,
         contentRevision: 1,
         agreeToReplace: false,
       })
     ).rejects.toThrow('Could not recheck inspected inputs');
-    expect(workflow.status.state).toBe('configuring');
+    expect(workflow.status.state).toBe('reviewing');
     expect(f.adapter.apply).not.toHaveBeenCalled();
     await workflow.close();
   });

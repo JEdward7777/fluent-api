@@ -48,6 +48,7 @@ it('fences row mutations, reassessment and report plans across a successful sour
     expect(session.reviewDetail(row.id).status).toBe(row.status);
     await session.preview(revision.configurationRevision, revision.contentRevision);
     const report = await session.inspectReport({
+      previewToken: session.visible.preview!.token,
       ...revision,
       format: 'markdown',
       path: join(fixture.dir, 'impact.md'),
@@ -254,6 +255,7 @@ it.each([false, true])(
       await session.previewPractice(a.configurationRevision, a.contentRevision);
       if (published) {
         const op = await session.savePractice({
+          previewToken: session.visible.preview!.token,
           configurationRevision: a.configurationRevision,
           contentRevision: a.contentRevision,
           operationId: crypto.randomUUID(),

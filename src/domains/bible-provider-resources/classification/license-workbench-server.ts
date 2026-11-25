@@ -259,26 +259,25 @@ function createLicenseWorkbenchApp(
       return c.text(error instanceof Error ? error.message : 'Reassessment unavailable', 409);
     }
   });
-  app.post('/api/practice/preview', async (c) => {
-    const parsed = revisionSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.text('Invalid practice preview', 400);
-    try {
-      await session.previewPractice(parsed.data.configurationRevision, parsed.data.contentRevision);
-      return c.json(session.visible);
-    } catch (error) {
-      return c.text(error instanceof Error ? error.message : 'Preview failed', 409);
-    }
-  });
-  app.post('/api/preview', async (c) => {
-    const parsed = revisionSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.text('Invalid preview revision', 400);
-    try {
-      await session.preview(parsed.data.configurationRevision, parsed.data.contentRevision);
-      return c.json(session.visible);
-    } catch (error) {
-      return c.text(error instanceof Error ? error.message : 'Preview failed', 409);
-    }
-  });
+  for (const practice of [false, true]) {
+    app.post(practice ? '/api/practice/preview' : '/api/preview', async (c) => {
+      const parsed = revisionSchema
+        .extend({ reviewedBy: z.string().max(500).optional() })
+        .safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) return c.text('Invalid preview revision', 400);
+      try {
+        await session.preview(
+          parsed.data.configurationRevision,
+          parsed.data.contentRevision,
+          practice,
+          parsed.data.reviewedBy
+        );
+        return c.json(session.visible);
+      } catch (error) {
+        return c.text(error instanceof Error ? error.message : 'Preview failed', 409);
+      }
+    });
+  }
   app.post('/api/attest', async (c) => {
     const parsed = revisionSchema
       .extend({
@@ -299,6 +298,7 @@ function createLicenseWorkbenchApp(
   app.post('/api/report/inspect', async (c) => {
     const parsed = revisionSchema
       .extend({
+        previewToken: z.string().uuid(),
         format: z.enum(['html', 'markdown']),
         path: z.string().trim().min(1).max(4096),
       })
@@ -364,7 +364,7 @@ function createLicenseWorkbenchApp(
   });
   app.post('/api/practice/save', async (c) => {
     const parsed = revisionSchema
-      .extend({ operationId: z.string().uuid() })
+      .extend({ previewToken: z.string().uuid(), operationId: z.string().uuid() })
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.text('Invalid practice save', 400);
     try {
@@ -375,7 +375,11 @@ function createLicenseWorkbenchApp(
   });
   app.post('/api/save', async (c) => {
     const parsed = revisionSchema
-      .extend({ operationId: z.string().uuid(), agreeToReplace: z.boolean() })
+      .extend({
+        previewToken: z.string().uuid(),
+        operationId: z.string().uuid(),
+        agreeToReplace: z.boolean(),
+      })
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.text('Invalid Save fields', 400);
     try {
@@ -432,7 +436,7 @@ export async function startLicenseWorkbenchServer(
   localProxyUrl?: string,
   injected?: Pick<
     LicenseWorkflowDependencies,
-    'apiKey' | 'database' | 'destinationDatabase' | 'transport' | 'fs'
+    'apiKey' | 'database' | 'destinationDatabase' | 'transport' | 'fs' | 'now'
   >,
   container?: LicenseReviewerContainer
 ) {

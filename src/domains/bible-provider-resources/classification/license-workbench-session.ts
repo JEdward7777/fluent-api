@@ -85,6 +85,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
           (async () => ownedWorkbenchDatabase(this.destinationConnection)),
         transport: this.injected?.transport,
         fs: this.injected?.fs,
+        now: this.injected?.now,
       });
     }
     if (!this.workflow && kind !== 'inspect')
@@ -225,10 +226,15 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       body.contentRevision
     );
   }
-  async previewPractice(configurationRevision: number, contentRevision: number) {
-    return this.preview(configurationRevision, contentRevision, true);
+  async previewPractice(configurationRevision: number, contentRevision: number, reviewedBy = '') {
+    return this.preview(configurationRevision, contentRevision, true, reviewedBy);
   }
-  async preview(configurationRevision: number, contentRevision: number, practice = false) {
+  async preview(
+    configurationRevision: number,
+    contentRevision: number,
+    practice = false,
+    reviewedBy = ''
+  ) {
     if (this.practiceMode !== practice || !this.workflow)
       throw new Error('Preview is unavailable in this mode');
     if (this.activeOperationId) throw new Error('An operation is running');
@@ -236,9 +242,9 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       throw new Error('Stale configuration revision');
     const workflow = this.workflow;
     if (workflow.status.state === 'previewing')
-      return workflow.preview(workflow.status.configurationRevision, contentRevision);
+      return workflow.preview(workflow.status.configurationRevision, contentRevision, reviewedBy);
     return this.reserve(() =>
-      workflow.preview(workflow.status.configurationRevision, contentRevision)
+      workflow.preview(workflow.status.configurationRevision, contentRevision, reviewedBy)
     );
   }
   attest(body: {
@@ -266,6 +272,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     );
   }
   async inspectReport(body: {
+    previewToken: string;
     configurationRevision: number;
     contentRevision: number;
     format: 'html' | 'markdown';
@@ -290,6 +297,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
   }
 
   async savePractice(body: {
+    previewToken: string;
     operationId: string;
     configurationRevision: number;
     contentRevision: number;
@@ -299,6 +307,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
   }
 
   save(body: {
+    previewToken: string;
     operationId: string;
     configurationRevision: number;
     contentRevision: number;
@@ -309,6 +318,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       body.configurationRevision,
       body.contentRevision,
       body.agreeToReplace,
+      body.previewToken,
     ]);
     if (this.rerunOperations.get(body.operationId))
       throw new Error('Operation ID was reused with different arguments');
@@ -328,6 +338,8 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     const preview = this.workflow.previewed;
     if (!preview || preview.contentRevision !== body.contentRevision)
       throw new Error('Preview this exact revision before saving');
+    if (preview.token !== body.previewToken)
+      throw new Error('Stale preview token; preview again before saving');
     const policy = this.visible.preview?.policy;
     const incomplete = Boolean(this.visible.preview?.incomplete);
     const promise = this.workflow.save({

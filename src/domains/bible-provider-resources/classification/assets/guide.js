@@ -56,6 +56,8 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed, sta
   } else if (next.sourceDraftPending) {
     step = 'inspect';
     message = 'Inspect the selected source before starting analysis.';
+  } else if (next.state === 'saved' && next.saveOutcome?.state !== 'succeeded') {
+    message = 'Check the result of this tab’s Save below.';
   } else if (next.state === 'saved') {
     message = next.practice
       ? 'Done: Incomplete JSON was saved to private scratch. See its path below.'

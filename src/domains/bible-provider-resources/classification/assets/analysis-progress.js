@@ -65,10 +65,12 @@ export function workflowStatus(next, { busy, dirty, starting }) {
     if (operation.state === 'succeeded' && operation.cleanupWarning)
       return `Loaded the selected source. ${operation.cleanupWarning}`;
   }
+  if (next.state === 'saved' && next.saveOutcome?.state !== 'succeeded')
+    return next.saveOutcome?.error ?? 'Checking this tab’s Save operation.';
   if (!next.practice && next.state === 'saved')
     return 'Save completed. See the written paths, hashes and policy result below.';
   if (next.practice && next.state === 'saved')
-    return `Incomplete practice JSON saved to ${next.preview?.output}. Discard the scratch directory when finished.`;
+    return `Incomplete practice JSON saved to ${next.saveOutcome.result.targets[0]?.path}. Discard the scratch directory when finished.`;
   if (next.analysis)
     return next.practice
       ? `Practice analysis ready: ${next.analysis.rows} rows. Review the evidence below, then save only to scratch.`

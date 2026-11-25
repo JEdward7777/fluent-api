@@ -67,15 +67,7 @@ export function invalidateReportSelection() {
 }
 
 export function renderReportControls(next, workflowBlocked) {
-  const nextKey =
-    next.state === 'previewed' && next.preview
-      ? JSON.stringify([
-          next.launchId,
-          next.configurationRevision,
-          next.contentRevision,
-          next.preview.wholeFileHash,
-        ])
-      : '';
+  const nextKey = next.state === 'previewed' ? (next.preview?.token ?? '') : '';
   const nextBlocked = Boolean(workflowBlocked || next.activeOperationId);
   const previousPath = path.value;
   suggestPath(next.reportDir);
@@ -152,6 +144,7 @@ export function initReportControls(request, getSetup, recover, token, settingsPe
     if (settingsPending() || exportButton.disabled) return;
     const { configurationRevision, contentRevision } = getSetup();
     const selection = {
+      previewToken: getSetup().preview.token,
       configurationRevision,
       contentRevision,
       path: path.value.trim(),

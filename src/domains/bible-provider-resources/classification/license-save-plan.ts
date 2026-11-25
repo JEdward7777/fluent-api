@@ -56,8 +56,8 @@ export function buildLicenseSavePlan(input: {
     overwriteJson,
     overwriteDatabase: input.overwriteDatabase ?? false,
   });
-  const reportingArtifact = destinations.databaseForecast ?? destinations.jsonArtifact ?? artifact;
-  const reports = renderLicenseReports(reportingArtifact, {
+  const reports = renderLicenseReports(artifact, {
+    impactArtifact: destinations.databaseForecast ?? destinations.jsonArtifact,
     formats: options.reportFormats,
     outputDir: options.reportDir,
     interactive: false,

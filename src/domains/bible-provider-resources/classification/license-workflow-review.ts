@@ -10,6 +10,7 @@ import type {
 } from './license-workflow.types';
 
 import {
+  applyHumanLicenseDecision,
   attestLicenseArtifact,
   licenseOverrideWarning,
   recordAnonymousLicenseNote,
@@ -73,6 +74,33 @@ export abstract class LicenseWorkflowReview {
   }
   get reviewDrafts(): Pick<LicenseReviewDrafts, 'epoch' | 'size' | 'values'> {
     return this.drafts;
+  }
+  private candidate?: { baseline: LicenseAnalysis; reviewer: string; analysis: LicenseAnalysis };
+  protected saveCandidate(baseline: LicenseAnalysis, reviewer: string) {
+    if (!this.drafts.size) return baseline;
+    if (!reviewer) {
+      this.candidate = undefined;
+      throw new Error('Enter a reviewer name for pending session edits');
+    }
+    if (this.candidate?.baseline === baseline && this.candidate.reviewer === reviewer)
+      return this.candidate.analysis;
+    const instant = this.dependencies.now?.() ?? new Date().toISOString();
+    const artifact = reviseLicenseArtifact(baseline.artifact, (draft) => {
+      for (const row of draft.classifications) {
+        const values = this.drafts.values(row);
+        if (values.pending)
+          applyHumanLicenseDecision(
+            row,
+            values.status,
+            { reviewComment: values.reviewComment ?? undefined },
+            reviewer,
+            instant
+          );
+      }
+    });
+    const analysis = Object.freeze({ ...baseline, artifact: freezeLicenseRevision(artifact) });
+    this.candidate = { baseline, reviewer, analysis };
+    return analysis;
   }
   protected analysis?: LicenseAnalysis;
   protected previewResult?: LicensePreview;
@@ -187,6 +215,8 @@ export abstract class LicenseWorkflowReview {
     this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
     if (!this.analysis || this.state !== 'previewed' || !this.previewResult)
       throw new Error('Preview this exact revision before attestation');
+    if (this.drafts.size)
+      throw new Error('Save pending session edits before whole-file attestation');
     if (this.analysis.artifact.reviewContentHash !== expectedReviewHash)
       throw new Error('Stale license review hash');
     if (!metadata.reviewedBy.trim() || !metadata.reviewReason.trim())

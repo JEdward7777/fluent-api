@@ -14,7 +14,7 @@ import {
 import { initReportControls, invalidateReportSelection } from './report-controls.js';
 import { reassessmentStatus } from './review-rerun.js';
 import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
-import { initSave, renderSave, saveStatusUnconfirmed } from './save.js';
+import { initSave, renderSave, saveStatusUnconfirmed, withTabSaveOutcome } from './save.js';
 import {
   equivalentCliCommand,
   pendingSettings,
@@ -152,6 +152,7 @@ async function request(path, method = 'GET', body, responseType = 'json') {
   });
   if (!response.ok) {
     const error = new Error(await response.text());
+    error.status = response.status;
     error.requestRejected = [400, 403, 409].includes(response.status);
     throw error;
   }
@@ -189,7 +190,8 @@ initReview(
     return next;
   }
 );
-function render(next, populate = false) {
+function render(raw, populate = false) {
+  const next = withTabSaveOutcome(raw, setup);
   sessionUnconfirmed = false;
   if (setup?.loadRevision !== next.loadRevision || setup?.contentRevision !== next.contentRevision)
     form.elements.discardReviewedState.checked = false;
@@ -452,15 +454,22 @@ initSave({
   setPracticeBusy: (value) => {
     practiceBusy = value;
     if (value) invalidateReportSelection();
-    if (setup) renderExactPreview(setup);
-    setReviewBusy(value);
-    if (setup) syncPracticeDraftControls();
-    if (setup) renderGuide(setup);
+    if (setup) {
+      syncReviewAvailability(setup);
+      renderGuide(setup);
+    }
   },
-  render,
 });
+const saveReviewer = document.getElementById('save-reviewer');
+saveReviewer.addEventListener('input', () => syncReviewAvailability(setup));
 function preview(path) {
+  if (setup.analysis?.pendingReviews && !saveReviewer.value.trim()) {
+    status.textContent = 'Enter a reviewer name for pending decisions.';
+    saveReviewer.focus();
+    return;
+  }
   return practiceAction(path, {
+    reviewedBy: saveReviewer.value,
     configurationRevision: setup.configurationRevision,
     contentRevision: setup.contentRevision,
   });

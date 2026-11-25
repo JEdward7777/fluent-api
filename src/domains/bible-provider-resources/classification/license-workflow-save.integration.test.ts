@@ -8,6 +8,7 @@ import { createTestSchema } from '@/db/testing/create-catalogue-schema';
 import { recordHumanLicenseDecision, serializeLicenseArtifact } from '../license-artifact';
 import { createLicenseDatabaseAdapter } from './license-classifications.service';
 import { makeCommandFixture } from './license-command.test-fixtures';
+import { licenseReviewRowId } from './license-workbench-review';
 import { LicenseWorkflow } from './license-workflow';
 
 const { client, database } = await vi.hoisted(async () => {
@@ -37,6 +38,121 @@ beforeEach(async () => {
 afterAll(() => client.close());
 
 describe('save through actual classification adapter', () => {
+  it('freezes pending reviews across retries and reports the candidate independently of Both winners', async () => {
+    const f = await makeCommandFixture();
+    const adapter = createLicenseDatabaseAdapter();
+    const instant = '2026-11-01T00:00:00.000Z';
+    const now = vi.fn(() => instant);
+    const workflow = new LicenseWorkflow(
+      { ...f.options, destination: 'both', reportFormats: 'html,markdown' },
+      {
+        ...f.dependencies,
+        database: async () => adapter,
+        destinationDatabase: async () => adapter,
+        now,
+      }
+    );
+    try {
+      const [first, second, untouched] = f.artifact.classifications;
+      const destination = recordHumanLicenseDecision(
+        f.artifact,
+        first.normalizedText,
+        'unknown',
+        'Later evidence',
+        'Database reviewer',
+        '2099-01-01T00:00:00.000Z'
+      );
+      await adapter.apply(destination, true);
+      await workflow.inspect(1);
+      const baseline = workflow.analyzed!.artifact;
+      for (const row of [first, second]) {
+        expect(
+          workflow.mutateDraft(
+            {
+              kind: 'patch',
+              touched: true,
+              reviewComment: 'Checked & confirmed',
+              status: 'allowed',
+              id: licenseReviewRowId(row.normalizedText),
+              epoch: workflow.reviewDrafts.epoch,
+              mutationId: crypto.randomUUID(),
+              contentRevision: workflow.status.contentRevision,
+            },
+            true
+          ).conflict
+        ).toBe(false);
+      }
+      const revision = workflow.status.contentRevision;
+      now.mockClear();
+      await expect(workflow.preview(1, revision)).rejects.toThrow('reviewer name');
+      const firstPreview = workflow.preview(1, revision, 'Reviewer A');
+      const duplicatePreview = workflow.preview(1, revision, 'Reviewer A');
+      await expect(workflow.preview(1, revision, 'Reviewer B')).rejects.toThrow(
+        'preview is running'
+      );
+      expect((await firstPreview).token).toBe((await duplicatePreview).token);
+      const refreshed = await workflow.preview(1, revision, 'Reviewer A');
+      expect(refreshed.token).not.toBe((await firstPreview).token);
+      expect(refreshed.plan.reviewContentHash).toBe((await firstPreview).plan.reviewContentHash);
+      expect(now).toHaveBeenCalledOnce();
+      const preview = await workflow.preview(1, revision, 'Reviewer B');
+      expect(now).toHaveBeenCalledTimes(2);
+      expect(preview.plan.reviewContentHash).not.toBe(refreshed.plan.reviewContentHash);
+      expect(workflow.analyzed!.artifact).toBe(baseline);
+      expect(preview.plan.databaseChanges.preserved).toContain(first.normalizedText);
+      expect(preview.reports.artifact).toEqual(preview.candidate.artifact);
+      expect(preview.reports.reviewContentHash).toBe(preview.plan.reviewContentHash);
+      for (const report of preview.reports.reports) {
+        expect(report.bytes).toContain('Reviewer B');
+        expect(report.bytes).toContain('2026');
+      }
+      const request = {
+        configurationRevision: 1,
+        contentRevision: revision,
+        operationId: 'both-frozen',
+        agreeToReplace: false,
+        previewToken: preview.token,
+      };
+      expect(() => workflow.save({ ...request, previewToken: refreshed.token })).toThrow(
+        'Stale preview token'
+      );
+      const publication = workflow.save(request);
+      expect(workflow.save(request)).toBe(publication);
+      expect(() => workflow.save({ ...request, previewToken: refreshed.token })).toThrow('reused');
+      await publication;
+      expect(await workflow.save(request)).toEqual(await publication);
+      expect(now).toHaveBeenCalledTimes(2);
+      const written = await f.readOutput();
+      expect(written).toEqual(preview.plan.jsonArtifact);
+      const finalized = written.classifications.filter(
+        (row) => row.normalizedText !== untouched.normalizedText
+      );
+      expect(finalized).toHaveLength(2);
+      for (const row of finalized)
+        expect(row).toMatchObject({
+          reviewedBy: 'Reviewer B',
+          decisionAt: instant,
+          humanReviewedAt: instant,
+          reviewComment: 'Checked & confirmed',
+        });
+      expect(
+        written.classifications.find((row) => row.normalizedText === untouched.normalizedText)
+      ).toEqual(
+        baseline.classifications.find((row) => row.normalizedText === untouched.normalizedText)
+      );
+      const stored = (await adapter.load()).classifications;
+      expect(stored.find((row) => row.normalizedText === first.normalizedText)?.reviewedBy).toBe(
+        'Database reviewer'
+      );
+      expect(stored.find((row) => row.normalizedText === second.normalizedText)?.reviewedBy).toBe(
+        'Reviewer B'
+      );
+    } finally {
+      await workflow.close();
+      await f.cleanup();
+    }
+  });
+
   it('bootstraps an empty database from valid unattested mixed-state JSON', async () => {
     const f = await makeCommandFixture(false);
     try {
@@ -49,6 +165,7 @@ describe('save through actual classification adapter', () => {
       const preview = await workflow.preview(1, 1);
       expect(preview.plan.targets).toEqual([]);
       await workflow.save({
+        previewToken: workflow.previewed!.token,
         operationId: 'bootstrap-mixed',
         configurationRevision: 1,
         contentRevision: 1,
@@ -76,6 +193,7 @@ describe('save through actual classification adapter', () => {
       await first.startAnalysis(1);
       await first.preview(1, 1);
       await first.save({
+        previewToken: first.previewed!.token,
         operationId: 'first-import',
         configurationRevision: 1,
         contentRevision: 1,
@@ -98,6 +216,7 @@ describe('save through actual classification adapter', () => {
         changedKeys: [],
       });
       await replay.save({
+        previewToken: replay.previewed!.token,
         operationId: 'repeat-import',
         configurationRevision: 1,
         contentRevision: 1,
@@ -146,6 +265,7 @@ describe('save through actual classification adapter', () => {
         changedKeys: [],
       });
       await workflow.save({
+        previewToken: workflow.previewed!.token,
         operationId: 'partial-import',
         configurationRevision: 1,
         contentRevision: 1,
@@ -193,6 +313,7 @@ describe('save through actual classification adapter', () => {
         'whole-table classification replacement'
       );
       await workflow.save({
+        previewToken: workflow.previewed!.token,
         operationId: 'omit-legacy',
         configurationRevision: 1,
         contentRevision: 1,
@@ -237,6 +358,7 @@ describe('save through actual classification adapter', () => {
         changedKeys: [key],
       });
       await workflow.save({
+        previewToken: workflow.previewed!.token,
         operationId: 'metadata-only',
         configurationRevision: 1,
         contentRevision: 1,
@@ -288,6 +410,7 @@ describe('save through actual classification adapter', () => {
       await workflow.preview(1, 1);
       await expect(
         workflow.save({
+          previewToken: workflow.previewed!.token,
           operationId: 'locked-drift',
           configurationRevision: 1,
           contentRevision: 1,

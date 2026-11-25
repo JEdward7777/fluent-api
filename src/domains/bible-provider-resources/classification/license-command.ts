@@ -231,6 +231,7 @@ export async function runLicenseCommand(
       return 0;
     }
     await workflow.save({
+      previewToken: preview.token,
       operationId: `cli-${createHash('sha256')
         .update(JSON.stringify([options.input, options.output, preview.plan.wholeFileHash]))
         .digest('hex')}`,

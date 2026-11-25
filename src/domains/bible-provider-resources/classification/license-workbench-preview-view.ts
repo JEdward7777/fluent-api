@@ -20,9 +20,11 @@ export function licenseWorkbenchPreviewView(input: {
   const preview = workflow?.previewed;
   if (!preview) return null;
   const impact = preview.reports.model.impact;
-  const review = workflow?.analyzed ? checkLicenseArtifactReview(workflow.analyzed.artifact) : null;
+  const review = checkLicenseArtifactReview(preview.candidate.artifact);
   void policyBaseline;
   return {
+    token: preview.token,
+    reviewer: preview.reviewer,
     configurationRevision,
     sourceLabel: options.source === 'database' ? input.loadedDatabaseTarget : options.input,
     destinationDatabaseLabel:

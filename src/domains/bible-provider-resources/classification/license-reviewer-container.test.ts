@@ -89,9 +89,16 @@ it('preserves loopback Host, Origin and token gates for reports in container mod
       configurationRevision: initial.configurationRevision,
       contentRevision: current.contentRevision,
     };
-    expect((await api('preview', revision)).status).toBe(200);
+    const response = await api('preview', revision);
+    expect(response.status).toBe(200);
+    const { preview } = await response.json();
     const path = join(fixture.dir, 'output.html');
-    const inspected = await api('report/inspect', { ...revision, path, format: 'html' });
+    const inspected = await api('report/inspect', {
+      ...revision,
+      previewToken: preview.token,
+      path,
+      format: 'html',
+    });
     expect(inspected.status).toBe(200);
     const inspectedPlan = await inspected.json();
     expect(inspectedPlan).toMatchObject({ displayPath: `Container path: ${path}`, existed: false });

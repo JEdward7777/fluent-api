@@ -324,6 +324,7 @@ it('exports exact raw notices and retains a column-only key without a witness th
       expect(report.bytes).toContain(raw[1]);
     }
     await workflow.save({
+      previewToken: workflow.previewed!.token,
       operationId: 'notice-witnesses',
       configurationRevision: 1,
       contentRevision: 1,

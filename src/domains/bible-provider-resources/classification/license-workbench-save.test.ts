@@ -50,7 +50,15 @@ describe('workbench Save operation', () => {
       expect((await api('preview', 'POST', revision)).status).toBe(200);
       const preview = (await (await api('setup')).json()).preview;
       expect(preview.incomplete).toBe(true);
-      const save = { ...revision, operationId: crypto.randomUUID(), agreeToReplace: false };
+      const save = {
+        previewToken: preview.token,
+        ...revision,
+        operationId: crypto.randomUUID(),
+        agreeToReplace: false,
+      };
+      const stale = { ...save, previewToken: crypto.randomUUID() };
+      expect((await api('save', 'POST', stale)).status).toBe(409);
+      expect((await api(`operations/${stale.operationId}`)).status).toBe(404);
       expect((await api('save', 'POST', { ...save, agreeToReplace: true })).status).toBe(202);
       // A matching ID with changed fields cannot reinterpret the first operation.
       expect((await api('save', 'POST', save)).status).toBe(409);
@@ -132,12 +140,18 @@ describe('workbench Save operation', () => {
         configurationRevision: 1,
         contentRevision: (await edit.json()).setup.contentRevision,
       };
-      await api('preview', 'POST', revision);
+      const { preview } = await (await api('preview', 'POST', revision)).json();
       await writeFile(fixture.output, 'external edit');
       const saveId = crypto.randomUUID();
       expect(
-        (await api('save', 'POST', { ...revision, operationId: saveId, agreeToReplace: false }))
-          .status
+        (
+          await api('save', 'POST', {
+            previewToken: preview.token,
+            ...revision,
+            operationId: saveId,
+            agreeToReplace: false,
+          })
+        ).status
       ).toBe(202);
       for (let attempt = 0; attempt < 50; attempt++) {
         if ((await (await api(`operations/${saveId}`)).json()).state === 'failed') break;

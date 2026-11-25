@@ -370,6 +370,7 @@ describe('source and destination connection ownership', () => {
       other.adapter.load.mockRejectedValueOnce(new Error(secret));
       const saveDestination = () =>
         session.save({
+          previewToken: session.visible.preview!.token,
           operationId: crypto.randomUUID(),
           configurationRevision: session.visible.configurationRevision,
           contentRevision: changed.contentRevision,

@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import type { LicenseArtifact } from './license-artifact.schemas';
 import type { LicenseDatabaseContext } from './license-impact';
 
 import { selectLicenseReportFormats } from './license-report-formats';
@@ -10,6 +11,7 @@ import { buildLicenseReportModel } from './license-report-model';
 import { freezeReviewValue } from './license-review-revision';
 
 export interface LicenseReportOptions {
+  impactArtifact?: LicenseArtifact;
   formats?: string;
   outputDir?: string;
   database?: LicenseDatabaseContext;
@@ -27,7 +29,8 @@ export function renderLicenseReports(value: unknown, options: LicenseReportOptio
   const model = buildLicenseReportModel(
     value,
     options.database,
-    options.preserveExistingNonUnknowns
+    options.preserveExistingNonUnknowns,
+    options.impactArtifact
   );
   const reports = formats.map((format) => {
     const path = join(outputDir, `license-impact.${format === 'html' ? 'html' : 'md'}`);

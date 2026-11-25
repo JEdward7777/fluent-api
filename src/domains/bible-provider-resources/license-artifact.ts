@@ -207,24 +207,34 @@ export function recordHumanLicenseDecision(
       (candidate) => candidate.normalizedText === normalizedText
     );
     if (!row) throw new Error('No exact normalized classification exists');
-    preserveReplacedReview(row, row);
-    delete row.reviewComment;
-    if (row.source !== 'manual')
-      row.automaticDecision = { source: row.source, status: row.status, rationale: row.rationale };
-    delete row.rowNote;
-    delete row.rowNoteProvenance;
-    row.status = status;
-    row.source = 'manual';
-    // String input is the legacy disposition contract. New reviews keep their
-    // optional authored text separate from the original proposal's rationale.
-    row.rationale = typeof review === 'string' ? review : '';
-    if (typeof review !== 'string' && review.reviewComment?.trim())
-      row.reviewComment = review.reviewComment;
-    row.reviewState = 'human_reviewed';
-    row.decisionAt = decisionAt;
-    row.reviewedBy = reviewedBy;
-    row.humanReviewedAt = decisionAt;
+    applyHumanLicenseDecision(row, status, review, reviewedBy, decisionAt);
   });
+}
+
+export function applyHumanLicenseDecision(
+  row: LicenseClassification,
+  status: LicenseClassification['status'],
+  review: string | { reviewComment?: string },
+  reviewedBy: string,
+  decisionAt: string
+) {
+  preserveReplacedReview(row, row);
+  delete row.reviewComment;
+  if (row.source !== 'manual')
+    row.automaticDecision = { source: row.source, status: row.status, rationale: row.rationale };
+  delete row.rowNote;
+  delete row.rowNoteProvenance;
+  row.status = status;
+  row.source = 'manual';
+  // String input is the legacy disposition contract. New reviews keep their
+  // optional authored text separate from the original proposal's rationale.
+  row.rationale = typeof review === 'string' ? review : '';
+  if (typeof review !== 'string' && review.reviewComment?.trim())
+    row.reviewComment = review.reviewComment;
+  row.reviewState = 'human_reviewed';
+  row.decisionAt = decisionAt;
+  row.reviewedBy = reviewedBy;
+  row.humanReviewedAt = decisionAt;
 }
 
 /** Legacy note-only edits do not change the decision's reviewer or clock. */

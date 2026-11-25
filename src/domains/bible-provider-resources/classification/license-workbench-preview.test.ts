@@ -131,12 +131,19 @@ describe('local license preview, attestation and report export', () => {
       ]);
       expect(preview.policy).toBeNull();
       expect(
-        (await api('report/inspect', 'POST', { ...revision, format: 'html', path: fixture.input }))
-          .status
+        (
+          await api('report/inspect', 'POST', {
+            ...revision,
+            previewToken: preview.token,
+            format: 'html',
+            path: fixture.input,
+          })
+        ).status
       ).toBe(409);
       const report = JSON.parse(
         (
           await api('report/inspect', 'POST', {
+            previewToken: preview.token,
             ...revision,
             format: 'markdown',
             path: `${fixture.dir}/impact.md`,

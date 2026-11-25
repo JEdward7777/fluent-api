@@ -1,3 +1,4 @@
+import type { LicenseArtifact } from './license-artifact.schemas';
 import type { LicenseDatabaseContext } from './license-impact';
 
 import { serializeLicenseArtifact } from './license-artifact';
@@ -8,10 +9,16 @@ import { freezeLicenseRevision, freezeReviewValue } from './license-review-revis
 export function buildLicenseReportModel(
   value: unknown,
   database?: LicenseDatabaseContext,
-  preserveExistingNonUnknowns = false
+  preserveExistingNonUnknowns = false,
+  impactArtifact?: LicenseArtifact
 ) {
   const artifact = freezeLicenseRevision(value);
-  const impact = computeLicenseImpact(artifact, database, preserveExistingNonUnknowns);
+  const impact = computeLicenseImpact(
+    artifact,
+    database,
+    preserveExistingNonUnknowns,
+    impactArtifact
+  );
   const serialized = serializeLicenseArtifact(artifact);
   const inventory = [...artifact.classifications]
     .sort((left, right) =>
@@ -28,6 +35,9 @@ export function buildLicenseReportModel(
       rationale: row.rationale,
       source: row.source,
       rowNote: row.rowNote ?? null,
+      reviewComment: row.reviewComment ?? null,
+      reviewedBy: row.reviewedBy ?? null,
+      humanReviewedAt: row.humanReviewedAt ?? null,
       automaticDecision: row.automaticDecision ?? null,
       rule: row.rule ?? null,
       samples: row.samples.map((sample) => ({

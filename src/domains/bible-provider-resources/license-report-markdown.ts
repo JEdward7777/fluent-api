@@ -115,6 +115,12 @@ export function renderLicenseMarkdown(model: LicenseReportModel): string {
       `<pre>${html(entry.exampleNotice)}</pre>`,
       ''
     );
+    if (entry.reviewedBy)
+      rows.push(
+        `Reviewed by ${text(entry.reviewedBy)} at ${text(entry.humanReviewedAt ?? '')}`,
+        ''
+      );
+    if (entry.reviewComment) rows.push(`Review comment: ${text(entry.reviewComment)}`, '');
     if (entry.rowNote) rows.push(`Human row note: ${text(entry.rowNote)}`, '');
     if (entry.automaticDecision)
       rows.push(

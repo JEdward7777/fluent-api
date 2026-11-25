@@ -126,6 +126,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         expect(stopped).toEqual([{ stopped: true }]);
         await expect(
           workflow.save({
+            previewToken: workflow.previewed!.token,
             operationId: 'lost-source',
             configurationRevision: 1,
             contentRevision: 1,
@@ -137,6 +138,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         expect(retry.plan.databaseProof?.mode).toBe('unavailable');
         expect(retry.plan.replace).toBe(false);
         await workflow.save({
+          previewToken: workflow.previewed!.token,
           operationId: 'safe-sync',
           configurationRevision: 1,
           contentRevision: 1,
@@ -189,6 +191,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         writer = source;
         await expect(
           rerouted.save({
+            previewToken: rerouted.previewed!.token,
             operationId: 'rerouted-clone',
             configurationRevision: 1,
             contentRevision: 1,
@@ -210,6 +213,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         }
         await expect(
           rerouted.save({
+            previewToken: rerouted.previewed!.token,
             operationId: 'reconnected',
             configurationRevision: 1,
             contentRevision: 1,
@@ -231,6 +235,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         await cli.startAnalysis(1);
         expect((await cli.preview(1, 1)).plan.databaseProof?.mode).toBe('same');
         await cli.save({
+          previewToken: cli.previewed!.token,
           operationId: 'one-adapter',
           configurationRevision: 1,
           contentRevision: 1,
@@ -247,6 +252,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         // idle timeout. An operator reading the preview can still save it once.
         await new Promise((resolve) => setTimeout(resolve, 22000));
         await sync.save({
+          previewToken: sync.previewed!.token,
           operationId: 'sync',
           configurationRevision: 1,
           contentRevision: 1,
@@ -266,6 +272,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         source.challenge = independent.challenge;
         await expect(
           overwrite.save({
+            previewToken: overwrite.previewed!.token,
             operationId: 'drift',
             configurationRevision: 1,
             contentRevision: 1,
@@ -276,6 +283,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         expect(overwrite.analyzed).toBeDefined();
         expect((await overwrite.preview(1, 1)).plan.databaseProof?.mode).toBe('same');
         await overwrite.save({
+          previewToken: overwrite.previewed!.token,
           operationId: 'retry',
           configurationRevision: 1,
           contentRevision: 1,
@@ -307,6 +315,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
           expect(preview.plan.databaseProof?.mode).toBe('unavailable');
           expect(preview.plan.replace).toBe(false);
           await fallback.save({
+            previewToken: fallback.previewed!.token,
             operationId: 'fallback',
             configurationRevision: 1,
             contentRevision: 1,
@@ -324,6 +333,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
           expect(conservative.plan.databaseProof?.mode).toBe('unavailable');
           expect(conservative.plan.replace).toBe(false);
           await restricted.save({
+            previewToken: restricted.previewed!.token,
             operationId: 'no-source-marker',
             configurationRevision: 1,
             contentRevision: 1,
@@ -382,7 +392,11 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         const first = await workflow.preview(1, 2);
         expect(first.plan.databaseProof?.mode).toBe('distinct');
         expect(first.plan.databaseChanges.metadataChanges).toEqual([key]);
-        await workflow.save({ ...request, operationId: 'save-copy' });
+        await workflow.save({
+          ...request,
+          previewToken: workflow.previewed!.token,
+          operationId: 'save-copy',
+        });
         const reviewer = async (adapter: typeof source) =>
           (await adapter.load()).classifications.find((item) => item.normalizedText === key)
             ?.reviewedBy;
@@ -398,7 +412,11 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
           permissionChanges: [],
         });
         expect(second.plan.databaseArtifact?.classifications).toHaveLength(1);
-        await workflow.save({ ...request, operationId: 'save-source' });
+        await workflow.save({
+          ...request,
+          previewToken: workflow.previewed!.token,
+          operationId: 'save-source',
+        });
         expect(await reviewer(source)).toBe('Saved as reviewer');
         const reloaded = new LicenseWorkflow(options, {
           ...dependencies,

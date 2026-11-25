@@ -27,6 +27,7 @@ it('publishes a same-file symlink to its target and preserves the link', async (
   expect(preview.plan.overwriteJson).toBe(true);
   expect(preview.plan.targets[0].path).toBe(f.input);
   await workflow.save({
+    previewToken: workflow.previewed!.token,
     operationId: 'alias',
     configurationRevision: 1,
     contentRevision: 1,
@@ -44,6 +45,7 @@ it('treats distinct equal files as sync and detects equal-byte inode replacement
   await rename(other, f.output);
   await expect(
     workflow.save({
+      previewToken: workflow.previewed!.token,
       operationId: 'changed',
       configurationRevision: 1,
       contentRevision: 1,

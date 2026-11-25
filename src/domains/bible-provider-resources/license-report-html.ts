@@ -35,6 +35,8 @@ export function renderLicenseHtml(model: LicenseReportModel): string {
       return `<article class="license-entry" data-status="${entry.status}" data-search="${html(search)}">
 <h3>${html(entry.normalizedText || '(empty normalized notice)')}</h3><p>Status: <strong>${entry.status}</strong>; source: ${entry.source}.</p>
 <p>Rationale: ${html(entry.rationale)}</p><p>Example notice:</p><pre>${html(entry.exampleNotice)}</pre>
+${entry.reviewedBy ? `<p>Reviewed by ${html(entry.reviewedBy)} at ${html(entry.humanReviewedAt ?? '')}</p>` : ''}
+${entry.reviewComment ? `<p>Review comment: ${html(entry.reviewComment)}</p>` : ''}
 ${entry.rowNote ? `<p>Human row note: ${html(entry.rowNote)}</p>` : ''}
 ${entry.automaticDecision ? `<p>Preserved automatic proposal: ${entry.automaticDecision.status} (${entry.automaticDecision.source}) — ${html(entry.automaticDecision.rationale)}</p>` : ''}
 ${entry.rule ? `<p>Rule: ${html(entry.rule.id)}; priority ${entry.rule.priority}; matched excerpt: ${html(entry.rule.matchedExcerpt)}.</p>` : ''}

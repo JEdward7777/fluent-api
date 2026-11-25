@@ -103,7 +103,7 @@ export class LicenseWorkbenchConfiguration {
     practiceMode = false,
     protected readonly injected?: Pick<
       LicenseWorkflowDependencies,
-      'apiKey' | 'database' | 'destinationDatabase' | 'transport' | 'fs'
+      'apiKey' | 'database' | 'destinationDatabase' | 'transport' | 'fs' | 'now'
     >
   ) {
     this.options = { ...options };

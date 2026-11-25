@@ -56,6 +56,9 @@ export type LicenseReviewEdit =
   | { kind: 'unknown-note'; normalizedText: string; note: string };
 
 export interface LicensePreview {
+  token: string;
+  reviewer: string;
+  candidate: LicenseAnalysis;
   configurationRevision: number;
   contentRevision: number;
   plan: LicenseSavePlan;
@@ -63,6 +66,7 @@ export interface LicensePreview {
 }
 
 export interface LicenseSaveRequest {
+  previewToken: string;
   operationId: string;
   configurationRevision: number;
   contentRevision: number;

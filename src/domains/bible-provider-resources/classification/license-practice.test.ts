@@ -87,6 +87,7 @@ describe('explicit offline license practice capability', () => {
         )
       ).toThrow('Practice cannot attest');
       await practice.workflow.save({
+        previewToken: practice.workflow.previewed!.token,
         operationId: 'practice-save',
         configurationRevision: 1,
         contentRevision: analysis.contentRevision,

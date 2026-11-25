@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type {
-  LicenseAnalysis,
   LicenseInspection,
   LicensePreview,
   LicenseSaveRequest,
@@ -53,6 +52,7 @@ export function licenseSaveFingerprint(request: LicenseSaveRequest) {
     request.configurationRevision,
     request.contentRevision,
     request.agreeToReplace,
+    request.previewToken,
   ]);
 }
 
@@ -61,13 +61,12 @@ export async function writePreviewedLicenseSave(input: {
   request: LicenseSaveRequest;
   preview: LicensePreview;
   inspection: LicenseInspection;
-  analysis: LicenseAnalysis;
   options: LicenseCommandOptions;
   database?: LicenseDatabaseAdapter;
   loadedSource?: { inspection: LicenseInspection; database?: LicenseDatabaseAdapter };
   fs?: LicenseFileIo;
 }): Promise<LicenseSaveResult> {
-  const { request, preview, inspection, analysis, options, database, fs } = input;
+  const { request, preview, inspection, options, database, fs } = input;
   if (preview.plan.conflicts.length)
     throw new Error(`Save conflicts: ${preview.plan.conflicts.join('; ')}`);
   try {
@@ -92,7 +91,7 @@ export async function writePreviewedLicenseSave(input: {
       options.destination === 'json' ? undefined : database
     );
   await writeLicenseDestinations({
-    artifact: preview.plan.databaseArtifact ?? analysis.artifact,
+    artifact: preview.plan.databaseArtifact ?? preview.candidate.artifact,
     fileArtifact: preview.plan.jsonArtifact,
     files: preview.plan.targets.map(({ path, previous }) => ({ path, previous })),
     database: options.destination !== 'json' ? database : undefined,

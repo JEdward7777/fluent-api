@@ -7,6 +7,7 @@ import type { LicenseWorkflow } from './license-workflow';
 import { licenseFileIo } from './license-write';
 
 interface ReportPlan {
+  previewToken: string;
   id: string;
   configurationRevision: number;
   contentRevision: number;
@@ -57,6 +58,7 @@ export class LicenseWorkbenchReports {
     if (workflow.status.state !== 'previewed')
       throw new Error('Wait for the current operation before inspecting a report target');
     if (
+      body.previewToken !== workflow.previewed.token ||
       body.configurationRevision !== configurationRevision ||
       body.contentRevision !== workflow.status.contentRevision
     )
@@ -105,6 +107,7 @@ export class LicenseWorkbenchReports {
     const plan = this.plans.get(body.planId);
     if (!plan) throw new Error('Inspect this report target before export');
     if (
+      plan.previewToken !== workflow.previewed?.token ||
       plan.configurationRevision !== configurationRevision ||
       plan.contentRevision !== workflow.status.contentRevision
     )

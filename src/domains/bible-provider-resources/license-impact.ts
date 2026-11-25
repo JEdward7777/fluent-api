@@ -50,9 +50,12 @@ const identity = (provider: string, externalId: string) => JSON.stringify([provi
 export function computeLicenseImpact(
   artifact: LicenseArtifact,
   database?: LicenseDatabaseContext,
-  preserveExistingNonUnknowns = false
+  preserveExistingNonUnknowns = false,
+  projection = artifact
 ) {
-  const statuses = new Map(artifact.classifications.map((row) => [row.normalizedText, row.status]));
+  const statuses = new Map(
+    projection.classifications.map((row) => [row.normalizedText, row.status])
+  );
   const before = new Map<string, DatabaseLicenseResource>();
   for (const resource of database?.resources ?? []) {
     const key = identity(resource.provider, resource.externalId);
@@ -60,7 +63,7 @@ export function computeLicenseImpact(
     before.set(key, resource);
   }
   const catalog = new Map(
-    artifact.catalog.map((bible) => [identity(bible.provider, bible.externalId), bible])
+    projection.catalog.map((bible) => [identity(bible.provider, bible.externalId), bible])
   );
   // Retained database-only resources also derive policy; a JSON source cannot hide their effects.
   const targetOnly = database?.projection === 'classification-only';

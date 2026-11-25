@@ -278,6 +278,10 @@
           </div>
           <div id="review-detail" hidden></div>
         </section>
+        <label id="save-reviewer-label" hidden
+          >Reviewer for pending decisions
+          <input id="save-reviewer" maxlength="500" />
+        </label>
         <div id="practice-review" hidden>
           <h2>Practice output</h2>
           <p>Edit a classification above, then preview the scratch output.</p>
@@ -329,9 +333,9 @@
               <span>I agree to replace policy.</span>
             </label>
             <button id="normal-save-button" type="button" disabled>Save previewed decisions</button>
-            <p id="save-result" role="status"></p>
           </div>
         </section>
+        <p id="save-result" role="status" hidden></p>
       </section>
       <section aria-labelledby="operations-heading">
         <h2 id="operations-heading">What the selections mean</h2>
