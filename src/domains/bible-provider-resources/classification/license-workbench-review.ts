@@ -150,6 +150,9 @@ export function getLicenseWorkbenchReviewDetail(
   if (!row) return null;
   const impact = computeLicenseImpact(artifact, database, preserveExistingNonUnknowns);
   const affected = impact.rows.filter((bible) => bible.normalizedText === row.normalizedText);
+  const catalog = new Map(
+    artifact.catalog.map((entry) => [JSON.stringify([entry.provider, entry.externalId]), entry])
+  );
   const variants = savedVariants(
     row.exampleNotice,
     catalogVariants(artifact).get(row.normalizedText)
@@ -157,6 +160,20 @@ export function getLicenseWorkbenchReviewDetail(
   return {
     normalizedText: row.normalizedText,
     exampleNotice: row.exampleNotice,
+    originalNoticeLabel: displayLicenseNotice(row.exampleNotice),
+    recordedDecision: {
+      status: row.status,
+      source: row.source,
+      rationale: row.rationale,
+      reviewState: row.reviewState,
+      decisionAt: row.decisionAt,
+      reviewedBy: row.reviewedBy,
+      humanReviewedAt: row.humanReviewedAt,
+      reviewComment: row.reviewComment,
+      rowNote: row.rowNote,
+    },
+    reviewHistory: row.reviewHistory ?? [],
+    rowNoteProvenance: row.rowNoteProvenance,
     status: row.status,
     reviewState: row.reviewState,
     decisionAt: row.decisionAt,
@@ -166,7 +183,8 @@ export function getLicenseWorkbenchReviewDetail(
     rationale: row.rationale,
     rule: row.rule,
     samples: row.samples,
-    evidenceContract: row.evidenceContract,
+    evidenceContract:
+      row.evidenceContract ?? (row.samples.length ? artifact.classificationRun : undefined),
     automaticDecision: row.automaticDecision,
     rowNote: row.rowNote,
     context: impact.context,
@@ -174,6 +192,8 @@ export function getLicenseWorkbenchReviewDetail(
     variantLabels: variants.map(displayLicenseNotice),
     missingNoticeLabel: variants.length ? null : displayLicenseNotice(row.exampleNotice),
     bibles: affected.map((bible) => ({
+      hasCurrentTarget: bible.currentStatus !== null,
+      language: catalog.get(JSON.stringify([bible.provider, bible.externalId]))?.language,
       provider: bible.provider,
       externalId: bible.externalId,
       bibleId: bible.bibleId,

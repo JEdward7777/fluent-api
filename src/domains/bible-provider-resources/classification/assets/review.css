@@ -26,3 +26,71 @@
   color: #526573;
   text-decoration: none;
 }
+
+.review-evidence {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-block: 1rem;
+}
+.evidence-opener {
+  background: transparent;
+  color: #164b78;
+  border: 1px solid currentColor;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.evidence-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  width: min(38rem, 90vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid #aebac4;
+  overflow: hidden;
+  color: inherit;
+}
+.evidence-drawer[open] {
+  display: flex;
+  flex-direction: column;
+}
+.evidence-drawer::backdrop {
+  background: rgb(14 27 39 / 48%);
+}
+.evidence-drawer > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid #aebac4;
+}
+.evidence-drawer h3 {
+  margin: 0;
+}
+.drawer-content {
+  padding: 1rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+.drawer-content pre,
+.drawer-content dd {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.drawer-content summary {
+  cursor: pointer;
+  padding: 0.45rem;
+}
+@media (max-width: 600px) {
+  .evidence-drawer {
+    width: 100vw;
+    border: 0;
+  }
+}

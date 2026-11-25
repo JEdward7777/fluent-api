@@ -4,93 +4,265 @@ export function node(tag, value, className) {
   if (className) element.className = className;
   return element;
 }
-function field(label, value) {
-  const wrapper = node('div');
-  wrapper.append(
-    node('dt', label),
-    node('dd', value === '' ? '(empty string)' : String(value ?? 'None'))
-  );
-  return wrapper;
+
+const notice = (value) =>
+  value === null ? 'Original notice unavailable' : value === '' ? '(empty original notice)' : value;
+const json = (value) => node('pre', JSON.stringify(value, null, 2));
+function accordion(label, ...contents) {
+  const section = node('details', undefined, 'evidence-block');
+  section.append(node('summary', label), ...contents);
+  return section;
 }
-function block(heading, value) {
-  const wrapper = node('section', undefined, 'evidence-block');
-  wrapper.append(node('h4', heading), node('pre', value));
-  return wrapper;
-}
-function expandable(heading, value) {
-  const wrapper = node('details', undefined, 'evidence-block');
-  wrapper.append(node('summary', heading), node('pre', value));
-  return wrapper;
-}
-export function refreshEvidenceFacts(detail, item) {
-  const facts = node('dl');
-  facts.append(
-    field('Stable row ID', item.id),
-    field('Normalized key', item.normalizedText),
-    field('Decision', item.status),
-    field('Review state', item.reviewState ?? 'unreviewed'),
-    field('Decision event', item.decisionAt ?? 'Unknown legacy time'),
-    field('Human reviewer', item.reviewedBy ?? 'None'),
-    field('Human review event', item.humanReviewedAt ?? 'None'),
-    field('Source', item.source),
-    field('Rationale', item.rationale),
-    field('Content revision', item.contentRevision),
-    field('Human note', item.rowNote ?? 'None')
-  );
-  if (detail.firstElementChild?.tagName === 'DL') detail.firstElementChild.replaceWith(facts);
-  else detail.prepend(facts);
-}
-export function appendEvidence(detail, item) {
-  refreshEvidenceFacts(detail, item);
-  const variants = node('div');
-  if (item.missingNoticeLabel) variants.append(node('p', item.missingNoticeLabel));
-  for (const [index, label] of item.variantLabels.entries())
-    variants.append(block(`Original notice variant ${index + 1}`, label));
-  detail.append(node('h4', `Saved original notice variants (${item.variants.length})`), variants);
-  const bibles = node('ul');
-  for (const bible of item.bibles) {
-    const entry = node('li');
-    entry.append(
-      node('strong', `${bible.name} (${bible.abbreviation})`),
-      node(
-        'span',
-        ` — ${bible.provider}:${bible.externalId}; Bible ID ${bible.bibleId ?? 'not assigned'}`
-      )
+function facts(entries) {
+  const list = node('dl');
+  for (const [label, value] of entries) {
+    const pair = node('div');
+    pair.append(
+      node('dt', label),
+      node('dd', value === '' ? '(empty string)' : (value ?? 'Not recorded'))
     );
-    if (bible.currentNotice !== null && bible.currentNotice !== bible.snapshotNotice)
-      entry.append(block('Current target notice', bible.currentNotice));
-    bibles.append(entry);
+    list.append(pair);
   }
-  detail.append(
-    node(
-      'h4',
-      `Affected Bibles in ${item.context.label ?? 'saved artifact'} (${item.bibles.length})`
-    ),
-    bibles
-  );
+  return list;
+}
+
+function decisionFacts(item) {
+  return facts([
+    ['Working decision', item.status],
+    ['Source', item.source],
+    [
+      'Review state',
+      item.pending ? 'Human reviewed · Unsaved' : (item.reviewState ?? 'unreviewed'),
+    ],
+    ['Decision event', item.pending ? 'Awaiting Save' : (item.decisionAt ?? 'Unknown legacy time')],
+    ['Reviewer', item.reviewedBy],
+    ['Human review event', item.humanReviewedAt],
+    ['Review comment', item.reviewComment],
+    ['Stable row ID', item.id],
+    ['Content revision', item.contentRevision],
+  ]);
+}
+
+function recordFacts(record) {
+  return facts([
+    ['Decision', record.status],
+    ['Source', record.source],
+    ['Original rationale', record.rationale],
+    ['Legacy row note', record.rowNote],
+    ['Review comment', record.reviewComment],
+    ['Review state', record.reviewState],
+    ['Decision event', record.decisionAt],
+    ['Human reviewer', record.reviewedBy],
+    ['Human review event', record.humanReviewedAt],
+  ]);
+}
+
+function classification(item) {
+  const sections = [];
+  const recorded = item.recordedDecision;
+  sections.push(accordion(`Recorded decision · ${recorded.status}`, recordFacts(recorded)));
+  if (item.rule) sections.push(accordion(`Ordered rule · ${item.rule.id}`, json(item.rule)));
   if (item.automaticDecision)
-    detail.append(
-      block('Preserved automatic proposal', JSON.stringify(item.automaticDecision, null, 2))
-    );
-  if (item.rule)
-    detail.append(
-      block(
-        'Ordered rule match: ID, priority, decision, rationale and matched excerpt',
-        JSON.stringify(item.rule, null, 2)
+    sections.push(
+      accordion(
+        `Preserved automatic proposal · ${item.automaticDecision.status}`,
+        json(item.automaticDecision)
       )
     );
-  detail.append(node('h4', 'Model evidence'), node('p', item.modelEvidenceLabel));
-  for (const sample of item.samples) {
-    const sampleSection = node('section', undefined, 'evidence-block');
-    sampleSection.append(
-      node('h5', `Historical sample ${sample.index}: ${sample.provider}:${sample.model}`),
-      field('Request hash', sample.requestHash),
-      field('Cache hit', sample.cacheHit === undefined ? 'Unreported' : String(sample.cacheHit)),
-      field('Recorded attempts', sample.attempts ?? 'Unreported'),
-      expandable('Exact saved request', JSON.stringify(sample.request, null, 2)),
-      expandable('Raw saved response', sample.response),
-      block('Parsed decision and rationale', JSON.stringify(sample.result, null, 2))
+  if (item.evidenceContract)
+    sections.push(accordion('Recorded model contract', json(item.evidenceContract)));
+  for (const sample of item.samples)
+    sections.push(
+      accordion(
+        `${sample.result.decision} · ${sample.provider}:${sample.model} · Sample ${sample.index}`,
+        facts([
+          ['Request hash', sample.requestHash],
+          ['Cache hit', sample.cacheHit],
+          ['Recorded attempts', sample.attempts],
+          ['Parsed rationale', sample.result.rationale],
+        ]),
+        accordion('Exact saved request', json(sample.request)),
+        accordion('Raw saved response', node('pre', sample.response)),
+        accordion('Parsed result', json(sample.result))
+      )
     );
-    detail.append(sampleSection);
+  if (item.rowNoteProvenance)
+    sections.push(accordion('Legacy note provenance', json(item.rowNoteProvenance)));
+  for (const [index, entry] of item.reviewHistory.entries())
+    sections.push(
+      accordion(
+        `Review history ${index + 1} · ${entry.status} · ${entry.reviewState}`,
+        recordFacts(entry),
+        ...(entry.rowNoteProvenance
+          ? [accordion('Legacy note provenance', json(entry.rowNoteProvenance))]
+          : [])
+      )
+    );
+  return sections;
+}
+
+function render(content, kind, item) {
+  content.replaceChildren();
+  if (kind === 'Notice') {
+    content.append(
+      node('h4', 'Original notice'),
+      node('pre', item.originalNoticeLabel),
+      facts([['Normalized key', item.normalizedText]]),
+      node('h4', `Saved original notice variants (${item.variants.length})`)
+    );
+    item.variantLabels.forEach((label, index) =>
+      content.append(accordion(`Original notice variant ${index + 1}`, node('pre', label)))
+    );
+  } else if (kind === 'Affected Bibles') {
+    content.append(node('p', item.context.label), node('p', item.context.disclaimer));
+    for (const bible of item.bibles)
+      content.append(
+        accordion(
+          [bible.name, bible.abbreviation, typeof bible.language === 'string' && bible.language]
+            .filter(Boolean)
+            .join(' · '),
+          facts([
+            ['Provider', bible.provider],
+            ['External ID', bible.externalId],
+            ['Bible ID', bible.bibleId],
+            ['Affected notice', notice(bible.rawNotice)],
+            ['Snapshot notice', notice(bible.snapshotNotice)],
+            ...(bible.hasCurrentTarget
+              ? [['Current target notice', notice(bible.currentNotice)]]
+              : []),
+          ])
+        )
+      );
+  } else {
+    const working = node('div', undefined, 'working-evidence');
+    working.append(decisionFacts(item), node('p', item.overrideWarnings[item.status] ?? ''));
+    content.append(working, node('p', item.modelEvidenceLabel));
+    if (item.samples.length) {
+      const votes = ['allowed', 'forbidden', 'unknown'].map((decision) => [
+        decision,
+        item.samples.filter((sample) => sample.result.decision === decision).length,
+      ]);
+      content.append(
+        node(
+          'p',
+          `${votes.filter(([, n]) => n).length === 1 ? 'Unanimous' : 'Mixed'} saved votes · ${votes.map(([d, n]) => `${n} ${d}`).join(', ')}`
+        )
+      );
+    }
+    content.append(...classification(item));
   }
+}
+
+function evidenceCount(item) {
+  return (
+    1 +
+    item.samples.length +
+    item.reviewHistory.length +
+    [item.rule, item.automaticDecision, item.evidenceContract, item.rowNoteProvenance].filter(
+      Boolean
+    ).length
+  );
+}
+const drawerFields = {
+  Notice: ['originalNoticeLabel', 'normalizedText', 'variantLabels'],
+  'Affected Bibles': ['context', 'bibles'],
+  'Classification evidence': [
+    'recordedDecision',
+    'samples',
+    'rule',
+    'automaticDecision',
+    'evidenceContract',
+    'rowNoteProvenance',
+    'reviewHistory',
+  ],
+};
+
+export function appendEvidence(detail, initial) {
+  let item = initial;
+  const dialog = node('dialog', undefined, 'evidence-drawer');
+  const heading = node('h3');
+  heading.id = 'evidence-drawer-title';
+  dialog.setAttribute('aria-labelledby', heading.id);
+  const close = node('button', 'Close');
+  close.type = 'button';
+  const header = node('header');
+  header.append(heading, close);
+  const content = node('div', undefined, 'drawer-content');
+  content.tabIndex = 0;
+  content.setAttribute('role', 'region');
+  content.setAttribute('aria-labelledby', heading.id);
+  dialog.append(header, content);
+  let opener;
+  close.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => {
+    if (opener?.isConnected) opener.focus();
+  });
+  dialog.addEventListener('click', (event) => {
+    const rect = dialog.getBoundingClientRect();
+    if (
+      event.target === dialog &&
+      (event.clientX < rect.left ||
+        event.clientX >= rect.right ||
+        event.clientY < rect.top ||
+        event.clientY >= rect.bottom)
+    )
+      dialog.close();
+  });
+  dialog.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab') return;
+    const controls = [close, content, ...content.querySelectorAll('summary')].filter((el) =>
+      el.checkVisibility()
+    );
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (document.activeElement === (event.shiftKey ? first : last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  });
+  const buttons = new Map();
+  const label = (kind) =>
+    kind === 'Notice'
+      ? kind
+      : `${kind} (${kind === 'Affected Bibles' ? item.bibles.length : evidenceCount(item)})`;
+  for (const kind of Object.keys(drawerFields)) {
+    const button = node('button', label(kind), 'evidence-opener');
+    buttons.set(kind, button);
+    button.type = 'button';
+    button.setAttribute('aria-haspopup', 'dialog');
+    button.addEventListener('click', () => {
+      opener = button;
+      heading.textContent = button.textContent;
+      render(content, kind, item);
+      dialog.showModal();
+      content.scrollTop = 0;
+      close.focus();
+    });
+    detail.append(button);
+  }
+  detail.append(dialog);
+  return (fresh) => {
+    const previous = item;
+    item = fresh;
+    for (const [kind, button] of buttons) {
+      button.textContent = label(kind);
+      if (!dialog.open || button !== opener) continue;
+      heading.textContent = button.textContent;
+      if (
+        drawerFields[kind].some(
+          (key) => JSON.stringify(previous[key]) !== JSON.stringify(item[key])
+        )
+      ) {
+        render(content, kind, item);
+        close.focus();
+      } else if (kind === 'Classification evidence') {
+        content
+          .querySelector('.working-evidence')
+          .replaceChildren(
+            decisionFacts(item),
+            node('p', item.overrideWarnings[item.status] ?? '')
+          );
+      }
+    }
+  };
 }

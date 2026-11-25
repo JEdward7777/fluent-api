@@ -4,6 +4,7 @@ import { createLicenseArtifact } from '../license-artifact';
 import { makeLicenseArtifact } from '../license-artifact.test-fixtures';
 import {
   getLicenseWorkbenchReviewDetail,
+  licenseReviewRowId,
   listLicenseWorkbenchReview,
 } from './license-workbench-review';
 
@@ -78,6 +79,46 @@ describe('license workbench review projection', () => {
     const detail = getLicenseWorkbenchReviewDetail(artifact, filtered.rows[0].id);
     expect(detail).toMatchObject({ normalizedText: '', variants: ['', '© 2025'] });
     expect(detail?.modelEvidenceLabel).toContain('No model request');
+  });
+
+  it('keeps a missing original and recorded human attribution visible under a pending overlay', () => {
+    const artifact = makeLicenseArtifact();
+    const row = artifact.classifications[2];
+    row.exampleNotice = null;
+    row.automaticDecision = { status: row.status, source: 'table', rationale: row.rationale };
+    row.source = 'manual';
+    row.reviewState = 'human_reviewed';
+    row.reviewedBy = 'Original reviewer';
+    row.decisionAt = row.humanReviewedAt = '2025-01-01T00:00:00.000Z';
+    row.reviewComment = 'Original comment';
+    const working = {
+      status: 'allowed' as const,
+      reviewState: 'human_reviewed' as const,
+      pending: true,
+      sequence: 2,
+      decisionAt: null,
+      humanReviewedAt: null,
+      reviewedBy: null,
+      reviewComment: 'Working comment',
+    };
+    const detail = getLicenseWorkbenchReviewDetail(
+      createLicenseArtifact(artifact),
+      licenseReviewRowId(row.normalizedText),
+      undefined,
+      false,
+      { values: () => working }
+    );
+    expect(detail).toMatchObject({
+      ...working,
+      originalNoticeLabel: 'Original notice unavailable',
+      variants: [artifact.catalog[2].rawNotice],
+      recordedDecision: {
+        status: row.status,
+        reviewedBy: 'Original reviewer',
+        reviewComment: 'Original comment',
+        humanReviewedAt: row.humanReviewedAt,
+      },
+    });
   });
 
   it('returns full saved model evidence and never treats a rule as a model call', () => {

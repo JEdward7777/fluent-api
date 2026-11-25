@@ -1,5 +1,5 @@
 import { createDraftSync, reviewShortcuts } from './review-edit-feedback.js';
-import { appendEvidence, node, refreshEvidenceFacts } from './review-evidence.js';
+import { appendEvidence, node } from './review-evidence.js';
 import { initReviewNavigation, reviewQuery, showFilters } from './review-navigation.js';
 import { initReviewPagination } from './review-pagination.js';
 import { reassessmentUnavailable, reviewRerunActions, syncRerunButtons } from './review-rerun.js';
@@ -148,7 +148,7 @@ function reviewLink(label, go) {
   });
   return link;
 }
-function reviewEditor(item) {
+function reviewEditor(item, refreshEvidence) {
   const editor = node('section', undefined, 'review-editor');
   const decision = node('select');
   decision.name = 'status';
@@ -216,12 +216,11 @@ function reviewEditor(item) {
           { status: 409 }
         );
       }
+      refreshEvidence(fresh);
       Object.assign(item, fresh);
       loadedRevision = `${item.configurationRevision}:${item.contentRevision}`;
       currentSetup = setup;
       refreshSetup(setup);
-      const evidence = detail.querySelector('.review-evidence');
-      if (evidence) refreshEvidenceFacts(evidence, item);
       rebaseFields(item, unchanged);
       if (kind === 'mark-next') nextNavigation = ack.navigation;
       else if (nextNavigation) nextNavigation = fresh.navigation;
@@ -316,6 +315,7 @@ function reviewEditor(item) {
     for (const control of [decision, comment, mark, next, revert]) control.disabled = locked;
   };
   refreshEditor = (fresh) => {
+    refreshEvidence(fresh);
     Object.assign(item, fresh);
     decision.value = item.status;
     const value = item.reviewComment ?? '';
@@ -325,8 +325,6 @@ function reviewEditor(item) {
       comment.setSelectionRange(selectionStart, selectionEnd);
     }
     feedback.textContent = item.pending ? 'Kept in session · awaiting Save' : 'No pending edit';
-    const evidence = detail.querySelector('.review-evidence');
-    if (evidence) refreshEvidenceFacts(evidence, item);
     update();
   };
   updateEditorControls = update;
@@ -366,13 +364,18 @@ async function openDetail(id, focus = true, retainEditor = false) {
       return;
     }
     detail.replaceChildren();
-    const title = node(
-      'h3',
-      item.missingNoticeLabel || item.variantLabels[0]?.slice(0, 160) || 'Classification evidence'
-    );
+    const title = node('h3', item.originalNoticeLabel.slice(0, 160));
     detail.dataset.rowId = item.id;
     const back = reviewLink('Back to results (Escape)', () => navigation.backToResults());
-    detail.append(title, back, node('p', item.context.disclaimer), reviewEditor(item));
+    const evidence = node('div', undefined, 'review-evidence');
+    const refreshEvidence = appendEvidence(evidence, item);
+    detail.append(
+      title,
+      back,
+      node('p', item.context.disclaimer),
+      reviewEditor(item, refreshEvidence),
+      evidence
+    );
     if (!currentSetup.practice)
       detail.append(
         node('h4', 'Explicit reassessment'),
@@ -385,9 +388,6 @@ async function openDetail(id, focus = true, retainEditor = false) {
           },
         })
       );
-    const evidence = node('div', undefined, 'review-evidence');
-    appendEvidence(evidence, item);
-    detail.append(evidence);
     viewStatus.hidden = true;
     detail.hidden = false;
     if (focus && section.getClientRects().length) back.focus();
