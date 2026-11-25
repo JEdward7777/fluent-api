@@ -10,6 +10,16 @@ import { license_classifications, licenseReviewStateEnum, ttsLicenseStatusEnum }
 
 import { createOwnedLicenseDatabaseAdapter } from './license-classifications.service';
 import { makeCommandFixture } from './license-command.test-fixtures';
+import { exerciseDeferredRetirement } from './license-output-retirement.test-fixtures';
+import {
+  exerciseBothDrift,
+  exerciseDelayedSave,
+  withEmptyLicenseTarget,
+} from './license-save-fence.test-fixtures';
+import {
+  exerciseRenameAcknowledgement,
+  exerciseStagedSubstitution,
+} from './license-staged-substitution.test-fixtures';
 import { LicenseWorkflow } from './license-workflow';
 
 const docker = promisify(execFile);
@@ -434,5 +444,51 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         await Promise.all([workflow.close(), copy.close!(), f.cleanup()]);
       }
     }, 30000);
+    it.each(['rollback', 'commit', 'mixed'] as const)(
+      'fences delayed %s before acknowledging any Save outcome',
+      async (finish) => {
+        await exerciseDelayedSave(endpoints[1], finish);
+      },
+      20000
+    );
+    it.each(['catalog', 'policy', 'file', 'lock', 'lock-cleanup'] as const)(
+      'rechecks Both %s at physical publication',
+      async (drift) => {
+        await exerciseBothDrift(endpoints[1], drift);
+      },
+      20000
+    );
+    it.each(['publication', 'compensation'] as const)(
+      'rolls back PostgreSQL when the %s stage is substituted',
+      async (stage) => {
+        await withEmptyLicenseTarget(endpoints[1], async (target, independent) => {
+          await exerciseStagedSubstitution(stage, 'symlink', target);
+          expect(
+            await independent`SELECT normalized_text FROM license_classifications`
+          ).toHaveLength(0);
+        });
+      },
+      20000
+    );
+    it.each(['publication', 'compensation'] as const)(
+      'checks physical %s rename acknowledgements through Both Save',
+      async (stage) => {
+        for (const outcome of ['unchanged', 'installed', 'foreign', 'late'] as const)
+          await withEmptyLicenseTarget(endpoints[1], (target) =>
+            exerciseRenameAcknowledgement(stage, outcome, false, target)
+          );
+      },
+      20000
+    );
+    it.each([true, false])(
+      'fences deferred removal on Both when database prior/planned match is %s',
+      async (unchanged) => {
+        for (const fault of ['unlink', 'rename'] as const)
+          await withEmptyLicenseTarget(endpoints[1], (target) =>
+            exerciseDeferredRetirement(fault, target, unchanged)
+          );
+      },
+      20000
+    );
   }
 );

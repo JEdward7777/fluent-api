@@ -17,7 +17,9 @@ import {
   issueLicenseChallenge,
   proveLicenseDatabase,
 } from './license-database-identity';
+import { sameLicenseDatabaseSnapshot } from './license-freshness';
 import { licenseSyncGuidance } from './license-sync-policy';
+import { lockClassificationWriter } from './license-write-fence';
 
 export function getClassifications(tx?: DbTransaction) {
   return repo.getClassifications(tx);
@@ -49,16 +51,24 @@ export function createOwnedLicenseDatabaseAdapter(
     });
   const client = connect(role === 'destination');
   const database = drizzle(client, { schema });
+  let witness: ReturnType<typeof connect> | undefined;
   // A CLI workflow can use one adapter for both roles. Its source challenge must
   // run on the Load backend while the destination holds a different transaction.
   let sourceClient: ReturnType<typeof connect> | undefined;
   const sourcePool = () => (sourceClient ??= connect(true));
-  const probe = async (
-    task: (tx: IdentityTransaction) => Promise<DatabaseProof>,
-    loadedSource = false
+  const probeClients = {
+    source: sourcePool,
+    witness: () => (witness ??= connect(true)),
+    destination: () => client,
+    temporary: () => connect(),
+  };
+  const probe = async <T>(
+    task: (tx: IdentityTransaction) => Promise<T>,
+    role: keyof typeof probeClients = 'temporary'
   ) => {
-    const pinned = loadedSource ? sourcePool() : connect();
+    const pinned = probeClients[role]();
     const timer = setTimeout(() => {
+      if (pinned === witness) witness = undefined;
       if (pinned === sourceClient) sourceClient = undefined;
       void pinned.end({ timeout: 0 });
     }, 7500);
@@ -71,7 +81,7 @@ export function createOwnedLicenseDatabaseAdapter(
       });
     } finally {
       clearTimeout(timer);
-      if (!loadedSource) await pinned.end({ timeout: 1 });
+      if (role === 'temporary') await pinned.end({ timeout: 1 });
     }
   };
   const loadSnapshot = async (tx: IdentityTransaction) => {
@@ -96,18 +106,31 @@ export function createOwnedLicenseDatabaseAdapter(
       }),
     challenge: (sourceMarker) => async (observe) => {
       if (!sourceMarker) return { mode: 'unavailable' };
-      return probe(async (tx) => {
+      return probe<DatabaseProof>(async (tx) => {
         const [row] = await tx.execute<{ marker: string | null }>(
           sql`SELECT current_setting('fluent.license_loaded_source', true) AS marker`
         );
         if (row.marker !== sourceMarker) return { mode: 'unavailable' };
         return issueLicenseChallenge(tx, observe);
-      }, true);
+      }, 'source');
     },
     prove: (challenge) =>
       probe((tx) => proveLicenseDatabase(tx, challenge)).catch(() => ({
         mode: 'unavailable' as const,
       })),
+    checkAbortedTarget: (marker, prior, checkFiles) =>
+      probe(async (tx) => {
+        await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL READ COMMITTED`);
+        await tx.execute(sql`SET LOCAL lock_timeout = '1s'`);
+        const [row] = await tx.execute<{ marker: string | null }>(
+          sql`SELECT current_setting('fluent.license_target_preview', true) AS marker`
+        );
+        if (!prior.relation || row.marker !== marker) return 'unverified';
+        await lockClassificationWriter(tx);
+        const actual = await loadSnapshot(tx);
+        await checkFiles();
+        return sameLicenseDatabaseSnapshot(actual, prior) ? 'prior' : 'other';
+      }, 'destination'),
     inspectTarget: (challenge) =>
       database.transaction(async (tx) => {
         await tx.execute(sql`SET LOCAL statement_timeout = '6s'`);
@@ -129,10 +152,15 @@ export function createOwnedLicenseDatabaseAdapter(
         force,
         expectedPolicy,
         database,
-        identity
+        identity,
+        (work) => probe(work, 'witness')
       ),
     close: async () => {
-      await Promise.all([client.end({ timeout: 5 }), sourceClient?.end({ timeout: 5 })]);
+      await Promise.all([
+        client.end({ timeout: 5 }),
+        witness?.end({ timeout: 1 }),
+        sourceClient?.end({ timeout: 5 }),
+      ]);
     },
   };
 }

@@ -18,6 +18,27 @@ import { LicenseWorkflow } from './license-workflow';
 import { LicenseWriteUncertainError } from './license-write';
 
 export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
+  private uncertainReceipt?: VisibleOperation['result'];
+
+  async reconcileSave(operationId: string) {
+    const operation = this.operations.get(operationId)?.snapshot;
+    if (operation?.kind !== 'save') throw new Error('Unknown Save operation');
+    if (operation.reconciliation && operation.reconciliation.outcome !== 'uncertain')
+      return operation;
+    if (!this.workflow || this.latestSaveOperationId !== operationId)
+      throw new Error('Unknown active Save operation');
+    const workflow = this.workflow;
+    return this.reserve(async () => {
+      operation.reconciliation = await workflow.reconcileSave(operationId);
+      if (operation.reconciliation.outcome === 'planned') {
+        operation.state = 'succeeded';
+        operation.result = this.uncertainReceipt;
+        delete operation.error;
+      }
+      if (operation.reconciliation.outcome !== 'uncertain') this.uncertainReceipt = undefined;
+      return operation;
+    });
+  }
   private pendingLoad?: Promise<void>;
   start(
     kind: VisibleOperation['kind'],
@@ -41,7 +62,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     if (this.closed || this.preparing || this.activeOperationId || this.testing)
       throw new Error('Another operation is running or the session is closed');
     if (this.workflow?.status.state === 'uncertain')
-      throw new Error('Save outcome uncertain; inspect actual targets in a new process');
+      throw new Error('Save outcome uncertain; check the actual Save targets before continuing');
     if (body.configurationRevision !== this.visible.configurationRevision)
       throw new Error('Configuration changed; reload setup before continuing');
     if (!this.options.source) throw new Error('Choose a source');
@@ -282,7 +303,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       throw new Error('Practice cannot inspect report targets');
     if (this.activeOperationId) throw new Error('An operation is running');
     if (this.workflow.status.state === 'uncertain')
-      throw new Error('Save outcome uncertain; inspect actual targets in a new process');
+      throw new Error('Save outcome uncertain; check the actual Save targets before continuing');
     const workflow = this.workflow;
     return this.reserve(() => this.reports.inspect(workflow, this.configurationRevision, body));
   }
@@ -291,7 +312,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     if (this.practiceMode || !this.workflow) throw new Error('Practice cannot export reports');
     if (this.activeOperationId) throw new Error('An operation is running');
     if (this.workflow.status.state === 'uncertain')
-      throw new Error('Save outcome uncertain; inspect actual targets in a new process');
+      throw new Error('Save outcome uncertain; check the actual Save targets before continuing');
     const workflow = this.workflow;
     return this.reserve(() => this.reports.export(workflow, this.configurationRevision, body));
   }
@@ -357,31 +378,37 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     this.activeOperationId = body.operationId;
     this.latestOperationId = body.operationId;
     this.latestSaveOperationId = body.operationId;
+    const receipt = {
+      wholeFileHash: preview.plan.wholeFileHash,
+      targets: preview.plan.targets.map((target) => ({
+        path: target.path,
+        role: target.role,
+        hash: preview.plan.wholeFileHash,
+      })),
+      policy: policy
+        ? {
+            inserts: policy.inserts.length,
+            updates: policy.updates.length,
+            deletes: policy.deletes.length,
+            preserved: preview.plan.databaseChanges.preserved.length,
+            reviewContentHash: preview.plan.databaseForecast?.reviewContentHash,
+          }
+        : null,
+      incomplete,
+    };
     void promise.then(
-      (result) => {
+      () => {
         operation.state = 'succeeded';
-        operation.result = {
-          wholeFileHash: result.wholeFileHash,
-          targets: result.targets.map((target) => ({
-            path: target.path,
-            role: target.role,
-            hash: result.wholeFileHash,
-          })),
-          policy: policy
-            ? {
-                inserts: policy.inserts.length,
-                updates: policy.updates.length,
-                deletes: policy.deletes.length,
-              }
-            : null,
-          incomplete,
-        };
+        operation.result = receipt;
         this.activeOperationId = undefined;
       },
       (error: unknown) => {
         operation.state = 'failed';
         operation.error = licenseWorkbenchBrowserError(error);
-        if (error instanceof LicenseWriteUncertainError) operation.recovery = error.recovery;
+        if (error instanceof LicenseWriteUncertainError) {
+          operation.recovery = error.recovery;
+          this.uncertainReceipt = receipt;
+        }
         this.activeOperationId = undefined;
       }
     );

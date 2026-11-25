@@ -31,12 +31,18 @@ import { LicenseOperationRegistry } from './license-workflow-operations';
 import { LicenseWorkflowPreparation } from './license-workflow-preparation';
 import { exportPreviewedLicenseReport } from './license-workflow-report-export';
 import {
+  compensatedLicenseInspection,
+  confirmedLicenseSave,
   destinationSaveFailure,
   licenseSaveFingerprint,
   LicenseSavePreflightError,
   writePreviewedLicenseSave,
 } from './license-workflow-save';
-import { LicenseFileDriftError } from './license-write';
+import {
+  LicenseFileDriftError,
+  LicenseWritePreflightError,
+  LicenseWriteUncertainError,
+} from './license-write';
 
 export type { LicenseReviewEdit } from './license-workflow.types';
 
@@ -48,6 +54,11 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
   private previewReviewer = '';
   private previewPromise?: Promise<LicensePreview>;
   private closePromise?: Promise<void>;
+  private uncertainSave?: {
+    request: LicenseSaveRequest;
+    preview: LicensePreview;
+    error: LicenseWriteUncertainError;
+  };
   private readonly saveOperations = new Map<string, LicenseSaveOperation>();
   private readonly operations = new LicenseOperationRegistry();
   constructor(options: LicenseCommandOptions, dependencies: LicenseWorkflowDependencies) {
@@ -112,7 +123,7 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
     this.requireRevision(expectedRevision);
     if (this.busyDone) throw new Error(`Cannot configure while ${this.state}`);
     if (this.state === 'uncertain')
-      throw new Error('Save outcome uncertain; inspect actual targets in a new process');
+      throw new Error('Save outcome uncertain; check the actual Save targets before continuing');
     if (this.analysis && this.state !== 'saved' && !discardReviewedState)
       throw new Error('Explicit discard is required before changing reviewed unsaved state');
     this.state = 'reconfiguring';
@@ -365,16 +376,13 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
         ...this.destination.publication(inspection, this.database),
         fs: this.dependencies.fs,
       });
-      if (this.reviewDrafts.size) {
-        this.analysis = preview.candidate;
-        this.acceptPreparedRows(
-          preview.candidate.artifact.classifications.map((row) => row.normalizedText)
-        );
-      }
-      this.state = 'saved';
+      this.acceptSave(preview);
       return result;
     } catch (error) {
+      if (error instanceof LicenseWritePreflightError)
+        this.inspection = compensatedLicenseInspection(this.inspection, error.restoredFiles);
       if (
+        error instanceof LicenseWritePreflightError ||
         error instanceof LicenseSavePreflightError ||
         (this.reviewDrafts.size &&
           (error instanceof LicenseInspectionStaleError ||
@@ -393,8 +401,44 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
         this.analysis = undefined;
         this.previewResult = undefined;
         this.state = 'configuring';
-      } else this.state = 'uncertain';
+      } else {
+        this.state = 'uncertain';
+        if (error instanceof LicenseWriteUncertainError)
+          this.uncertainSave = { request, preview, error };
+      }
       throw error;
+    } finally {
+      this.endBusy();
+    }
+  }
+
+  async reconcileSave(operationId: string) {
+    const pending = this.uncertainSave;
+    if (
+      this.busyDone ||
+      this.state !== 'uncertain' ||
+      pending?.request.operationId !== operationId ||
+      !pending.error.reconcile
+    )
+      throw new Error('No uncertain Save with that operation ID is available');
+    this.beginBusy();
+    try {
+      const status = await pending.error.reconcile();
+      if (status.outcome === 'planned') {
+        this.acceptSave(pending.preview);
+        const result = confirmedLicenseSave(pending.request, pending.preview);
+        this.saveOperations.get(operationId)!.promise = Promise.resolve(result);
+        this.operations.confirmSave(operationId, result);
+      } else if (status.outcome === 'prior') {
+        this.inspection = compensatedLicenseInspection(
+          this.inspection,
+          pending.error.restoredFiles
+        );
+        this.previewResult = undefined;
+        this.state = 'reviewing';
+      }
+      if (status.outcome !== 'uncertain') this.uncertainSave = undefined;
+      return status;
     } finally {
       this.endBusy();
     }

@@ -318,3 +318,53 @@ it.each([
     }
   }
 );
+
+it('reconciles the session-wide uncertain Save while retaining the originating tab receipt', async () => {
+  const { controls, storage } = browserControls();
+  try {
+    vi.resetModules();
+    const ui = await import('./assets/save.js');
+    const receipt = {
+      launchId: 'launch',
+      operation: { operationId: 'A', state: 'succeeded', result: { targets: [], policy: null } },
+    };
+    storage.set('license-workbench-save-receipt', JSON.stringify(receipt));
+    const server = {
+      launchId: 'launch',
+      state: 'uncertain',
+      saveOutcome: { operationId: 'B', state: 'failed', error: 'Unknown commit' },
+    };
+    let setup;
+    const refresh = () => {
+      setup = ui.withTabSaveOutcome(server);
+      ui.renderSave(setup);
+    };
+    const request = vi.fn(async () => {
+      server.state = 'reviewing';
+      server.saveOutcome.reconciliation = { outcome: 'prior', targets: [] };
+      return server.saveOutcome;
+    });
+    ui.initSave({
+      getSetup: () => setup,
+      refresh,
+      request,
+      isBlocked: () => false,
+      hasDraft: () => false,
+    });
+    refresh();
+    const button = controls.get('reconcile-save');
+    expect(button.hidden).toBe(false);
+    expect(controls.get('session-save-status').textContent).toContain(
+      'Session Save B is uncertain'
+    );
+    expect(controls.get('save-result').textContent).toContain('Operation A');
+    await button.click({ currentTarget: button });
+    expect(request).toHaveBeenCalledWith('save/reconcile', 'POST', { operationId: 'B' });
+    expect(button.hidden).toBe(true);
+    expect(controls.get('session-save-status').textContent).toContain('confirmed unwritten');
+    expect(controls.get('save-result').textContent).toContain('Operation A');
+    expect(JSON.parse(storage.get('license-workbench-save-receipt'))).toEqual(receipt);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

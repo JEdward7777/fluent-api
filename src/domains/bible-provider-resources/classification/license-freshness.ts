@@ -23,6 +23,10 @@ export class LicenseInspectionStaleError extends Error {
   }
 }
 
+export function comparableCatalog(context: LicenseDatabaseSnapshot['context']) {
+  return { ...context, resources: context.resources.map((row) => JSON.stringify(row)).sort() };
+}
+
 function comparableDatabase(snapshot: LicenseDatabaseSnapshot | undefined) {
   if (!snapshot) return undefined;
   const byBytes = <T>(rows: T[]) => rows.map((row) => JSON.stringify(row)).sort();
@@ -30,8 +34,15 @@ function comparableDatabase(snapshot: LicenseDatabaseSnapshot | undefined) {
     relation: snapshot.relation,
     tableExists: snapshot.tableExists,
     classifications: byBytes(snapshot.classifications),
-    context: { ...snapshot.context, resources: byBytes(snapshot.context.resources) },
+    context: comparableCatalog(snapshot.context),
   };
+}
+
+export function sameLicenseDatabaseSnapshot(
+  left?: LicenseDatabaseSnapshot,
+  right?: LicenseDatabaseSnapshot
+) {
+  return JSON.stringify(comparableDatabase(left)) === JSON.stringify(comparableDatabase(right));
 }
 
 /** Recheck source, selected output and policy snapshot without rereading the model cache. */
@@ -65,10 +76,7 @@ export async function requireFreshLicenseSources(
     !destinationOnly && options.source === 'database' && adapter?.loadSource
       ? await adapter?.load('source')
       : await adapter?.load();
-  if (
-    JSON.stringify(comparableDatabase(database)) !==
-    JSON.stringify(comparableDatabase(inspected.database))
-  )
+  if (!sameLicenseDatabaseSnapshot(database, inspected.database))
     throw new LicenseInspectionStaleError();
   return { inputBytes, database };
 }

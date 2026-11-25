@@ -22,6 +22,17 @@ export class LicenseOperationRegistry {
     return this.records.get(operationId)?.snapshot;
   }
 
+  confirmSave(operationId: string, result: unknown) {
+    const record = this.records.get(operationId);
+    if (record?.snapshot.kind === 'save')
+      record.snapshot = freezeReviewValue({
+        operationId,
+        kind: 'save',
+        state: 'succeeded',
+        result,
+      });
+  }
+
   run<T>(
     operationId: string,
     kind: LicenseOperationSnapshot['kind'],

@@ -6,6 +6,7 @@ import { bible_provider_resources, bibles, license_classifications } from '@/db/
 import { hashCanonicalJson } from '@/lib/llm/canonical-json';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
+import type { IdentityTransaction } from './license-database-identity';
 import type {
   LicenseDatabaseAdapter,
   LicenseDatabaseSnapshot,
@@ -20,8 +21,10 @@ import {
   sameLicenseRelation,
 } from './license-database-identity';
 import { selectLicenseMaintenanceRows } from './license-database-projection';
-import { LicensePolicyDriftError } from './license-database.types';
+import { LicenseDatabaseAbortedError, LicensePolicyDriftError } from './license-database.types';
+import { comparableCatalog } from './license-freshness';
 import { readStoredLicenseClassification } from './license-stored-decision';
+import { lockClassificationWriter, prepareLicenseFence } from './license-write-fence';
 
 type LicenseDb = typeof import('@/db').db;
 
@@ -86,11 +89,14 @@ export async function applyClassifications(
   _force = false,
   expectedPolicy?: StoredLicenseClassification[],
   database?: LicenseDb,
-  identity?: Parameters<LicenseDatabaseAdapter['apply']>[5]
+  identity?: Parameters<LicenseDatabaseAdapter['apply']>[5],
+  witness?: Parameters<typeof prepareLicenseFence>[1]
 ) {
   const connection = database ?? (await import('@/db')).db;
-  await connection.transaction(async (tx) => {
+  let phase: 'checking' | 'writing' | 'closed' = 'checking';
+  const stage = async (tx: IdentityTransaction) => {
     if (identity) {
+      await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL READ COMMITTED`);
       await tx.execute(sql`SET LOCAL lock_timeout = '3s'`);
       await tx.execute(sql`SET LOCAL statement_timeout = '6s'`);
       if (identity.marker) {
@@ -102,7 +108,7 @@ export async function applyClassifications(
             'The previewed database connection changed since preview; prepare a new preview'
           );
       }
-      await tx.execute(sql`LOCK TABLE license_classifications IN SHARE ROW EXCLUSIVE MODE`);
+      await lockClassificationWriter(tx);
       if (
         identity.target !== undefined &&
         !sameLicenseRelation(await availableLicenseRelation(tx), identity.target)
@@ -120,8 +126,7 @@ export async function applyClassifications(
     }
     // Serialize initialization/replacement with ordinary table writes, including the
     // empty-table case where no row exists to lock. This enforces --force at apply.
-    if (!identity && (replace || expectedPolicy))
-      await tx.execute(sql`LOCK TABLE license_classifications IN SHARE ROW EXCLUSIVE MODE`);
+    if (!identity && (replace || expectedPolicy)) await lockClassificationWriter(tx);
     const existing = new Map(
       (await getClassifications(tx)).map((row) => [row.normalizedText, row])
     );
@@ -148,12 +153,27 @@ export async function applyClassifications(
         });
       if (!matches) throw new LicensePolicyDriftError();
     }
+    if (identity?.expectedContext) {
+      const current = await loadClassificationSnapshot(tx, console);
+      if (
+        JSON.stringify(comparableCatalog(current.context)) !==
+        JSON.stringify(comparableCatalog(identity.expectedContext))
+      )
+        throw new LicensePolicyDriftError(
+          'Database catalog changed since preview; prepare a new preview'
+        );
+    }
+    const capture =
+      identity?.registerFence && witness ? await prepareLicenseFence(tx, witness) : undefined;
     // Both overwrite and sync are scoped upserts. The plan supplies only selected keys.
     const selectedExisting = artifact.classifications.flatMap(({ normalizedText }) => {
       const row = existing.get(normalizedText);
       return row ? [readStoredLicenseClassification(row)] : [];
     });
     const rows = selectLicenseMaintenanceRows(artifact, selectedExisting);
+    // A rejected transaction can never resume past preflight and issue a late write.
+    if (phase === 'closed') throw new Error('The Save transaction already ended');
+    phase = 'writing';
     // Bounded batches reduce parameter pressure; the transaction preserves all-or-nothing writes.
     for (let offset = 0; offset < rows.length; offset += 100) {
       await tx
@@ -181,6 +201,29 @@ export async function applyClassifications(
           ),
         });
     }
+    if (capture) identity?.registerFence?.(await capture());
     await beforeCommit?.();
-  });
+  };
+  await connection
+    .transaction(async (tx) => {
+      try {
+        await stage(tx);
+      } catch (cause) {
+        // postgres-js rethrows this callback error only after its ROLLBACK succeeds.
+        // Lost connections and failed COMMIT acknowledgements reject separately.
+        if (identity?.registerFence) throw new LicenseDatabaseAbortedError(cause);
+        throw cause;
+      }
+    })
+    .catch((cause: unknown) => {
+      const beforeMutation = phase === 'checking';
+      phase = 'closed';
+      if (
+        beforeMutation &&
+        identity?.registerFence &&
+        !(cause instanceof LicenseDatabaseAbortedError)
+      )
+        throw new LicenseDatabaseAbortedError(cause);
+      throw cause;
+    });
 }

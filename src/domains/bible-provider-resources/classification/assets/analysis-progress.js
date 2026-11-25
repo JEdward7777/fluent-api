@@ -54,7 +54,7 @@ export function createAnalysisProgress(getSetup, render, isUnconfirmed) {
 
 export function workflowStatus(next, { busy, dirty, starting }) {
   if (next.state === 'uncertain')
-    return 'Save outcome uncertain. Inspect actual targets before starting a new process.';
+    return 'Save outcome uncertain. Check the actual Save targets before continuing.';
   const operation = next.latestOperation;
   if (starting === 'inspect' || (operation?.kind === 'inspect' && operation.state === 'running'))
     return 'Inspecting the selected source…';

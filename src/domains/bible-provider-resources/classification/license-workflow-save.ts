@@ -102,6 +102,7 @@ export async function writePreviewedLicenseSave(input: {
       preview.plan.databaseProof ||
       inspection.database?.relation !== undefined
         ? {
+            expectedContext: inspection.database?.context,
             marker: preview.plan.targetMarker,
             expected: preview.plan.databaseProof,
             target: inspection.database?.relation,
@@ -110,17 +111,60 @@ export async function writePreviewedLicenseSave(input: {
             ),
           }
         : undefined,
+    checkAbortedDatabase:
+      preview.plan.targetMarker && inspection.database && database?.checkAbortedTarget
+        ? (checkFiles) =>
+            database.checkAbortedTarget!(
+              preview.plan.targetMarker!,
+              inspection.database!,
+              checkFiles
+            )
+        : undefined,
+    targetIdentity: preview.plan.targetIdentity,
+    checkSourceBeforePublish:
+      input.loadedSource &&
+      options.source === 'database' &&
+      preview.plan.databaseProof?.mode !== 'same'
+        ? async () => {
+            await requireFreshLicenseSources(
+              input.loadedSource!.inspection,
+              options,
+              fs ?? licenseFileIo,
+              input.loadedSource!.database
+            );
+          }
+        : undefined,
     checkFileIdentities: () => requirePreviewFileIdentities(preview.plan),
     fs,
     expectedFiles: preview.plan.expectedFiles,
     expectedPolicy:
       options.destination !== 'json' ? inspection.database?.classifications : undefined,
   });
+  return confirmedLicenseSave(request, preview);
+}
+
+export function confirmedLicenseSave(
+  request: LicenseSaveRequest,
+  preview: LicensePreview
+): LicenseSaveResult {
   return freezeReviewValue({
     configurationRevision: request.configurationRevision,
     contentRevision: request.contentRevision,
     operationId: request.operationId,
     wholeFileHash: preview.plan.wholeFileHash,
     targets: preview.plan.targets,
+  });
+}
+
+export function compensatedLicenseInspection(
+  inspection: LicenseInspection | undefined,
+  restoredFiles: NonNullable<LicenseInspection['inputIdentity']>[]
+) {
+  const source = inspection?.inputIdentity;
+  const restored = restoredFiles.find((file) => file.canonical === source?.canonical);
+  if (!inspection || !source || !restored) return inspection;
+  return freezeReviewValue({
+    ...inspection,
+    inputIdentity: { ...source, inode: restored.inode, links: restored.links },
   });
 }

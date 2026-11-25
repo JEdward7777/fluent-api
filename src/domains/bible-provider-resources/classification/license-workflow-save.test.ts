@@ -445,7 +445,7 @@ describe('shared workflow exact-preview Save', () => {
       })
     ).rejects.toThrow('outcome may be uncertain');
     expect(workflow.status.state).toBe('uncertain');
-    await expect(workflow.configure(f.options, 1)).rejects.toThrow('new process');
+    await expect(workflow.configure(f.options, 1)).rejects.toThrow('check the actual Save targets');
     await workflow.close();
   });
 

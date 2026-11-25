@@ -2,15 +2,21 @@ import { LicenseDestinationRecheckError } from './license-freshness';
 import { PaidBatchError } from './license-paid-batch';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
 import { LicenseSourceReadError } from './license-workflow-inspect';
-import { LicenseWriteUncertainError } from './license-write';
+import { LicenseWritePreflightError, LicenseWriteUncertainError } from './license-write';
 
 export function licenseWorkbenchBrowserError(error: unknown) {
-  if (error instanceof PaidBatchError || error instanceof LicenseDestinationRecheckError)
+  if (
+    error instanceof LicenseWritePreflightError ||
+    error instanceof PaidBatchError ||
+    error instanceof LicenseDestinationRecheckError
+  )
     return error.message;
   if (error instanceof LicenseSourceReadError || error instanceof LicenseWorkbenchDatabaseError)
     return error.message;
   if (error instanceof Error && 'code' in error && error.code === '42P01')
     return 'Configured database schema is missing. Check this connection and apply its migrations before Inspect.';
+  if (error instanceof LicenseWriteUncertainError && error.recovery.cleanupUnverified)
+    return 'Temporary file cleanup is unverified. Inspect the retained paths and check the actual Save targets before retrying.';
   if (error instanceof LicenseWriteUncertainError)
     return error.recovery.diverged
       ? 'Published file state diverged during compensation. Inspect the affected targets, retained recovery files and policy before retrying.'

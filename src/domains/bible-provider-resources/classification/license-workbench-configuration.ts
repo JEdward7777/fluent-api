@@ -294,7 +294,7 @@ export class LicenseWorkbenchConfiguration {
       )
         throw new Error('Cannot configure while an operation runs');
       if (this.workflow?.status.state === 'uncertain')
-        throw new Error('Save outcome uncertain; inspect scratch targets before restarting');
+        throw new Error('Save outcome uncertain; check the scratch Save target before continuing');
       if (
         body.source !== 'json' ||
         body.destination !== 'json' ||
@@ -414,7 +414,7 @@ export class LicenseWorkbenchConfiguration {
       throw new DatabaseTestUnavailableError('Cannot test while an operation runs');
     if (this.workflow?.status.state === 'uncertain')
       throw new DatabaseTestUnavailableError(
-        'Save outcome uncertain; inspect actual targets in a new process'
+        'Save outcome uncertain; check the actual Save targets before continuing'
       );
     const { connection: applied, tests } = this.databaseRole(role);
     const connection = draft ? selectWorkbenchDatabase(applied, draft) : applied;

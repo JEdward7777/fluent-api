@@ -7,6 +7,7 @@ import type {
   DatabaseProof,
   LicenseRelation,
 } from './license-database-identity';
+import type { DatabaseFence } from './license-write-fence';
 
 export interface StoredLicenseClassification {
   normalizedText: string;
@@ -32,6 +33,11 @@ export interface LicenseDatabaseSnapshot {
   context: LicenseDatabaseContext;
 }
 export interface LicenseDatabaseAdapter {
+  checkAbortedTarget?: (
+    marker: string,
+    prior: LicenseDatabaseSnapshot,
+    checkFiles: () => Promise<void>
+  ) => ReturnType<DatabaseFence>;
   inspectTarget?: (challenge?: ChallengeConnection) => Promise<{
     snapshot: LicenseDatabaseSnapshot;
     marker: string;
@@ -48,6 +54,8 @@ export interface LicenseDatabaseAdapter {
     force?: boolean,
     expectedPolicy?: StoredLicenseClassification[],
     identity?: {
+      expectedContext?: LicenseDatabaseSnapshot['context'];
+      registerFence?: (fence: DatabaseFence) => void;
       marker?: string;
       expected?: DatabaseProof;
       target?: LicenseRelation | null;
@@ -55,6 +63,14 @@ export interface LicenseDatabaseAdapter {
     }
   ) => Promise<void>;
   close?: () => Promise<void>;
+}
+
+/** The writer was stopped before mutation or PostgreSQL acknowledged ROLLBACK. */
+export class LicenseDatabaseAbortedError extends Error {
+  constructor(cause: unknown) {
+    super('Database Save ended without committing', { cause });
+    this.name = 'LicenseDatabaseAbortedError';
+  }
 }
 
 export class LicensePolicyDriftError extends Error {

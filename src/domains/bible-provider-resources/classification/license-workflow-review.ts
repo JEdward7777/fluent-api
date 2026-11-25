@@ -76,6 +76,16 @@ export abstract class LicenseWorkflowReview {
     return this.drafts;
   }
   private candidate?: { baseline: LicenseAnalysis; reviewer: string; analysis: LicenseAnalysis };
+  protected acceptSave(preview: LicensePreview) {
+    if (this.reviewDrafts.size) {
+      this.analysis = preview.candidate;
+      this.acceptPreparedRows(
+        preview.candidate.artifact.classifications.map((row) => row.normalizedText)
+      );
+    }
+    this.state = 'saved';
+  }
+
   protected saveCandidate(baseline: LicenseAnalysis, reviewer: string) {
     if (!this.drafts.size) return baseline;
     if (!reviewer) {

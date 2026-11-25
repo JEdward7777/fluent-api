@@ -79,10 +79,22 @@ function settleMissingOperation(setup, id, lookup) {
 
 export function withTabSaveOutcome(setup, previous) {
   syncSaveReviewer(previous, setup);
+  // The global write fence and this tab's receipt can belong to different Saves.
+  setup = { ...setup, sessionSave: setup.saveOutcome };
   const saved = storedPending(setup);
   if (!saved) {
     unresolved = false;
     const receipt = storedPending(setup, receiptKey);
+    if (
+      receipt?.operation.operationId === setup.saveOutcome?.operationId &&
+      setup.saveOutcome?.reconciliation
+    ) {
+      window.sessionStorage.setItem(
+        receiptKey,
+        JSON.stringify({ launchId: setup.launchId, operation: setup.saveOutcome })
+      );
+      return setup;
+    }
     return receipt ? { ...setup, saveOutcome: receipt.operation } : setup;
   }
   if (setup.saveOutcome?.operationId === saved.body.operationId) {
@@ -121,11 +133,61 @@ export function initSave(dependencies) {
   document.getElementById('practice-save').addEventListener('click', () => void practiceSave());
   agreement.addEventListener('change', () => renderSave(getSetup()));
   button.addEventListener('click', () => void startSave());
+  document.getElementById('reconcile-save')?.addEventListener('click', async (event) => {
+    const setup = getSetup();
+    const operationId = setup.sessionSave?.operationId;
+    if (!operationId) return;
+    const control = event.currentTarget;
+    control.disabled = true;
+    try {
+      const operation = await request('save/reconcile', 'POST', { operationId });
+      if (storedPending(setup, receiptKey)?.operation.operationId === operationId)
+        window.sessionStorage.setItem(
+          receiptKey,
+          JSON.stringify({ launchId: setup.launchId, operation })
+        );
+      await refresh();
+    } catch {
+      const status =
+        setup.saveOutcome?.operationId === operationId ? 'save-result' : 'session-save-status';
+      document.getElementById(status).textContent =
+        `Could not verify Save ${operationId}. Check its targets again.`;
+    } finally {
+      control.disabled = false;
+    }
+  });
+}
+
+function describeRecovery(recovery) {
+  return recovery
+    ? `Affected paths: ${recovery.affectedPaths.join(', ') || 'none'}. Recovery files: ${recovery.recoveryFiles.join(', ') || 'none confirmed'}. Retained temporary files: ${recovery.retainedTemporary.join(', ') || 'none confirmed'}. Recovery writes that failed: ${recovery.recoveryFailures.join(', ') || 'none'}.`
+    : '';
 }
 
 export function renderSave(setup) {
   if (!setup) return;
   panel.hidden = setup.practice || (!setup.preview && !setup.saveOutcome);
+  const reconcile = document.getElementById('reconcile-save');
+  const shared = setup.sessionSave;
+  if (reconcile) reconcile.hidden = setup.state !== 'uncertain' || !shared;
+  const sharedStatus = document.getElementById('session-save-status');
+  if (sharedStatus) {
+    sharedStatus.hidden =
+      !shared ||
+      shared.operationId === setup.saveOutcome?.operationId ||
+      (setup.state !== 'uncertain' && !shared.reconciliation);
+    if (!sharedStatus.hidden) {
+      const checked = shared.reconciliation;
+      const progress =
+        checked?.outcome === 'planned'
+          ? 'confirmed successful'
+          : checked?.outcome === 'prior'
+            ? 'confirmed unwritten; prepare a fresh preview to retry'
+            : 'uncertain; check the actual Save targets';
+      const targets = checked?.targets.map(({ target, match }) => `${target}: ${match}`).join('. ');
+      sharedStatus.textContent = `Session Save ${shared.operationId} is ${progress}. ${targets || shared.error || ''} ${setup.state === 'uncertain' ? describeRecovery(shared.recovery) : ''}`;
+    }
+  }
   const result = document.getElementById('save-result');
   result.hidden = !setup.saveOutcome && !unresolved && (setup.practice || !setup.preview);
   if (result.hidden) return;
@@ -152,17 +214,19 @@ export function renderSave(setup) {
   const outcome = setup.saveOutcome;
   if (outcome?.state === 'succeeded') {
     const saved = outcome.result;
-    result.textContent = `Save completed. Operation ${outcome.operationId}. Whole JSON SHA-256 ${saved.wholeFileHash}. ${saved.targets.map((target) => `${target.role} written: ${target.path} (SHA-256 ${target.hash}).`).join(' ')} ${saved.policy ? `Policy changed: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates, ${saved.policy.deletes} deletes. No resource-cache rows were written by Save.` : 'No policy rows were written.'}`;
+    result.textContent = `Save completed. Operation ${outcome.operationId}. ${saved.targets.map((target) => `${target.role} written: ${target.path} (SHA-256 ${target.hash}).`).join(' ')} ${saved.policy ? `Policy changed: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates, ${saved.policy.deletes} deletes.${saved.policy.preserved !== undefined ? ` ${saved.policy.preserved} destination records preserved.` : ''}${saved.policy.reviewContentHash ? ` Database review SHA-256 ${saved.policy.reviewContentHash}.` : ''} No resource-cache rows were written by Save.` : 'No policy rows were written.'}`;
   } else if (outcome?.state === 'failed') {
-    const recovery = outcome.recovery;
-    const recoveryText = recovery
-      ? `Affected paths: ${recovery.affectedPaths.join(', ') || 'none'}. Recovery files: ${recovery.recoveryFiles.join(', ') || 'none confirmed'}. Retained temporary files: ${recovery.retainedTemporary.join(', ') || 'none confirmed'}. Recovery writes that failed: ${recovery.recoveryFailures.join(', ') || 'none'}.`
-      : '';
+    const recoveryText = describeRecovery(outcome.recovery);
+    const checked = outcome.reconciliation;
+    const targets = checked?.targets.map(({ target, match }) => `${target}: ${match}`).join('. ');
     result.textContent =
-      outcome.recovery ||
-      (setup.state === 'uncertain' && setup.latestOperation?.operationId === outcome.operationId)
-        ? `Save outcome uncertain for operation ${outcome.operationId}. Inspect the actual targets outside this session before starting a new process. ${outcome.error} ${recoveryText}`
-        : `Save did not complete for operation ${outcome.operationId}. ${outcome.error} ${recoveryText} Inspect inputs again and make a new preview before retrying.`;
+      checked?.outcome === 'prior'
+        ? `All targets match their prior state. Prepare a fresh preview before retrying. ${targets}`
+        : outcome.recovery ||
+            (setup.state === 'uncertain' &&
+              setup.latestOperation?.operationId === outcome.operationId)
+          ? `Save outcome uncertain for operation ${outcome.operationId}. Check the actual targets to reconcile this Save. ${targets || outcome.error} ${recoveryText}`
+          : `Save did not complete for operation ${outcome.operationId}. ${outcome.error} ${recoveryText} Inspect inputs again and make a new preview before retrying.`;
   } else if (outcome?.state === 'rejected') {
     result.textContent = `Save request ${outcome.operationId} was rejected before writing. ${outcome.error}`;
   } else if (outcome?.state === 'running') {

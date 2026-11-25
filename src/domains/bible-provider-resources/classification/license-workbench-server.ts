@@ -29,7 +29,7 @@ import {
 import { LicenseWorkbenchSession } from './license-workbench-session';
 
 const assetDirectory = join(dirname(fileURLToPath(import.meta.url)), 'assets');
-const assets = new Map([
+const assets = new Map<string, readonly [string, string]>([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
@@ -373,6 +373,18 @@ function createLicenseWorkbenchApp(
       return c.text(error instanceof Error ? error.message : 'Save failed', 409);
     }
   });
+  app.post('/api/save/reconcile', async (c) => {
+    const parsed = z
+      .object({ operationId: z.string().uuid() })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid Save operation ID', 400);
+    try {
+      return c.json(await session.reconcileSave(parsed.data.operationId));
+    } catch {
+      return c.text('The requested Save is unavailable for reconciliation', 409);
+    }
+  });
   app.post('/api/save', async (c) => {
     const parsed = revisionSchema
       .extend({
@@ -392,26 +404,7 @@ function createLicenseWorkbenchApp(
   app.get('/api/ping', (c) => c.json({ ok: true }));
   app.post('/api/ping', (c) => c.json({ ok: true }));
   app.get('*', async (c) => {
-    const asset = assets.get(
-      c.req.path as
-        | '/'
-        | '/app.css'
-        | '/app.js'
-        | '/paid-controls.js'
-        | '/analysis-progress.js'
-        | '/database-test.js'
-        | '/preview-ui.js'
-        | '/guide.js'
-        | '/help.js'
-        | '/report-controls.js'
-        | '/review.js'
-        | '/review-edit-feedback.js'
-        | '/review-pagination.js'
-        | '/review-navigation.js'
-        | '/save.js'
-        | '/settings-draft.js'
-        | '/preview-text.js'
-    );
+    const asset = assets.get(c.req.path);
     if (!asset) return c.text('Not found', 404);
     const [name, contentType] = asset;
     c.header('Content-Type', contentType);

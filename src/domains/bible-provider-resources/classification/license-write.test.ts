@@ -35,15 +35,22 @@ describe('bounded file/database compensation', () => {
         externalInode = (await stat(f.output, { bigint: true })).ino;
         throw new Error('commit failed');
       });
-      await expect(
-        writeLicenseDestinations({
-          artifact: f.artifact,
-          files: [{ path: f.output, previous }],
-          database: f.adapter,
-          replace: false,
-          expectedFiles: [{ path: f.output, bytes: previous }],
-        })
-      ).rejects.toMatchObject({ recovery: { diverged: true, affectedPaths: [f.output] } });
+      const error = await writeLicenseDestinations({
+        artifact: f.artifact,
+        files: [{ path: f.output, previous }],
+        database: f.adapter,
+        replace: false,
+        expectedFiles: [{ path: f.output, bytes: previous }],
+      }).catch((error: unknown) => error);
+      expect(error).toMatchObject({ recovery: { diverged: true, affectedPaths: [f.output] } });
+      if (!(error instanceof LicenseWriteUncertainError)) throw error;
+      expect(await error.reconcile?.()).toEqual({
+        outcome: 'uncertain',
+        targets: [
+          { target: 'license_classifications', match: 'unverified' },
+          { target: f.output, match: 'other' },
+        ],
+      });
       expect((await stat(f.output, { bigint: true })).ino).toBe(externalInode);
     }
   );
@@ -103,8 +110,8 @@ describe('bounded file/database compensation', () => {
         ],
         fs: {
           ...licenseFileIo,
-          write: async (path, bytes) => {
-            await licenseFileIo.write(path, bytes);
+          write: async (path, bytes, opened) => {
+            await licenseFileIo.write(path, bytes, opened);
             await licenseFileIo.remove(f.input);
           },
         },
@@ -265,9 +272,9 @@ describe('bounded file/database compensation', () => {
             if (++renameCount === 2) throw new Error('restore rename denied');
             await licenseFileIo.rename(from, to);
           },
-          write: async (path, bytes) => {
+          write: async (path, bytes, opened) => {
             if (path.endsWith('.recovery')) throw new Error('recovery denied');
-            await licenseFileIo.write(path, bytes);
+            await licenseFileIo.write(path, bytes, opened);
           },
         },
       });
@@ -303,9 +310,9 @@ describe('bounded file/database compensation', () => {
             if (++renameCount === 2) throw new Error('restore rename denied');
             await licenseFileIo.rename(from, to);
           },
-          write: async (path, bytes) => {
+          write: async (path, bytes, opened) => {
             if (path.endsWith('.recovery')) throw new Error('recovery denied');
-            await licenseFileIo.write(path, bytes);
+            await licenseFileIo.write(path, bytes, opened);
           },
           read: async (path) => {
             if (path.endsWith('.tmp')) throw new Error('temporary read denied');
@@ -326,9 +333,9 @@ describe('bounded file/database compensation', () => {
     const order: string[] = [];
     const fs = {
       ...licenseFileIo,
-      write: vi.fn(async (path: string, bytes: string) => {
+      write: vi.fn(async (path: string, bytes: string, opened?: (inode: string) => void) => {
         order.push('stage file');
-        await licenseFileIo.write(path, bytes);
+        await licenseFileIo.write(path, bytes, opened);
       }),
       rename: vi.fn(async (a: string, b: string) => {
         order.push('publish file');

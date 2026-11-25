@@ -1,4 +1,4 @@
-import type { LicenseWriteRecovery } from './license-write';
+import type { LicenseReconciliation, LicenseWriteRecovery } from './license-write';
 
 export interface VisibleOperation {
   operationId: string;
@@ -14,11 +14,18 @@ export interface VisibleOperation {
     stopRequested?: boolean;
   };
   cleanupWarning?: string;
+  reconciliation?: LicenseReconciliation;
   recovery?: LicenseWriteRecovery;
   result?: {
     wholeFileHash: string;
     targets: Array<{ path: string; role: 'output' | 'signed-source'; hash: string }>;
-    policy: { inserts: number; updates: number; deletes: number } | null;
+    policy: {
+      inserts: number;
+      updates: number;
+      deletes: number;
+      preserved: number;
+      reviewContentHash?: string;
+    } | null;
     incomplete: boolean;
   };
 }
