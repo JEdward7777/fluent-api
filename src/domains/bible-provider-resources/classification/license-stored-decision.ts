@@ -9,7 +9,7 @@ import {
   parseStoredLicenseEvidence,
 } from '../license-artifact.schemas';
 import { validateLicenseEvidence } from '../license-artifact.validation';
-import { isLicenseNoticeUnavailable, normalizeLicenseNotice } from '../license-normalizer';
+import { normalizeLicenseNotice } from '../license-normalizer';
 import { restoreStoredExtensions } from './license-database-extensions';
 
 export function databaseRationaleText(row: Pick<LicenseClassification, 'source' | 'rationale'>) {
@@ -63,6 +63,14 @@ function originalV2(content: StoredLicenseClassification['storedRationale']) {
   );
 }
 
+function matchesColumnTime(column: string | null | undefined, evidence: string | null | undefined) {
+  return (
+    column === undefined ||
+    column === evidence ||
+    (column != null && evidence != null && Date.parse(column) === Date.parse(evidence))
+  );
+}
+
 function currentEvidence(row: StoredLicenseClassification) {
   const evidence = row.evidence;
   if (!evidence) return;
@@ -82,8 +90,8 @@ function currentEvidence(row: StoredLicenseClassification) {
         evidence.reviewedBy === null &&
         evidence.humanReviewedAt === null
       )) ||
-    (row.decisionAt !== undefined && row.decisionAt !== evidence.decisionAt) ||
-    (row.humanReviewedAt !== undefined && row.humanReviewedAt !== evidence.humanReviewedAt) ||
+    !matchesColumnTime(row.decisionAt, evidence.decisionAt) ||
+    !matchesColumnTime(row.humanReviewedAt, evidence.humanReviewedAt) ||
     (row.reviewedBy !== undefined && row.reviewedBy !== evidence.reviewedBy)
   )
     return;
@@ -152,8 +160,6 @@ export function storedLicenseDecision(
     currentEvidence(row);
   if (evidence) {
     const decision = structuredClone(evidence);
-    if (isLicenseNoticeUnavailable(decision.exampleNotice) && example !== null)
-      decision.exampleNotice = example;
     if ((decision.samples.length || decision.rule) && !decision.evidenceContract)
       decision.evidenceContract = row.classificationRun;
     return decision;

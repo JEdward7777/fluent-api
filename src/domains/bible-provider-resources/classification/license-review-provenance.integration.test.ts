@@ -126,7 +126,7 @@ describe('physical database review provenance', () => {
         humanReviewedAt: first,
       });
       const toJson = planLicenseSaveDestinations({
-        source: 'database',
+        overwriteDatabase: true,
         destination: 'both',
         artifact: retained,
         outputBytes: serializeLicenseArtifact(modelArtifact).bytes,
@@ -136,12 +136,11 @@ describe('physical database review provenance', () => {
       expect(toJson.jsonChanges.updated).toContain(key);
       expect(
         toJson.jsonArtifact?.classifications.find((row) => row.normalizedText === key)
-      ).toEqual({ ...winner, exampleNotice: model.exampleNotice });
+      ).toEqual(winner);
       expect(toJson.databaseChanges.unchanged).toEqual([key]);
       await adapter.apply(toJson.databaseArtifact!, true);
       expect(await database.select().from(schema.license_classifications)).toEqual(before);
       const toDb = planLicenseSaveDestinations({
-        source: 'json',
         destination: 'database',
         artifact: modelArtifact,
         outputBytes: null,
@@ -150,7 +149,7 @@ describe('physical database review provenance', () => {
       expect(toDb.databaseChanges.preserved).toContain(key);
       expect(
         toDb.databaseForecast?.classifications.find((row) => row.normalizedText === key)
-      ).toEqual({ ...winner, exampleNotice: model.exampleNotice });
+      ).toEqual(winner);
       await adapter.apply(toDb.databaseArtifact!, false);
       const [after] = await database
         .select()
@@ -205,7 +204,6 @@ describe('physical database review provenance', () => {
       ownedLicenseClassification({ ...original, evidenceContract: draft.classificationRun })
     );
     const replay = planLicenseSaveDestinations({
-      source: 'json',
       destination: 'database',
       artifact: serialized,
       outputBytes: null,
@@ -339,7 +337,6 @@ describe('physical database review provenance', () => {
       const empty = await adapter.load();
       expect(empty.classifications).toEqual([]);
       const transfer = planLicenseSaveDestinations({
-        source: 'json',
         destination: 'database',
         artifact: exported,
         outputBytes: null,
@@ -396,7 +393,7 @@ describe('physical database review provenance', () => {
     artifact.classifications[0].unownedExtension = { ignoreForComparison: true };
     const snapshot = await adapter.load();
     const plan = planLicenseSaveDestinations({
-      source: 'database',
+      overwriteDatabase: true,
       destination: 'database',
       artifact,
       outputBytes: null,
@@ -470,7 +467,6 @@ describe('physical database review provenance', () => {
       await expect(refresh(snapshot.classifications)).rejects.toThrow(test.error);
       expect(() =>
         planLicenseSaveDestinations({
-          source: 'json',
           destination: 'database',
           artifact,
           outputBytes: null,

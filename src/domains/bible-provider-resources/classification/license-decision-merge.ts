@@ -17,8 +17,16 @@ interface PlannedLicenseDecision extends DecisionMergeResult {
 
 const rank = { unreviewed: 0, llm_reviewed: 1, human_reviewed: 2 } as const;
 
-function ownedDecision(row: LicenseClassification, includeDecisionAt = true): string {
-  return hashCanonicalJson(ownedLicenseClassification(row, includeDecisionAt));
+function eventInstant(value: string | null | undefined) {
+  return value == null ? null : Date.parse(value);
+}
+
+export function ownedDecision(row: LicenseClassification, includeDecisionAt = true): string {
+  return hashCanonicalJson({
+    ...ownedLicenseClassification(row, includeDecisionAt),
+    decisionAt: includeDecisionAt ? eventInstant(row.decisionAt) : null,
+    humanReviewedAt: eventInstant(row.humanReviewedAt),
+  });
 }
 
 /** Selects an entire owned decision; null dates are unknown, never migration time. */
@@ -35,8 +43,8 @@ export function compareLicenseDecisions(
     return sourceRank > destinationRank
       ? { reason: 'update', winner: source }
       : { reason: 'preserve', winner: destination };
-  const sourceAt = source.decisionAt ?? null;
-  const destinationAt = destination.decisionAt ?? null;
+  const sourceAt = eventInstant(source.decisionAt);
+  const destinationAt = eventInstant(destination.decisionAt);
   if (sourceAt !== destinationAt) {
     if (sourceAt === null || destinationAt === null) {
       if (ownedDecision(source, false) !== ownedDecision(destination, false))

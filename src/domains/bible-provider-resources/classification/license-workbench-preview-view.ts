@@ -48,6 +48,8 @@ export function licenseWorkbenchPreviewView(input: {
           operation:
             (preview.plan.overwriteJson ?? options.source === 'json') ? 'overwrite' : 'sync',
           ...preview.plan.jsonChanges,
+          artifactRows: preview.plan.jsonArtifact.classifications.length,
+          wholeFileHash: preview.plan.wholeFileHash,
         }
       : null,
     database: preview.plan.databaseArtifact
@@ -58,6 +60,7 @@ export function licenseWorkbenchPreviewView(input: {
               : undefined,
           operation: preview.plan.replace ? 'overwrite' : 'sync',
           ...preview.plan.databaseChanges,
+          reviewContentHash: preview.plan.databaseForecast?.reviewContentHash,
         }
       : null,
     policy:

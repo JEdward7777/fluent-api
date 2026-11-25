@@ -183,7 +183,7 @@ export async function runLicenseCommand(
     );
     await emitReports(preview.reports);
     const changes = (label: string, operation: string, value: typeof preview.plan.jsonChanges) =>
-      `${label} ${operation}: ${value.inserted.length} inserts, ${value.updated.length} updates, ${value.preserved.length} preserved, ${value.unchanged.length} unchanged`;
+      `${label} ${operation}: ${value.inserted.length} inserts, ${value.updated.length} updates, ${value.preserved.length} preserved, ${value.unchanged.length} unchanged (${value.permissionChanges.length} permission updates, ${value.metadataChanges.length} metadata-only updates)`;
     await io.write(
       preview.plan.jsonArtifact
         ? changes(

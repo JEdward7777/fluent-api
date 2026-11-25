@@ -111,6 +111,14 @@ export function licenseDatabaseProjection(artifact: LicenseArtifact) {
   });
 }
 
+function comparisonHash(row: ReturnType<typeof ownedLicenseClassification>) {
+  return hashCanonicalJson({
+    ...row,
+    decisionAt: row.decisionAt === null ? null : Date.parse(row.decisionAt),
+    humanReviewedAt: row.humanReviewedAt === null ? null : Date.parse(row.humanReviewedAt),
+  });
+}
+
 /**
  * Compare complete owned decisions so changing the storage representation alone
  * cannot rewrite untouched legacy evidence, producer labels or timestamps.
@@ -131,7 +139,7 @@ export function selectLicenseMaintenanceRows(
     // Column-only policies never stored a spelling for the raw notice.
     if (!old.evidence && projected.rationale.evidence.source === 'table')
       prior.exampleNotice = projected.rationale.evidence.exampleNotice;
-    return hashCanonicalJson(prior) !== hashCanonicalJson(projected.rationale.evidence);
+    return comparisonHash(prior) !== comparisonHash(projected.rationale.evidence);
   });
 }
 

@@ -40,6 +40,18 @@ describe('whole license decision merge', () => {
     expect(compareLicenseDecisions(undated, dated)).toEqual({ reason: 'conflict', winner: null });
   });
 
+  it('compares UTC instants across offsets at millisecond precision', () => {
+    const source = make();
+    const destination = make();
+    source.decisionAt = '2026-11-17T01:00:00.101+01:00';
+    destination.decisionAt = '2026-11-17T00:00:00.102Z';
+    expect(compareLicenseDecisions(source, destination).reason).toBe('preserve');
+    source.decisionAt = '2026-11-17T01:00:00.102+01:00';
+    expect(compareLicenseDecisions(source, destination).reason).toBe('no-op');
+    source.rationale = 'Different';
+    expect(compareLicenseDecisions(source, destination).reason).toBe('conflict');
+  });
+
   it('plans destination-only preservation without feeding winners into source', () => {
     const source = make();
     const destinationOnly = make();

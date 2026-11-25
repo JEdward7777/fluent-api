@@ -341,5 +341,80 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         await Promise.all([source.close!(), alias.close!(), independent.close!(), f.cleanup()]);
       }
     }, 60000);
+
+    it('saves an edit from A to independent B and then to the verified physical A', async () => {
+      const f = await makeCommandFixture(false);
+      const [a, b] = endpoints;
+      const sourceUrl = `postgres://api_user@${a}/postgres`;
+      const copyUrl = `postgres://api_user@${b}/postgres`;
+      const source = createOwnedLicenseDatabaseAdapter(sourceUrl, undefined, 'source');
+      const copy = createOwnedLicenseDatabaseAdapter(copyUrl);
+      let targetUrl = copyUrl;
+      const options = {
+        ...f.options,
+        source: 'database' as const,
+        destination: 'database' as const,
+      };
+      const dependencies = {
+        apiKey: '',
+        database: async () => source,
+        destinationDatabase: async () => createOwnedLicenseDatabaseAdapter(targetUrl),
+      };
+      const workflow = new LicenseWorkflow(options, dependencies);
+      try {
+        await source.apply(f.artifact, true);
+        await copy.apply(f.artifact, true);
+        await workflow.inspect(1);
+        const row = workflow.analyzed!.artifact.classifications[1];
+        const key = row.normalizedText;
+        workflow.editReview(
+          {
+            kind: 'disposition',
+            normalizedText: key,
+            status: row.status,
+            reason: 'A new human decision',
+            reviewedBy: 'Saved as reviewer',
+          },
+          1,
+          1
+        );
+        const request = { configurationRevision: 1, contentRevision: 2, agreeToReplace: false };
+        const first = await workflow.preview(1, 2);
+        expect(first.plan.databaseProof?.mode).toBe('distinct');
+        expect(first.plan.databaseChanges.metadataChanges).toEqual([key]);
+        await workflow.save({ ...request, operationId: 'save-copy' });
+        const reviewer = async (adapter: typeof source) =>
+          (await adapter.load()).classifications.find((item) => item.normalizedText === key)
+            ?.reviewedBy;
+        expect(await reviewer(copy)).toBe('Saved as reviewer');
+        expect(await reviewer(source)).toBeNull();
+        targetUrl = sourceUrl;
+        await workflow.configureLoadedSettings(options, true, false);
+        const second = await workflow.preview(1, 2);
+        expect(second.plan.databaseProof?.mode).toBe('same');
+        expect(second.plan.databaseChanges).toMatchObject({
+          updated: [key],
+          metadataChanges: [key],
+          permissionChanges: [],
+        });
+        expect(second.plan.databaseArtifact?.classifications).toHaveLength(1);
+        await workflow.save({ ...request, operationId: 'save-source' });
+        expect(await reviewer(source)).toBe('Saved as reviewer');
+        const reloaded = new LicenseWorkflow(options, {
+          ...dependencies,
+          database: async () => createOwnedLicenseDatabaseAdapter(sourceUrl, undefined, 'source'),
+        });
+        try {
+          await reloaded.inspect(1);
+          const repeat = await reloaded.preview(1, 1);
+          expect(repeat.plan.databaseChanges.updated).toEqual([]);
+          expect(repeat.plan.databaseArtifact?.classifications).toEqual([]);
+        } finally {
+          await reloaded.close();
+        }
+      } finally {
+        await Promise.all([workflow.close(), copy.close!(), f.cleanup()]);
+      }
+    }, 30000);
   }
 );

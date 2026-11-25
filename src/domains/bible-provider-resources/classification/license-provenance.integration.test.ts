@@ -364,7 +364,6 @@ it('exports exact raw notices and retains a column-only key without a witness th
     } = encoded.evidence;
     expect(parseStoredLicenseEvidence(v2Evidence, undefined)).toBeUndefined();
     const importPlan = planLicenseSaveDestinations({
-      source: 'json',
       destination: 'database',
       artifact: {
         ...exported,

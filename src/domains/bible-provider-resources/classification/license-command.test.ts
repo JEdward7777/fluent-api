@@ -267,9 +267,7 @@ describe('license command source/destination and responsibility boundary', () =>
         )
       ).toBe(0);
       expect(f.dependencies.transport).not.toHaveBeenCalled();
-      expect(
-        f.applied[0].classifications.find((row) => row.status === 'unknown')
-      ).not.toHaveProperty('rowNote');
+      expect(f.applied[0].classifications).toEqual([]);
       expect(f.applied[0].attestation).toBeUndefined();
       if (destination === 'both') expect((await f.readOutput()).reviewState).toBe('incomplete');
     }

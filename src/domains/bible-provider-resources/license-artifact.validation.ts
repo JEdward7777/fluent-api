@@ -42,8 +42,13 @@ function validateReviewFacts(row: ReviewFacts) {
   } else if (row.reviewedBy !== null || row.humanReviewedAt !== null)
     throw new Error('Only human-reviewed rows carry human identity and time');
   for (const time of [row.decisionAt, row.humanReviewedAt]) {
-    if (time !== null && new Date(time).toISOString() !== time)
-      throw new Error('Decision times must use canonical millisecond UTC precision');
+    if (
+      time !== null &&
+      (!/\.\d{3}(?:Z|[+-]\d{2}:?\d{2})$/.test(time) || !Number.isFinite(Date.parse(time)))
+    )
+      throw new Error(
+        'Decision times must use canonical millisecond precision and an explicit time zone'
+      );
   }
 }
 

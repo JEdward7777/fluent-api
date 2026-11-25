@@ -34,6 +34,9 @@ beforeAll(async () => {
   });
 }, 30000);
 beforeEach(async () => {
+  await database.delete(schema.bibles);
+  await database.delete(schema.bible_provider_resources);
+  await database.delete(schema.languages);
   await database.delete(schema.license_classifications);
 });
 afterAll(() => client.close());
@@ -43,7 +46,6 @@ describe('pGlite license persistence', () => {
     const adapter = createLicenseDatabaseAdapter();
     const source = makeLicenseArtifact();
     const first = planLicenseSaveDestinations({
-      source: 'json',
       destination: 'database',
       artifact: source,
       outputBytes: null,
@@ -60,7 +62,6 @@ describe('pGlite license persistence', () => {
     expect(snapshot.classifications.every((row) => row.decisionAt === null)).toBe(true);
     const before = await database.select().from(schema.license_classifications);
     const repeat = planLicenseSaveDestinations({
-      source: 'json',
       destination: 'database',
       artifact: source,
       outputBytes: null,
@@ -76,6 +77,98 @@ describe('pGlite license persistence', () => {
       false,
       snapshot.classifications
     );
+    expect(await database.select().from(schema.license_classifications)).toEqual(before);
+  });
+
+  it('retains full evidence with an offset event and treats equivalent UTC as unchanged', async () => {
+    const adapter = createLicenseDatabaseAdapter();
+    const base = makeLicenseArtifact();
+    const key = base.classifications[0].normalizedText;
+    const event = (date: string) =>
+      recordHumanLicenseDecision(base, key, 'allowed', 'Reviewed', 'Named', date);
+    const offset = event('2026-11-17T10:00:00.000+02:00');
+    await adapter.apply(offset, true);
+    const prior = (await adapter.load()).classifications;
+    expect(prior.find((row) => row.normalizedText === key)?.evidence).toMatchObject({
+      decisionAt: '2026-11-17T10:00:00.000+02:00',
+      reviewedBy: 'Named',
+    });
+    for (const overwriteDatabase of [true, false]) {
+      const plan = planLicenseSaveDestinations({
+        destination: 'database',
+        artifact: event('2026-11-17T08:00:00.000Z'),
+        databaseRows: prior,
+        outputBytes: null,
+        overwriteDatabase,
+      });
+      expect(plan.conflicts).toEqual([]);
+      expect(plan.databaseChanges.unchanged).toContain(key);
+      expect(plan.databaseArtifact?.classifications).toEqual([]);
+    }
+  });
+
+  it('publishes a null-notice source winner, preserves it against a weaker source and replays the physical DB row', async () => {
+    const adapter = createLicenseDatabaseAdapter();
+    const base = makeLicenseArtifact();
+    await adapter.apply(base, true);
+    const original = base.classifications[2];
+    const externalId = 'null-notice-winner';
+    await database
+      .insert(schema.languages)
+      .values({ id: 1, langName: 'English', langCodeIso6393: 'eng' });
+    await database
+      .insert(schema.bibles)
+      .values({
+        languageId: 1,
+        provider: 'dbl',
+        externalId,
+        name: 'Test Bible',
+        abbreviation: 'TB',
+      });
+    await database
+      .insert(schema.bible_provider_resources)
+      .values({ provider: 'dbl', externalId, textLicenseNotice: original.exampleNotice });
+    const candidate = recordHumanLicenseDecision(
+      base,
+      original.normalizedText,
+      'allowed',
+      { reviewComment: 'Authoritative terms' },
+      'Named',
+      '2026-11-17T08:00:00.000Z'
+    );
+    const winner = candidate.classifications[2];
+    winner.exampleNotice = null;
+    const plan = async (artifact: typeof base, overwriteDatabase: boolean) =>
+      planLicenseSaveDestinations({
+        destination: 'database',
+        artifact,
+        outputBytes: null,
+        overwriteDatabase,
+        databaseRows: (await adapter.load()).classifications,
+      });
+    const first = await plan(candidate, false);
+    expect(first.databaseArtifact?.classifications).toEqual([winner]);
+    await adapter.apply(first.databaseArtifact!, false);
+    const actual = (await adapter.load()).classifications.find(
+      (row) => row.normalizedText === winner.normalizedText
+    )!;
+    expect(actual.exampleNotice).toBe(original.exampleNotice);
+    expect(actual.evidence).toMatchObject(winner);
+    const before = await database.select().from(schema.license_classifications);
+    for (const overwriteDatabase of [false, true]) {
+      const repeat = await plan(candidate, overwriteDatabase);
+      expect(repeat.conflicts).toEqual([]);
+      expect(repeat.databaseChanges.unchanged).toContain(winner.normalizedText);
+      expect(repeat.databaseArtifact?.classifications).toEqual([]);
+      await adapter.apply(repeat.databaseArtifact!, overwriteDatabase);
+    }
+    const weaker = await plan(base, false);
+    expect(weaker.databaseChanges.preserved).toContain(winner.normalizedText);
+    expect(
+      weaker.databaseForecast?.classifications.find(
+        (row) => row.normalizedText === winner.normalizedText
+      )
+    ).toMatchObject(winner);
     expect(await database.select().from(schema.license_classifications)).toEqual(before);
   });
 
@@ -99,7 +192,6 @@ describe('pGlite license persistence', () => {
       '2026-11-17T12:00:00.000Z'
     );
     const plan = planLicenseSaveDestinations({
-      source: 'json',
       destination: 'database',
       artifact: reviewed,
       outputBytes: null,
@@ -128,7 +220,6 @@ describe('pGlite license persistence', () => {
     expect(artifact.classifications).toHaveLength(523);
     const adapter = createLicenseDatabaseAdapter();
     const first = planLicenseSaveDestinations({
-      source: 'json',
       destination: 'database',
       artifact,
       outputBytes: null,
@@ -142,7 +233,6 @@ describe('pGlite license persistence', () => {
       snapshot.classifications.filter((row) => row.reviewState === 'llm_reviewed')
     ).toHaveLength(300);
     const replay = planLicenseSaveDestinations({
-      source: 'json',
       destination: 'database',
       artifact,
       outputBytes: null,

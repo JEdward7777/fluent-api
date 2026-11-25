@@ -45,14 +45,16 @@ export function buildLicenseSavePlan(input: {
 }): LicenseSavePlan {
   const { options, artifact, inputBytes, outputBytes, database } = input;
   if (!options.source || !options.destination) throw new Error('Select source and destination');
+  const overwriteJson =
+    input.overwriteJson ??
+    (options.source === 'json' && resolve(options.input) === resolve(options.output));
   const destinations = planLicenseSaveDestinations({
-    source: options.source,
     destination: options.destination,
     artifact,
     outputBytes,
     databaseRows: database?.classifications,
-    overwriteJson: input.overwriteJson,
-    overwriteDatabase: input.overwriteDatabase,
+    overwriteJson,
+    overwriteDatabase: input.overwriteDatabase ?? false,
   });
   const reportingArtifact = destinations.databaseForecast ?? destinations.jsonArtifact ?? artifact;
   const reports = renderLicenseReports(reportingArtifact, {
@@ -92,14 +94,13 @@ export function buildLicenseSavePlan(input: {
   const output = serializeLicenseArtifact(destinations.jsonArtifact ?? artifact);
   return {
     ...destinations,
-    overwriteJson: input.overwriteJson,
+    overwriteJson,
     targets,
     expectedFiles,
-    replace:
-      (input.overwriteDatabase ?? options.source === 'database') && options.destination !== 'json',
+    replace: input.overwriteDatabase === true && options.destination !== 'json',
     requiresForceAgreement: false,
     wholeFileHash: output.wholeFileHash,
-    reviewContentHash: (destinations.jsonArtifact ?? artifact).reviewContentHash,
+    reviewContentHash: artifact.reviewContentHash,
     reports,
   };
 }

@@ -73,7 +73,7 @@ describe('database-source authority isolation', () => {
     });
     expect(source.classifications[0].automaticDecision).toBeUndefined();
     const plan = planLicenseSaveDestinations({
-      source: 'database',
+      overwriteDatabase: true,
       destination: 'both',
       artifact: source,
       outputBytes: serializeLicenseArtifact(prior).bytes,

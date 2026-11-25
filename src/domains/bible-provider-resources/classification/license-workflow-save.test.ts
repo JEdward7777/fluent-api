@@ -27,6 +27,54 @@ async function readyWorkflow(attested = true) {
 }
 
 describe('shared workflow exact-preview Save', () => {
+  it('saves edited JSON A to B, then counts the physical difference and publishes to A', async () => {
+    const f = await fixture(false);
+    const dependencies = { ...f.dependencies, destinationDatabase: f.dependencies.database };
+    const workflow = new LicenseWorkflow(f.options, dependencies);
+    try {
+      await workflow.inspect(1);
+      const key = f.artifact.classifications[0].normalizedText;
+      workflow.editReview(
+        {
+          kind: 'disposition',
+          normalizedText: key,
+          status: 'allowed',
+          reason: 'Approved',
+          reviewedBy: 'Reviewer',
+        },
+        1,
+        1
+      );
+      const request = { configurationRevision: 1, contentRevision: 2, agreeToReplace: false };
+      expect((await workflow.preview(1, 2)).plan.jsonChanges.inserted).toHaveLength(3);
+      await workflow.save({ ...request, operationId: 'save-copy' });
+      expect(await readFile(f.input, 'utf8')).toBe(f.sourceBytes);
+      const options = { ...f.options, output: f.input };
+      await workflow.configureLoadedSettings(options, true, false);
+      const preview = await workflow.preview(1, 2);
+      expect(preview.plan.jsonChanges).toMatchObject({
+        inserted: [],
+        updated: [key],
+        permissionChanges: [key],
+        metadataChanges: [],
+      });
+      expect(preview.plan.jsonChanges.unchanged).toHaveLength(2);
+      await workflow.save({ ...request, operationId: 'save-original' });
+      expect(await readFile(f.input, 'utf8')).toBe(await readFile(f.output, 'utf8'));
+      const reloaded = new LicenseWorkflow(options, dependencies);
+      try {
+        await reloaded.inspect(1);
+        const repeat = await reloaded.preview(1, 1);
+        expect(repeat.plan.jsonChanges.updated).toEqual([]);
+        expect(repeat.plan.jsonChanges.unchanged).toHaveLength(3);
+      } finally {
+        await reloaded.close();
+      }
+    } finally {
+      await workflow.close();
+    }
+  });
+
   it.each(['saved', 'inspected'])(
     'retains destination changes across draft revert from %s',
     async (state) => {
