@@ -1,180 +1,250 @@
-const stateKey = 'licenseReviewNavigationV1';
-const initialView = { search: '', status: 'all', source: 'all', page: 1, row: null };
-const statuses = ['all', 'allowed', 'forbidden', 'unknown'];
-const sources = ['all', 'table', 'rule', 'gemini', 'manual'];
+const stateKey = 'licenseReviewNavigationV2';
+const initial = {
+  search: '',
+  status: 'all',
+  source: 'all',
+  reviewState: 'all',
+  page: 1,
+  pageSize: 25,
+  row: null,
+};
 const maxSearchLength = 500;
-
-function readEntry(state) {
-  const entry = state?.[stateKey];
-  if (
-    !entry ||
-    !/^[\da-f-]{36}$/.test(entry.launchId) ||
-    !/^[\da-f]{32}$/.test(entry.chain) ||
-    !Number.isSafeInteger(entry.index) ||
-    entry.index < 0 ||
-    !Number.isSafeInteger(entry.configuration) ||
-    typeof entry.search !== 'string' ||
-    entry.search.length > maxSearchLength ||
-    !statuses.includes(entry.status) ||
-    !sources.includes(entry.source) ||
-    !Number.isSafeInteger(entry.page) ||
-    entry.page < 1 ||
-    !(entry.row === null || (typeof entry.row === 'string' && /^[\da-f]{64}$/.test(entry.row)))
-  )
-    return null;
-  const { launchId, chain, index, configuration, search, status, source, page, row } = entry;
-  const listIndex =
-    Number.isSafeInteger(entry.listIndex) && entry.listIndex >= 0 && entry.listIndex < index
-      ? entry.listIndex
-      : index - 1;
-  return { launchId, chain, index, configuration, search, status, source, page, row, listIndex };
+function validEntry(entry) {
+  const uuid = /^[\da-f-]{36}$/;
+  const row = /^[\da-f]{64}$/;
+  return (
+    entry &&
+    uuid.test(entry.launchId) &&
+    uuid.test(entry.chain) &&
+    Number.isSafeInteger(entry.index) &&
+    entry.index >= 0 &&
+    Number.isSafeInteger(entry.configuration) &&
+    typeof entry.search === 'string' &&
+    entry.search.length <= maxSearchLength &&
+    ['all', 'allowed', 'forbidden', 'unknown'].includes(entry.status) &&
+    ['all', 'table', 'rule', 'gemini', 'manual'].includes(entry.source) &&
+    ['all', 'unreviewed', 'llm_reviewed', 'human_reviewed'].includes(entry.reviewState) &&
+    [1, 10, 25, 50, 100].includes(entry.pageSize) &&
+    Number.isSafeInteger(entry.page) &&
+    entry.page > 0 &&
+    (entry.row === null ||
+      (row.test(entry.row) &&
+        Number.isSafeInteger(entry.listIndex) &&
+        entry.listIndex >= 0 &&
+        entry.listIndex < entry.index)) &&
+    (entry.anchor == null || row.test(entry.anchor))
+  );
+}
+export function reviewQuery(view) {
+  return Object.fromEntries(
+    Object.keys(initial)
+      .filter((key) => key !== 'row')
+      .map((key) => [key, view[key]])
+  );
 }
 
-const chainId = () =>
-  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, '0')
-  ).join('');
+export function showFilters(form, view) {
+  const banner = document.getElementById('review-filtered');
+  const active = view.search ? [`Search: ${view.search}`] : [];
+  for (const [key, name] of Object.entries({
+    status: 'Decision',
+    source: 'Source',
+    reviewState: 'Review state',
+  })) {
+    if (view[key] === 'all') continue;
+    const option = Array.from(form.elements[key].options).find(
+      (option) => option.value === view[key]
+    );
+    active.push(`${name}: ${option.text}`);
+  }
+  banner.hidden = !active.length;
+  banner.textContent = active.length ? `Filtered view · ${active.join(' · ')}` : '';
+}
 
-export function initReviewNavigation(form, onNavigate, mayTraverse) {
-  form.elements.search.maxLength = maxSearchLength;
+export function initReviewNavigation(form, onNavigate, flush) {
   let entry;
-  let pending = null;
-  let repairTimer;
   let dirty = false;
+  let traversal;
+  let departure;
+  const read = () => {
+    const value = history.state?.[stateKey];
+    return validEntry(value) ? value : undefined;
+  };
+  const write = (method, url = location.href) => history[method]({ [stateKey]: entry }, '', url);
+  const notify = () => {
+    window.dispatchEvent(new Event('review-location'));
+    onNavigate();
+  };
+  function push(change, url, render = true) {
+    if (!entry || traversal) return false;
+    if (!render) {
+      entry.index++;
+      write('pushState', url);
+      return true;
+    }
+    entry = { ...entry, ...change, index: entry.index + 1 };
+    write('pushState', url);
+    if (render) onNavigate();
+    return true;
+  }
+  async function depart(proceed, ready = () => !dirty || flush()) {
+    if (!entry || departure || traversal) return false;
+    const source = entry;
+    const intent = {};
+    departure = intent;
+    try {
+      if (!(await ready()) || departure !== intent || source !== entry || traversal) return false;
+      const here = read();
+      if (here?.chain !== source.chain || here.index !== source.index) return false;
+      return proceed();
+    } finally {
+      if (departure === intent) departure = undefined;
+    }
+  }
+  function openRow(row) {
+    if (!row || row === entry.row) return false;
+    if (!entry.row) {
+      entry.anchor = row;
+      entry.scroll = window.scrollY;
+      write('replaceState');
+    }
+    return push({ row, listIndex: entry.row ? entry.listIndex : entry.index });
+  }
+  function back() {
+    if (!entry.row) return false;
+    if (entry.listIndex < entry.index) {
+      traversal = { destination: entry.listIndex };
+      history.go(entry.listIndex - entry.index);
+    } else {
+      entry = { ...entry, row: null };
+      write('replaceState');
+      onNavigate();
+    }
+    return true;
+  }
+  window.addEventListener('popstate', async () => {
+    departure = undefined;
+    const target = read();
+    if (!entry) return;
+    if (!target) {
+      const raw = history.state?.[stateKey];
+      if (
+        raw?.chain === entry.chain &&
+        Number.isSafeInteger(raw.index) &&
+        raw.index !== entry.index
+      ) {
+        traversal = { repair: true, destination: entry.index };
+        history.go(entry.index - raw.index);
+      }
+      return;
+    }
+    if (target.chain !== entry.chain) return;
+    if (traversal?.repair) {
+      if (target.index !== entry.index) {
+        history.go(entry.index - target.index);
+        return;
+      }
+      const repair = traversal;
+      const destination = repair.destination;
+      if (destination === entry.index) {
+        traversal = undefined;
+        return;
+      }
+      const kept = await flush();
+      if (traversal !== repair || read()?.index !== entry.index) return;
+      if (kept) {
+        traversal = { destination };
+        history.go(destination - entry.index);
+      } else traversal = undefined;
+      return;
+    }
+    if (dirty && target.index !== entry.index) {
+      traversal = { repair: true, destination: target.index };
+      history.go(entry.index - target.index);
+      return;
+    }
+    traversal = undefined;
+    entry = target;
+    notify();
+  });
+  const search = form.elements.search;
+  search.maxLength = maxSearchLength;
+  search.addEventListener('input', () => search.setCustomValidity(''));
+  const filters = () => {
+    search.setCustomValidity(
+      search.value.length > maxSearchLength
+        ? `Search must be ${maxSearchLength} characters or fewer.`
+        : ''
+    );
+    if (!search.reportValidity()) {
+      search.focus();
+      return;
+    }
+
+    const change = Object.fromEntries(
+      ['search', 'status', 'source', 'reviewState'].map((key) => [key, form.elements[key].value])
+    );
+    if (Object.keys(change).some((key) => change[key] !== entry[key]))
+      push({ ...change, page: 1, anchor: null, scroll: 0 });
+  };
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    filters();
+  });
+  for (const key of ['status', 'source', 'reviewState'])
+    form.elements[key].addEventListener('change', filters);
   const beforeUnload = (event) => {
     event.preventDefault();
     event.returnValue = '';
   };
-
-  const write = (method) => {
-    if (!pending?.repair) window.history[method]({ [stateKey]: entry }, '');
-  };
-  const repairTraversal = () => {
-    window.clearTimeout(repairTimer);
-    repairTimer = window.setTimeout(() => {
-      if (!pending?.repair) return;
-      const here = readEntry(window.history.state);
-      if (here?.chain === entry.chain && here.index !== entry.index)
-        window.history.go(entry.index - here.index);
-    }, 0);
-  };
-  const push = (change) => {
-    if (!entry || entry.row || pending) return;
-    if (Object.entries(change).every(([key, value]) => entry[key] === value)) return;
-    entry = { ...entry, ...change, index: entry.index + 1 };
-    write('pushState');
-    onNavigate();
-  };
-  const replaceRow = () => {
-    entry = { ...entry, row: null };
-    write('replaceState');
-    onNavigate();
-  };
-
-  window.addEventListener('popstate', (event) => {
-    const target = readEntry(event.state);
-    if (!entry) return;
-    if (!target || target.chain !== entry.chain) {
-      if (pending && !pending.repair) {
-        pending = null;
-        entry = { ...entry, index: 0, chain: chainId() };
-        replaceRow();
-      }
-      return;
-    }
-    if (pending?.repair) {
-      if (target.index === pending.index) {
-        pending = null;
-        write('replaceState');
-      } else repairTraversal();
-      return;
-    }
-    const discardConfirmed = pending?.index === target.index && pending.discardConfirmed;
-    pending = null;
-    if (target.index === entry.index) return;
-    if (
-      ['row', 'page', 'search', 'status', 'source', 'configuration'].every(
-        (key) => target[key] === entry[key]
-      )
-    ) {
-      Object.assign(entry, target);
-      return;
-    }
-    if (
-      !mayTraverse() ||
-      (!discardConfirmed &&
-        dirty &&
-        // eslint-disable-next-line no-alert -- Confirm browser traversal before discarding the editor.
-        !window.confirm(
-          'Discard unsaved row edits? Cancel to stay and apply the decision or update the note.'
-        ))
-    ) {
-      pending = { index: entry.index, repair: true };
-      repairTraversal();
-      return;
-    }
-    entry = target;
-    onNavigate();
-  });
-
-  const applyFilters = () =>
-    push({
-      search: form.elements.search.value,
-      status: form.elements.status.value,
-      source: form.elements.source.value,
-      page: 1,
-    });
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    applyFilters();
-  });
-  for (const key of ['status', 'source'])
-    form.elements[key].addEventListener('change', applyFilters);
   return {
     sync(setup) {
-      if (entry === undefined) entry = readEntry(window.history.state);
-      const sameLaunch = entry?.launchId === setup.launchId;
+      entry ??= read();
       if (
-        !sameLaunch ||
+        entry?.launchId !== setup.launchId ||
         entry.configuration !== setup.loadRevision ||
         (!setup.analysis && entry.row)
       ) {
         entry = {
-          ...initialView,
+          ...initial,
           launchId: setup.launchId,
-          chain: sameLaunch ? entry.chain : chainId(),
-          index: sameLaunch ? entry.index : 0,
           configuration: setup.loadRevision,
+          chain: entry?.chain ?? crypto.randomUUID(),
+          index: entry?.index ?? 0,
         };
         write('replaceState');
       }
       return entry;
     },
     pushStage(url) {
-      if (!entry || pending || !mayTraverse()) return false;
-      entry.index++;
-      window.history.pushState({ [stateKey]: entry }, '', url);
-      return true;
+      return depart(() => push({}, url, false));
     },
-    goTo(page) {
-      push({ page });
+    goTo(page, pageSize = entry.pageSize) {
+      if (page !== entry.page || pageSize !== entry.pageSize)
+        push({ page, pageSize, anchor: null, scroll: 0 });
     },
     openRow(row) {
-      push({ row, listIndex: entry.index });
+      return depart(() => openRow(typeof row === 'function' ? row() : row));
     },
-    backToResults(discardConfirmed = false) {
-      if (!entry?.row || pending || !mayTraverse()) return;
-      if (entry.index > 0) {
-        const index = entry.listIndex ?? entry.index - 1;
-        pending = { index, discardConfirmed };
-        window.history.go(index - entry.index);
-      } else replaceRow();
+    backToResults() {
+      return depart(back);
     },
-    forgetRow: replaceRow,
-    setPage(view, page) {
-      if (entry !== view || entry.page === page) return;
-      entry.page = page;
+    finishAction(ready, nextRow) {
+      return depart(() => {
+        const row = nextRow();
+        return row === null ? back() : openRow(row);
+      }, ready);
+    },
+    forgetRow() {
+      entry = { ...entry, row: null };
       write('replaceState');
+      onNavigate();
+    },
+    setPage(view, page) {
+      if (entry === view && entry.page !== page) {
+        entry.page = page;
+        write('replaceState');
+      }
     },
     setDirty(value) {
       dirty = value;

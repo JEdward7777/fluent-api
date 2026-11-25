@@ -186,9 +186,7 @@ function checkPendingSettings() {
 initReview(
   request,
   async (body) => {
-    const result = await request('review/edit', 'POST', body);
-    render(result.setup);
-    return result;
+    return request('review/draft', 'POST', body);
   },
   () => {
     syncPracticeDraftControls();
@@ -214,7 +212,8 @@ initReview(
     render(next);
     if (!evidenceChanges()) status.textContent = reassessmentStatus(body, next.paidEstimate);
     return next;
-  }
+  },
+  (next) => render(next, false, undefined, true)
 );
 function render(raw, populate = false, accepted, passive = false) {
   observer.remember(raw);

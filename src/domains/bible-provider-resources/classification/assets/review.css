@@ -1,0 +1,28 @@
+.review-chip {
+  display: inline-block;
+  border-radius: 1em;
+  padding: 0.2em 0.7em;
+  background: #e8e8e8;
+  color: #272727;
+}
+.review-chip.llm_reviewed {
+  background: #d9ebff;
+  color: #163e70;
+}
+.review-chip.human_reviewed {
+  background: #f0e3ff;
+  color: #522578;
+}
+#review-filtered {
+  background: #fff1af;
+  color: #422f00;
+}
+.review-editor > a,
+.review-editor > button {
+  margin: 0.25rem;
+}
+
+.review-pager a[aria-disabled='true'] {
+  color: #526573;
+  text-decoration: none;
+}

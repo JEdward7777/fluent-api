@@ -1,5 +1,6 @@
-import { reviewEditFeedback, validateReviewEdit } from './review-edit-feedback.js';
-import { initReviewNavigation } from './review-navigation.js';
+import { createDraftSync, reviewShortcuts } from './review-edit-feedback.js';
+import { appendEvidence, node, refreshEvidenceFacts } from './review-evidence.js';
+import { initReviewNavigation, reviewQuery, showFilters } from './review-navigation.js';
 import { initReviewPagination } from './review-pagination.js';
 import { reassessmentUnavailable, reviewRerunActions, syncRerunButtons } from './review-rerun.js';
 
@@ -24,17 +25,27 @@ let editBusy = false;
 let externalBusy = false;
 let dirtySettings = false;
 let editDirty = false;
-let editMessage = '';
+let activeSync;
+let refreshEditor;
+let shortcut;
+let refreshSetup;
+const filtered = (view) =>
+  view.search || [view.status, view.source, view.reviewState].some((v) => v !== 'all');
+const detailPath = (id) =>
+  `review/${encodeURIComponent(id)}?${new URLSearchParams(reviewQuery(renderedView))}`;
+document.addEventListener('keydown', (event) => {
+  if (!detail.hidden && section.getClientRects().length) shortcut?.(event);
+});
 let updateEditorControls = () => {};
 const navigation = initReviewNavigation(
   form,
   () => updateReview(currentSetup),
-  () => !editBusy
+  () => activeSync?.flush() ?? true
 );
 
 export const { pushStage } = navigation;
 
-const pagination = initReviewPagination(section, (page) => navigation.goTo(page));
+const pagination = initReviewPagination(section, (page, size) => navigation.goTo(page, size));
 
 function setDraftDirty(value) {
   if (editDirty === value) return;
@@ -45,30 +56,6 @@ function setDraftDirty(value) {
 
 export const hasUnsavedReviewDraft = () => editDirty;
 
-function node(tag, value, className) {
-  const element = document.createElement(tag);
-  if (value !== undefined) element.textContent = value;
-  if (className) element.className = className;
-  return element;
-}
-function field(label, value) {
-  const wrapper = node('div');
-  wrapper.append(
-    node('dt', label),
-    node('dd', value === '' ? '(empty string)' : String(value ?? 'None'))
-  );
-  return wrapper;
-}
-function block(heading, value) {
-  const wrapper = node('section', undefined, 'evidence-block');
-  wrapper.append(node('h4', heading), node('pre', value));
-  return wrapper;
-}
-function expandable(heading, value) {
-  const wrapper = node('details', undefined, 'evidence-block');
-  wrapper.append(node('summary', heading), node('pre', value));
-  return wrapper;
-}
 function currentRevision(result) {
   return `${result.configurationRevision}:${result.contentRevision}` === loadedRevision;
 }
@@ -76,10 +63,7 @@ async function loadRows(view, focusRow) {
   const sequence = ++listRequest;
   pagination.loading();
   try {
-    const { search, status, source, page: requestedPage } = view;
-    const result = await request(
-      `review?${new URLSearchParams({ search, status, source, page: requestedPage })}`
-    );
+    const result = await request(`review?${new URLSearchParams(reviewQuery(view))}`);
     if (sequence !== listRequest) return;
     if (!currentRevision(result))
       throw new Error('Review changed. Reload to see the current results.');
@@ -88,10 +72,9 @@ async function loadRows(view, focusRow) {
     rows.replaceChildren();
     for (const item of result.rows) {
       const tr = node('tr');
-      const action = node('button', item.preview);
-      action.type = 'button';
+      const action = reviewLink(item.preview, () => navigation.openRow(item.id));
       action.dataset.rowId = item.id;
-      action.addEventListener('click', () => navigation.openRow(item.id));
+
       const preview = node('td');
       preview.append(action, node('small', `Row ID: ${item.id}`));
       preview.dataset.label = 'Original notice preview';
@@ -104,10 +87,7 @@ async function loadRows(view, focusRow) {
         ),
         node('td', item.source),
         node('td', item.status),
-        node(
-          'td',
-          `${item.reviewState ?? 'unreviewed'}${item.reviewedBy ? ` — ${item.reviewedBy}` : ''}`
-        ),
+        node('td'),
         node(
           'td',
           item.sampleCount
@@ -122,19 +102,22 @@ async function loadRows(view, focusRow) {
           ['Affected Bibles', 'Source', 'Decision', 'Review state', 'Saved model votes'][index],
         ]))
         cell.dataset.label = label;
+      tr.children[4].append(reviewChip(item));
       rows.append(tr);
     }
-    summary.textContent =
-      (total < allCount ? `${total} of ${allCount} classifications match. ` : '') +
-      result.context.disclaimer;
+    summary.textContent = `${total} of ${allCount} classifications · ${result.remaining} left${filtered(view) ? ' (filtered)' : ''}. ${result.context.disclaimer}`;
     pagination.render(result);
     if (!result.rows.length) {
       const empty = node('tr');
       empty.append(node('td', 'No matching classifications. Change search or filters.'));
       rows.append(empty);
     }
-    if (focusRow && !view.row)
-      (rows.querySelector(`[data-row-id="${focusRow}"]`) ?? form.elements.search).focus();
+    if (focusRow && !view.row && section.getClientRects().length) {
+      (
+        rows.querySelector(`[data-row-id="${view.anchor ?? focusRow}"]`) ?? form.elements.search
+      ).focus({ preventScroll: true });
+      window.scrollTo(0, view.scroll ?? 0);
+    }
   } catch (error) {
     if (sequence === listRequest) {
       rows.replaceChildren();
@@ -146,218 +129,250 @@ async function loadRows(view, focusRow) {
     }
   }
 }
-function reviewEditor(item) {
-  const editor = node('form', undefined, 'review-editor');
-  const heading = node('h4', 'Human review');
-  const help = node(
-    'p',
-    'Applying a reasoned decision records a new human review, even if the decision stays the same. For an unknown entry, updating the note keeps the existing decision, reason, reviewer and review time. After an edit changes the review, Preview again and Save to write it.'
+function reviewChip(item) {
+  const label =
+    { human_reviewed: 'Human reviewed', llm_reviewed: 'AI reviewed' }[item.reviewState] ??
+    'Unreviewed';
+  return node(
+    'span',
+    label + (item.pending ? ' · Unsaved' : ''),
+    `review-chip ${item.reviewState ?? 'unreviewed'}`
   );
+}
+function reviewLink(label, go) {
+  const link = node('a', label);
+  link.href = '?stage=review';
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    void go();
+  });
+  return link;
+}
+function reviewEditor(item) {
+  const editor = node('section', undefined, 'review-editor');
   const decision = node('select');
   decision.name = 'status';
-  for (const status of ['allowed', 'forbidden', 'unknown'])
-    decision.append(new Option(status[0].toUpperCase() + status.slice(1), status));
+  for (const [status, key] of [
+    ['allowed', 'A'],
+    ['forbidden', 'F'],
+    ['unknown', 'U'],
+  ])
+    decision.append(new Option(`${status[0].toUpperCase() + status.slice(1)} (${key})`, status));
   decision.value = item.status;
-  const reason = node('textarea');
-  reason.name = 'reason';
-  reason.rows = 3;
-  reason.value = item.source === 'manual' ? item.rationale : '';
-  const initialReason = reason.value;
-  const reviewer = node('input');
-  reviewer.name = 'reviewedBy';
-  reviewer.type = 'text';
-  reviewer.maxLength = 200;
-  reviewer.value = item.reviewedBy ?? '';
-  const initialReviewer = reviewer.value;
-  const note = node('textarea');
-  note.name = 'note';
-  note.rows = 3;
-  note.value = item.rowNote ?? '';
-  const initialNote = note.value;
-  const decisionLabel = node('label', 'Decision');
-  decisionLabel.append(decision);
-  const reasonLabel = node('label', 'Reason for decision');
-  reasonLabel.append(reason);
-  const reviewerLabel = node('label', 'Human reviewer name');
-  reviewerLabel.append(reviewer);
-  const noteLabel = node(
-    'label',
-    'Human note for retained unknown (leave blank to use the reason)'
-  );
-  noteLabel.append(note);
+  const comment = node('textarea');
+  comment.name = 'reviewComment';
+  comment.maxLength = 2000;
+  comment.value = item.reviewComment ?? '';
+  const state = node('p');
+  const count = node('span');
   const warning = node('p', '', 'notice');
-  const agreement = node('label');
-  const agree = node('input');
-  agree.type = 'checkbox';
-  agreement.append(
-    agree,
-    node('span', 'I understand this overrides the automatic all-rights-reserved decision.')
-  );
-  const error = node('p', editMessage);
-  error.setAttribute('role', 'status');
-  const feedback = reviewEditFeedback(error);
-  const apply = node('button', 'Apply reasoned decision');
-  apply.type = 'submit';
-  apply.value = 'disposition';
-  apply.name = 'editKind';
-  const saveNote = node('button', 'Update unknown note');
-  saveNote.type = 'submit';
-  saveNote.value = 'unknown-note';
-  saveNote.name = 'editKind';
-  const actions = node('div', undefined, 'actions');
-  const applyHelp = node('span', undefined, 'action-help');
-  const noteHelp = node('span', undefined, 'action-help');
-  applyHelp.append(apply);
-  noteHelp.append(saveNote);
-  actions.append(applyHelp, noteHelp);
-  editor.append(heading, decisionLabel, reviewerLabel, reasonLabel, warning, agreement, noteLabel);
-  editor.append(actions, error, help);
-  const update = () => {
-    const message = item.overrideWarnings[decision.value];
-    warning.hidden = !message;
-    warning.textContent = message ?? '';
-    agreement.hidden = !message;
-    noteLabel.hidden = decision.value !== 'unknown' && note.value === initialNote;
-    noteHelp.hidden = item.status !== 'unknown' || decision.value !== 'unknown';
-    const locked =
-      editBusy ||
-      externalBusy ||
-      Boolean(currentSetup.activeOperationId) ||
-      !['reviewing', 'previewed'].includes(currentSetup.state);
-    for (const control of editor.elements) control.disabled = locked;
+  const feedback = node('p');
+  feedback.setAttribute('role', 'status');
+  const decisionLabel = node('label', 'Permission');
+  const commentLabel = node('label', 'Optional comment');
+  decisionLabel.append(decision);
+  commentLabel.append(comment);
+  const button = (text, run) => {
+    const el = node('button', text);
+    el.type = 'button';
+    el.addEventListener('click', run);
+    return el;
   };
-  updateEditorControls = update;
-  decision.addEventListener('change', update);
-  editor.addEventListener('input', () => setDraftDirty(true));
-  editor.addEventListener('input', feedback.onInput);
-  editor.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (editBusy || externalBusy) return;
-    const kind = event.submitter?.value ?? 'disposition';
-    const message = item.overrideWarnings[decision.value];
-    feedback.clear();
-    if (
-      kind === 'unknown-note' &&
-      (decision.value !== item.status ||
-        reason.value !== initialReason ||
-        reviewer.value !== initialReviewer)
-    ) {
-      feedback.showNoteConflict(decision, reason, reviewer);
-      return;
-    }
-    if (kind === 'disposition' && decision.value !== 'unknown' && note.value !== initialNote) {
-      noteLabel.hidden = false;
-      feedback.show('Restore the note before applying a decision other than unknown.', note);
-      return;
-    }
-    if (!validateReviewEdit(kind, reviewer, reason, note, feedback)) return;
-    if (kind === 'disposition' && message && !agree.checked) {
-      feedback.show(
-        'Acknowledge the automatic-decision warning before applying this override.',
-        agree
-      );
-      return;
-    }
-    const edit =
-      kind === 'unknown-note'
-        ? { kind, normalizedText: item.normalizedText, note: note.value }
-        : {
-            kind: 'disposition',
-            normalizedText: item.normalizedText,
-            status: decision.value,
-            reason: reason.value,
-            reviewedBy: reviewer.value,
-            ...(decision.value === 'unknown' && note.value.trim()
-              ? { unknownNote: note.value }
-              : {}),
-          };
-    editBusy = true;
-    update();
-    try {
-      const result = await submitEdit({
-        configurationRevision: item.configurationRevision,
-        contentRevision: item.contentRevision,
-        id: item.id,
-        edit,
-        acknowledgeWarning: agree.checked,
-      });
-      setDraftDirty(false);
-      editMessage = result.warning
-        ? `Review edit applied. ${result.warning} Preview again before Save.`
-        : 'Review edit applied. Preview again before Save.';
-      if (result.setup.contentRevision === item.contentRevision) {
-        error.textContent = 'No content changed; the existing preview remains current.';
-        editMessage = '';
+  let nextNavigation;
+  let retry;
+  let useSession;
+  let update;
+  function rebaseFields(values, unchanged) {
+    if (unchanged('status')) decision.value = values.status;
+    if (unchanged('reviewComment') && comment.value !== (values.reviewComment ?? ''))
+      comment.value = values.reviewComment ?? '';
+  }
+  const sync = createDraftSync(item, {
+    send: submitEdit,
+    rebaseFields,
+    values: () => ({ status: decision.value, reviewComment: comment.value || null }),
+    dirty: setDraftDirty,
+    feedback: (text, failed = false, conflict = false) => {
+      feedback.textContent = text;
+      retry.hidden = !failed;
+      useSession.hidden = !conflict;
+      update();
+    },
+    async acknowledged(ack, kind, unchanged) {
+      const [fresh, setup] = await Promise.all([request(detailPath(item.id)), request('setup')]);
+      if (
+        fresh.epoch !== ack.epoch ||
+        fresh.contentRevision !== ack.contentRevision ||
+        setup.contentRevision !== ack.contentRevision
+      ) {
+        throw Object.assign(
+          new Error(
+            JSON.stringify({
+              epoch: fresh.epoch,
+              contentRevision: fresh.contentRevision,
+              values: fresh,
+            })
+          ),
+          { status: 409 }
+        );
       }
-    } catch (failure) {
-      feedback.show(failure.message);
+      Object.assign(item, fresh);
+      loadedRevision = `${item.configurationRevision}:${item.contentRevision}`;
+      currentSetup = setup;
+      refreshSetup(setup);
+      const evidence = detail.querySelector('.review-evidence');
+      if (evidence) refreshEvidenceFacts(evidence, item);
+      rebaseFields(item, unchanged);
+      if (kind === 'mark-next') nextNavigation = ack.navigation;
+      else if (nextNavigation) nextNavigation = fresh.navigation;
+      update();
+    },
+  });
+  activeSync = sync;
+  const run = async (kind) => {
+    if (editBusy || externalBusy) return;
+    editBusy = true;
+    try {
+      if (kind === 'mark-next') {
+        await navigation.finishAction(
+          () => sync.command({ kind, query: reviewQuery(renderedView) }),
+          () => nextNavigation?.nextEligibleId
+        );
+      } else await sync.command({ kind });
     } finally {
       editBusy = false;
-      update();
+    }
+  };
+  const mark = button('Mark reviewed (R)', () => run('mark'));
+  const next = button('Mark reviewed & next (Shift+Enter)', () => run('mark-next'));
+  const revert = button('Revert edit (Ctrl+Backspace)', () => run('revert'));
+  retry = button('Retry sync', () =>
+    navigation.finishAction(
+      () => sync.retry(),
+      () => nextNavigation?.nextEligibleId
+    )
+  );
+  retry.hidden = true;
+  useSession = button('Discard my local edit and load the session version', async () => {
+    try {
+      const before = sync.generation;
+      const latest = await request('setup');
+      if (before !== sync.generation) {
+        feedback.textContent = 'You edited this row again. Retry sync or discard the current edit.';
+        return;
+      }
+      setDraftDirty(false);
+      loadedRevision = null;
+      refreshEditor = undefined;
+      refreshSetup(latest);
+    } catch (error) {
+      feedback.textContent = error.message;
     }
   });
+  useSession.hidden = true;
+  const move = (key) => {
+    if (!editBusy) void navigation.openRow(() => item.navigation[key]);
+  };
+  const prev = reviewLink('Previous (K)', () => move('previousId'));
+  const following = reviewLink('Next (J)', () => move('nextId'));
+  const guide = node('details');
+  guide.append(
+    node('summary', 'Keyboard shortcuts'),
+    node(
+      'p',
+      'J / K: next / previous. A / F / U: Allowed / Forbidden / Unknown. R: mark reviewed. Shift+Enter: mark reviewed and next. Ctrl+Backspace: revert. Escape: back to results. While typing, text editing keys keep their ordinary behavior. Tab leaves the field.'
+    )
+  );
+  editor.append(
+    state,
+    decisionLabel,
+    warning,
+    commentLabel,
+    mark,
+    next,
+    count,
+    revert,
+    feedback,
+    retry,
+    useSession,
+    prev,
+    following,
+    guide
+  );
+  update = () => {
+    state.replaceChildren(
+      reviewChip(sync.hasLocalIntent ? { reviewState: 'human_reviewed', pending: true } : item)
+    );
+    count.setAttribute('aria-live', 'polite');
+    count.textContent = `${item.remaining} left${filtered(renderedView) ? ' (filtered)' : ''}`;
+    warning.textContent = item.overrideWarnings[decision.value] ?? '';
+    warning.hidden = !warning.textContent;
+    prev.hidden = !item.navigation.previousId;
+    following.hidden = !item.navigation.nextId;
+    const locked =
+      externalBusy ||
+      Boolean(currentSetup.activeOperationId) ||
+      !['inspected', 'reviewing', 'previewed', 'saved'].includes(currentSetup.state);
+    for (const control of [decision, comment, mark, next, revert]) control.disabled = locked;
+  };
+  refreshEditor = (fresh) => {
+    Object.assign(item, fresh);
+    decision.value = item.status;
+    const value = item.reviewComment ?? '';
+    if (comment.value !== value) {
+      const { selectionStart, selectionEnd } = comment;
+      comment.value = value;
+      comment.setSelectionRange(selectionStart, selectionEnd);
+    }
+    feedback.textContent = item.pending ? 'Kept in session · awaiting Save' : 'No pending edit';
+    const evidence = detail.querySelector('.review-evidence');
+    if (evidence) refreshEvidenceFacts(evidence, item);
+    update();
+  };
+  updateEditorControls = update;
+  const change = (field) => {
+    sync.schedule(field);
+    update();
+  };
+  decision.addEventListener('change', () => change('status'));
+  comment.addEventListener('input', () => change('reviewComment'));
+  for (const el of [comment, decision])
+    el.addEventListener('blur', () => {
+      if (editDirty) void sync.flush();
+    });
+  shortcut = reviewShortcuts({
+    back: navigation.backToResults,
+    decision,
+    change: () => change('status'),
+    mark,
+    next,
+    revert,
+    move,
+  });
+  feedback.textContent = item.pending ? 'Kept in session · awaiting Save' : 'No pending edit';
   update();
   return editor;
 }
-async function openDetail(id, focus = true) {
+async function openDetail(id, focus = true, retainEditor = false) {
   const sequence = ++detailRequest;
   try {
-    const item = await request(`review/${encodeURIComponent(id)}`);
+    const item = await request(detailPath(id));
     if (sequence !== detailRequest) return;
     if (!currentRevision(item))
       throw new Error('Review changed. Reload to see the current results.');
+    if (retainEditor && editDirty) return;
+    if (retainEditor && refreshEditor) {
+      refreshEditor(item);
+      return;
+    }
     detail.replaceChildren();
-    const title = node('h3', 'Classification evidence');
-    const back = node('button', 'Back to results');
-    back.type = 'button';
-    const discardPrompt = node('div', undefined, 'notice');
-    discardPrompt.hidden = true;
-    const discard = node('button', 'Discard unsaved edits and return');
-    discard.type = 'button';
-    const keep = node('button', 'Keep editing');
-    keep.type = 'button';
-    discardPrompt.append(
-      node(
-        'p',
-        'This row has unsaved edits. Choose Keep editing, then apply the decision or update the note to keep your changes.'
-      ),
-      discard,
-      keep
+    const title = node(
+      'h3',
+      item.missingNoticeLabel || item.variantLabels[0]?.slice(0, 160) || 'Classification evidence'
     );
-    back.addEventListener('click', () => {
-      if (editBusy) return;
-      if (editDirty) {
-        discardPrompt.hidden = false;
-        keep.focus();
-      } else navigation.backToResults();
-    });
-    discard.addEventListener('click', () => navigation.backToResults(true));
-    keep.addEventListener('click', () => {
-      discardPrompt.hidden = true;
-      back.focus();
-    });
-    const facts = node('dl');
-    facts.append(
-      field('Stable row ID', item.id),
-      field('Normalized key', item.normalizedText),
-      field('Decision', item.status),
-      field('Review state', item.reviewState ?? 'unreviewed'),
-      field('Decision event', item.decisionAt ?? 'Unknown legacy time'),
-      field('Human reviewer', item.reviewedBy ?? 'None'),
-      field('Human review event', item.humanReviewedAt ?? 'None'),
-      field('Source', item.source),
-      field('Rationale', item.rationale),
-      field('Content revision', item.contentRevision),
-      field('Human note', item.rowNote ?? 'None')
-    );
-    detail.append(
-      title,
-      back,
-      discardPrompt,
-      node('p', item.context.disclaimer),
-      facts,
-      reviewEditor(item)
-    );
+    detail.dataset.rowId = item.id;
+    const back = reviewLink('Back to results (Escape)', () => navigation.backToResults());
+    detail.append(title, back, node('p', item.context.disclaimer), reviewEditor(item));
     if (!currentSetup.practice)
       detail.append(
         node('h4', 'Explicit reassessment'),
@@ -365,66 +380,25 @@ async function openDetail(id, focus = true) {
           selectRerun,
           isBusy: rerunUnavailable,
           showError: (message) => {
-            summary.textContent = message;
+            viewStatus.hidden = false;
+            viewStatus.textContent = message;
           },
         })
       );
-    const variants = node('div');
-    if (item.missingNoticeLabel) variants.append(node('p', item.missingNoticeLabel));
-    for (const [index, label] of item.variantLabels.entries())
-      variants.append(block(`Original notice variant ${index + 1}`, label));
-    detail.append(node('h4', `Saved original notice variants (${item.variants.length})`), variants);
-    const bibles = node('ul');
-    for (const bible of item.bibles) {
-      const entry = node('li');
-      entry.append(
-        node('strong', `${bible.name} (${bible.abbreviation})`),
-        node(
-          'span',
-          ` — ${bible.provider}:${bible.externalId}; Bible ID ${bible.bibleId ?? 'not assigned'}`
-        )
-      );
-      if (bible.currentNotice !== null && bible.currentNotice !== bible.snapshotNotice)
-        entry.append(block('Current target notice', bible.currentNotice));
-      bibles.append(entry);
-    }
-    detail.append(
-      node(
-        'h4',
-        `Affected Bibles in ${item.context.label ?? 'saved artifact'} (${item.bibles.length})`
-      ),
-      bibles
-    );
-    if (item.automaticDecision)
-      detail.append(
-        block('Preserved automatic proposal', JSON.stringify(item.automaticDecision, null, 2))
-      );
-    if (item.rule)
-      detail.append(
-        block(
-          'Ordered rule match: ID, priority, decision, rationale and matched excerpt',
-          JSON.stringify(item.rule, null, 2)
-        )
-      );
-    detail.append(node('h4', 'Model evidence'), node('p', item.modelEvidenceLabel));
-    for (const sample of item.samples) {
-      const sampleSection = node('section', undefined, 'evidence-block');
-      sampleSection.append(
-        node('h5', `Historical sample ${sample.index}: ${sample.provider}:${sample.model}`),
-        field('Request hash', sample.requestHash),
-        field('Cache hit', sample.cacheHit === undefined ? 'Unreported' : String(sample.cacheHit)),
-        field('Recorded attempts', sample.attempts ?? 'Unreported'),
-        expandable('Exact saved request', JSON.stringify(sample.request, null, 2)),
-        expandable('Raw saved response', sample.response),
-        block('Parsed decision and rationale', JSON.stringify(sample.result, null, 2))
-      );
-      detail.append(sampleSection);
-    }
+    const evidence = node('div', undefined, 'review-evidence');
+    appendEvidence(evidence, item);
+    detail.append(evidence);
     viewStatus.hidden = true;
     detail.hidden = false;
-    if (focus) back.focus();
+    if (focus && section.getClientRects().length) back.focus();
   } catch (error) {
     if (sequence === detailRequest) {
+      if (retainEditor) {
+        viewStatus.hidden = false;
+        viewStatus.textContent =
+          'Review changed. Local edits will be checked against the session before syncing.';
+        return;
+      }
       navigation.forgetRow();
       viewStatus.hidden = false;
       viewStatus.textContent =
@@ -435,7 +409,8 @@ async function openDetail(id, focus = true) {
   }
 }
 
-export function initReview(fetchReview, sendEdit, draftChanged, onRerun = async () => {}) {
+export function initReview(fetchReview, sendEdit, draftChanged, onRerun, refresh) {
+  refreshSetup = refresh;
   request = fetchReview;
   submitEdit = sendEdit;
   selectRerun = onRerun;
@@ -458,6 +433,7 @@ export function updateReview(setup, focus = true) {
   const view = navigation.sync(setup);
   const previous = renderedView;
   renderedView = view;
+  if (previous !== view) showFilters(form, view);
   updateEditorControls();
   syncRerunButtons(detail, rerunUnavailable());
   section.hidden = !setup.analysis;
@@ -467,7 +443,7 @@ export function updateReview(setup, focus = true) {
     if (loadedRevision !== null || previous !== view) form.reset();
     loadedRevision = null;
     setDraftDirty(false);
-    editMessage = '';
+    activeSync = undefined;
     updateEditorControls = () => {};
     rows.replaceChildren();
     summary.textContent = setup.practice
@@ -484,14 +460,23 @@ export function updateReview(setup, focus = true) {
     listRequest++;
     detailRequest++;
     const focusRow = previous?.row;
-    if (['search', 'status', 'source', 'page'].some((key) => previous?.[key] !== view[key]))
+    if (
+      ['search', 'status', 'source', 'reviewState', 'pageSize', 'page'].some(
+        (key) => previous?.[key] !== view[key]
+      )
+    )
       rows.replaceChildren();
     if (previous !== view) {
-      for (const key of ['search', 'status', 'source']) form.elements[key].value = view[key];
+      for (const key of ['search', 'status', 'source', 'reviewState'])
+        form.elements[key].value = view[key];
       setDraftDirty(false);
-      editMessage = '';
+      activeSync = undefined;
     }
     loadedRevision = revision;
+    if (previous === view && view.row && !detail.hidden && !focus) {
+      void openDetail(view.row, false, true);
+      return;
+    }
     detail.replaceChildren();
     detail.hidden = true;
     results.hidden = Boolean(view.row);
@@ -499,7 +484,10 @@ export function updateReview(setup, focus = true) {
     viewStatus.textContent = view.row ? 'Loading classification evidence…' : '';
     updateEditorControls = () => {};
     if (view.row) void openDetail(view.row, focus);
-    void loadRows(view, focus && focusRow);
+    else {
+      rows.replaceChildren();
+      void loadRows(view, focus && focusRow);
+    }
     if (focus && !view.row && !focusRow && previous === view) {
       heading.tabIndex = -1;
       heading.focus();

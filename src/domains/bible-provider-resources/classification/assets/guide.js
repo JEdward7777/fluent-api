@@ -135,7 +135,7 @@ export function createStageNavigation(
     syncRoleActions(next, stage);
   }
 
-  function navigate(target, traversal = false) {
+  async function navigate(target, traversal = false) {
     if (!Object.hasOwn(names, target)) return;
     if (target === 'ai' && !aiAvailable) {
       if (!traversal) return;
@@ -148,24 +148,24 @@ export function createStageNavigation(
     if (target === stage) return;
     const url = new URL(location.href);
     url.searchParams.set('stage', target);
-    if (!traversal && !pushStage(url)) return;
+    if (!traversal && !(await pushStage(url))) return;
     stage = target;
     display(getSetup());
     heading.focus();
   }
   for (const link of [...links, nextLink, ...statusLinks])
-    link.addEventListener('click', (event) => {
+    link.addEventListener('click', async (event) => {
       event.preventDefault();
       if (!link.hasAttribute('href')) return;
       const target = new URL(link.href).searchParams.get('stage');
-      navigate(target);
+      await navigate(target);
       if (link.id.endsWith('-test-status') && !link.hidden && stage === target) {
         const field = form.elements.databaseMode;
         (field.disabled ? document.getElementById('database-test-result') : field).focus();
       }
     });
   form.addEventListener('change', () => display(getSetup()));
-  window.addEventListener('popstate', () =>
+  window.addEventListener('review-location', () =>
     navigate(new URL(location.href).searchParams.get('stage') ?? 'load', true)
   );
   return {

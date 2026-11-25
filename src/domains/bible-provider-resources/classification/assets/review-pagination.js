@@ -7,11 +7,13 @@ export function initReviewPagination(section, goTo) {
     const jump = group.querySelector('.page-jump');
     const input = jump.elements.page;
     const submit = jump.querySelector('button');
-    previous.addEventListener('click', () => {
-      if (!previous.disabled) goTo(currentPage - 1);
+    previous.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (previous.hasAttribute('href')) goTo(currentPage - 1);
     });
-    next.addEventListener('click', () => {
-      if (!next.disabled) goTo(currentPage + 1);
+    next.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (next.hasAttribute('href')) goTo(currentPage + 1);
     });
     jump.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -19,7 +21,9 @@ export function initReviewPagination(section, goTo) {
         goTo(input.valueAsNumber);
       }
     });
-    return { group, previous, next, status, input, submit };
+    const size = group.querySelector('[name=pageSize]');
+    size.addEventListener('change', () => goTo(1, Number(size.value)));
+    return { size, group, previous, next, status, input, submit };
   });
   let focused = null;
 
@@ -27,8 +31,14 @@ export function initReviewPagination(section, goTo) {
     currentPage = page;
     for (const { previous, next, status, input, submit } of pagers) {
       status.textContent = text;
-      previous.disabled = page <= 1;
-      next.disabled = page >= pageCount;
+      for (const [link, enabled] of [
+        [previous, page > 1],
+        [next, page < pageCount],
+      ]) {
+        link.setAttribute('aria-disabled', String(!enabled));
+        if (enabled) link.href = '?stage=review';
+        else link.removeAttribute('href');
+      }
       input.max = String(pageCount);
       input.value = page ? String(page) : '';
       input.disabled = submit.disabled = !pageCount;
@@ -41,6 +51,7 @@ export function initReviewPagination(section, goTo) {
       show('Loading results…');
     },
     render({ page, pageCount, pageSize, total, rows }) {
+      for (const pager of pagers) pager.size.value = String(pageSize);
       const offset = (page - 1) * pageSize;
       const message = total
         ? `Page ${page} of ${pageCount} · Showing ${offset + 1}–${offset + rows.length} of ${total} results · ${pageSize} per page`
@@ -51,7 +62,10 @@ export function initReviewPagination(section, goTo) {
         (document.activeElement === document.body || document.activeElement === focused)
       ) {
         const pager = pagers.find(({ group }) => group.contains(focused));
-        (focused.disabled ? pager.status : focused).focus();
+        (focused.disabled || focused.getAttribute('aria-disabled') === 'true'
+          ? pager.status
+          : focused
+        ).focus();
       }
       focused = null;
     },

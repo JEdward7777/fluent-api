@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>License workbench · Load</title>
     <link rel="stylesheet" href="./app.css" />
+    <link rel="stylesheet" href="./review.css" />
     <script type="module" src="./help.js"></script>
     <script type="module" src="./app.js"></script>
   </head>
@@ -211,6 +212,7 @@
           <p>Search saved evidence and open a notice to see its details.</p>
           <p>Reading evidence makes no model request or decision change.</p>
           <p id="review-view-status" role="status" hidden></p>
+          <p id="review-filtered" class="notice" role="status" hidden></p>
           <div id="review-results">
             <form id="review-filter" class="review-filter">
               <label>Search notice, Bible or identity <input name="search" type="search" /></label>
@@ -233,13 +235,32 @@
                   <option value="manual">Manual</option>
                 </select></label
               >
+              <label
+                >Review state
+                <select name="reviewState">
+                  <option value="all">All</option>
+                  <option value="unreviewed">Unreviewed</option>
+                  <option value="llm_reviewed">AI reviewed</option>
+                  <option value="human_reviewed">Human reviewed</option>
+                </select></label
+              >
               <button type="submit">Search</button>
             </form>
             <p id="review-summary" role="status">Loading review results…</p>
             <div class="actions review-pager" role="group" aria-label="Top review pages">
               <p class="review-page-status" role="status" aria-atomic="true" tabindex="-1"></p>
-              <button type="button" name="previous">Previous page</button
-              ><button type="button" name="next">Next page</button>
+              <a role="link" name="previous">Previous page</a>
+              <a role="link" name="next">Next page</a>
+              <label
+                >Per page
+                <select name="pageSize">
+                  <option>1</option>
+                  <option>10</option>
+                  <option selected>25</option>
+                  <option>50</option>
+                  <option>100</option>
+                </select></label
+              >
               <form class="page-jump">
                 <!-- prettier-ignore -->
                 <label
@@ -265,8 +286,18 @@
             </div>
             <div class="actions review-pager" role="group" aria-label="Bottom review pages">
               <p class="review-page-status" tabindex="-1"></p>
-              <button type="button" name="previous">Previous page</button
-              ><button type="button" name="next">Next page</button>
+              <a role="link" name="previous">Previous page</a>
+              <a role="link" name="next">Next page</a>
+              <label
+                >Per page
+                <select name="pageSize">
+                  <option>1</option>
+                  <option>10</option>
+                  <option selected>25</option>
+                  <option>50</option>
+                  <option>100</option>
+                </select></label
+              >
               <form class="page-jump">
                 <!-- prettier-ignore -->
                 <label
