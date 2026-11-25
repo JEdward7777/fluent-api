@@ -26,7 +26,10 @@ import {
   requirePracticeOptions,
 } from './license-workflow-inspect';
 import { LicenseOperationRegistry } from './license-workflow-operations';
-import { exportPreviewedLicenseReport } from './license-workflow-report-export';
+import {
+  exportPreviewedLicenseReport,
+  requireSavedReportTargets,
+} from './license-workflow-report-export';
 import {
   compensatedLicenseInspection,
   confirmedLicenseSave,
@@ -250,22 +253,27 @@ export class LicenseWorkflow extends LicenseSourceReconciliation {
     return this.previewPromise;
   }
 
+  private planDestination(inspection: LicenseInspection, analysis: LicenseAnalysis) {
+    return this.destination.plan(
+      inspection,
+      analysis,
+      this.options,
+      this.dependencies,
+      this.database
+    );
+  }
+
   private async performPreview(
     inspection: LicenseInspection,
     analysis: LicenseAnalysis
   ): Promise<LicensePreview> {
     try {
-      const plan = await this.destination.plan(
-        inspection,
-        analysis,
-        this.options,
-        this.dependencies,
-        this.database
-      );
+      const plan = await this.planDestination(inspection, analysis);
       this.previewResult = freezeReviewValue({
         token: randomUUID(),
         candidate: analysis,
         reviewer: this.previewReviewer,
+        reviewedAt: this.previewReviewer ? this.candidateReviewedAt : undefined,
         configurationRevision: this.configurationRevision,
         contentRevision: this.contentRevision,
         plan,
@@ -443,6 +451,8 @@ export class LicenseWorkflow extends LicenseSourceReconciliation {
         frozen.format,
         frozen.path,
         frozen.expectedPreviousBytes,
+        frozen.expectedReportIdentity,
+        frozen.reportDirectory,
         frozen.agreeToOverwrite,
       ],
       () => this.exportReportOnce(frozen)
@@ -453,12 +463,19 @@ export class LicenseWorkflow extends LicenseSourceReconciliation {
     request: LicenseReportExportRequest
   ): Promise<LicenseReportExportResult> {
     this.requireContentRevision(request.configurationRevision, request.contentRevision);
-    if (this.state !== 'previewed' || !this.previewResult || !this.inspection)
+    const state = this.state;
+    if ((state !== 'previewed' && state !== 'saved') || !this.previewResult || !this.inspection)
       throw new Error('Preview this exact revision before exporting a report');
     const preview = this.previewResult;
     this.state = 'exporting';
     this.beginBusy();
     try {
+      // Save advanced the source baseline and published the destination. Inspect the current
+      // targets before exporting the immutable report from that completed operation.
+      if (state === 'saved') {
+        const current = await this.planDestination(this.inspection, preview.candidate);
+        requireSavedReportTargets(preview.plan, current);
+      }
       const result = await exportPreviewedLicenseReport({
         request,
         preview,
@@ -466,7 +483,7 @@ export class LicenseWorkflow extends LicenseSourceReconciliation {
         ...this.destination.publication(this.inspection, this.database),
         fs: this.dependencies.fs,
       });
-      this.state = 'previewed';
+      this.state = state;
       return result;
     } catch (error) {
       if (this.inspection?.sourceOnly && error instanceof LicenseInspectionStaleError)
@@ -483,7 +500,7 @@ export class LicenseWorkflow extends LicenseSourceReconciliation {
         this.analysis = undefined;
         this.previewResult = undefined;
         this.state = 'configuring';
-      } else this.state = 'previewed';
+      } else this.state = state;
       throw error;
     } finally {
       this.endBusy();

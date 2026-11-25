@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
@@ -27,6 +27,7 @@ import {
 } from './license-write-temporary';
 
 export interface LicenseFileIo {
+  link?: (from: string, to: string) => Promise<void>;
   entry?: typeof inspectTemporaryEntry;
   matchesStagedBytes?: typeof matchesStagedBytes;
   identity?: (path: string) => Promise<LicenseFileIdentity>;
@@ -83,6 +84,7 @@ export class LicenseWriteUncertainError extends Error {
   }
 }
 export const licenseFileIo: LicenseFileIo = {
+  link,
   identity: inspectLicenseFile,
   entry: inspectTemporaryEntry,
   matchesStagedBytes,

@@ -1,4 +1,7 @@
+import { Buffer } from 'node:buffer';
 import { resolve } from 'node:path';
+
+import { hashCanonicalJson } from '@/lib/llm/canonical-json';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseReportBundle } from '../license-reports';
@@ -8,6 +11,7 @@ import type { DestinationDecisionPlan } from './license-save-destinations';
 
 import { serializeLicenseArtifact } from '../license-artifact';
 import { renderLicenseReports } from '../license-reports';
+import { comparableCatalog } from './license-freshness';
 import { planLicenseSaveDestinations } from './license-save-destinations';
 
 export interface LicenseSaveTarget {
@@ -27,6 +31,8 @@ export interface LicenseSavePlan extends DestinationDecisionPlan {
   replace: boolean;
   requiresForceAgreement: boolean;
   wholeFileHash: string;
+  artifactBytes: number;
+  impactContextHash: string | null;
   reviewContentHash: string;
   reports: LicenseReportBundle;
 }
@@ -56,7 +62,24 @@ export function buildLicenseSavePlan(input: {
     overwriteJson,
     overwriteDatabase: input.overwriteDatabase ?? false,
   });
+  const output = serializeLicenseArtifact(destinations.jsonArtifact ?? artifact);
   const reports = renderLicenseReports(artifact, {
+    targets: {
+      json: destinations.jsonArtifact
+        ? {
+            path: resolve(options.output),
+            reviewContentHash: destinations.jsonArtifact.reviewContentHash,
+            wholeFileHash: output.wholeFileHash,
+            assertion: destinations.jsonArtifact.attestation,
+          }
+        : undefined,
+      database: destinations.databaseForecast
+        ? {
+            reviewContentHash: destinations.databaseForecast.reviewContentHash,
+            label: database?.context.label,
+          }
+        : undefined,
+    },
     impactArtifact: destinations.databaseForecast ?? destinations.jsonArtifact,
     formats: options.reportFormats,
     outputDir: options.reportDir,
@@ -91,7 +114,6 @@ export function buildLicenseSavePlan(input: {
       ? [{ path: resolve(options.output), bytes: outputBytes }]
       : []),
   ];
-  const output = serializeLicenseArtifact(destinations.jsonArtifact ?? artifact);
   return {
     ...destinations,
     overwriteJson,
@@ -100,6 +122,13 @@ export function buildLicenseSavePlan(input: {
     replace: input.overwriteDatabase === true && options.destination !== 'json',
     requiresForceAgreement: false,
     wholeFileHash: output.wholeFileHash,
+    artifactBytes: Buffer.byteLength(output.bytes),
+    impactContextHash: database
+      ? hashCanonicalJson({
+          relation: database.relation ? { ...database.relation } : null,
+          catalog: comparableCatalog(database.context),
+        })
+      : null,
     reviewContentHash: artifact.reviewContentHash,
     reports,
   };

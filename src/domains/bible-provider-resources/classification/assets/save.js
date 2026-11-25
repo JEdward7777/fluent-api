@@ -22,7 +22,8 @@ let checking = false;
 function syncSaveReviewer(setup, next) {
   const reviewerField = document.getElementById('save-reviewer');
   if (setup?.loadRevision !== next.loadRevision) reviewerField.value = next.preview?.reviewer ?? '';
-  document.getElementById('save-reviewer-label').hidden = !next.analysis?.pendingReviews;
+  reviewerField.required = Boolean(next.analysis?.pendingReviews);
+  document.getElementById('save-reviewer-label').hidden = !reviewerField.required;
 }
 
 export function reviewerMatchesPreview(setup) {
@@ -282,16 +283,16 @@ export function renderSave(setup) {
     const saved = outcome.result;
     const json = saved.json;
     const jsonSummary = json
-      ? `JSON decisions: ${json.inserted} inserts, ${json.updated} updates (${json.permissionChanges} permission, ${json.metadataChanges} metadata only), ${json.preserved} preserved, ${json.unchanged} unchanged, ${json.deleted.length} deletions.`
+      ? `JSON decisions: ${json.inserted} inserts, ${json.updated} updates (${json.permissionChanges} permission, ${json.metadataChanges} metadata only), ${json.preserved} preserved, ${json.unchanged} unchanged, ${json.deleted.length} deletions. File contains ${json.artifactRows} rows (${json.artifactBytes} bytes). JSON review SHA-256: ${json.reviewContentHash}.`
       : '';
     const deletions = [
-      ...(json?.deleted ?? []),
+      ...(json?.deleted ?? []).map((key) => key || '(empty notice)'),
       ...(json?.deletedCatalog ?? []).map(
         ({ provider, externalId }) => `${provider}/${externalId}`
       ),
     ];
     const deleted = deletions.length ? ` Deleted from JSON: ${deletions.join(' | ')}.` : '';
-    result.textContent = `Save completed. Operation ${outcome.operationId}. ${saved.targets.map((target) => `${target.role} written: ${target.path} (SHA-256 ${target.hash}).`).join(' ')} ${jsonSummary}${deleted} ${saved.policy ? `Policy changed: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates, ${saved.policy.deletes} deletes.${saved.policy.preserved !== undefined ? ` ${saved.policy.preserved} destination records preserved.` : ''}${saved.policy.reviewContentHash ? ` Database review SHA-256 ${saved.policy.reviewContentHash}.` : ''} No resource-cache rows were written by Save.` : 'No policy rows were written.'}`;
+    result.textContent = `Save completed. Operation ${outcome.operationId}. Working review SHA-256: ${saved.reviewContentHash}.${saved.reviewer ? ` Newly reviewed by ${saved.reviewer} at ${saved.reviewedAt}.` : ''} ${saved.targets.map((target) => `${target.role} written: ${target.path} (SHA-256 ${target.hash}).`).join(' ')} ${jsonSummary}${deleted} ${saved.policy ? `Policy at ${saved.policy.target ?? 'the selected database'}: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates (${saved.policy.permissionChanges} permission, ${saved.policy.metadataChanges} metadata only), ${saved.policy.unchanged} unchanged, ${saved.policy.deletes} deletes.${saved.policy.preserved !== undefined ? ` ${saved.policy.preserved} destination records preserved.` : ''}${saved.policy.reviewContentHash ? ` Database review SHA-256 ${saved.policy.reviewContentHash}.` : ''} No resource-cache rows were written by Save.` : 'No policy rows were written.'}`;
   } else if (outcome?.state === 'failed') {
     const recoveryText = describeRecovery(outcome.recovery);
     const checked = outcome.reconciliation;
@@ -311,6 +312,11 @@ export function renderSave(setup) {
   } else if (unresolved) {
     result.textContent =
       'Save acknowledgment is unresolved. Reload to check the same operation ID. If the server no longer knows it, inspect actual targets before starting a new process.';
+  } else if (
+    button.disabled &&
+    (!preview || !reviewerMatchesPreview(setup) || isBlocked() || setup.state !== 'previewed')
+  ) {
+    result.textContent = 'Waiting for a current Save preview.';
   } else if (hasConflict) {
     result.textContent = `Resolve destination conflicts before Save: ${preview.conflicts.join('; ')}`;
   } else if (preview?.requiresForceAgreement) {

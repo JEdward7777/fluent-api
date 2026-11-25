@@ -131,6 +131,7 @@ describe('local license preview, attestation and report export', () => {
         { path: fixture.output, role: 'output', existed: false, previousHash: null },
       ]);
       expect(preview.policy).toBeNull();
+      expect(preview.forecast.changedStatuses).toBeNull();
       expect(
         (
           await api('report/inspect', 'POST', {

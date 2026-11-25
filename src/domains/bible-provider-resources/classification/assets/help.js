@@ -114,6 +114,11 @@ const help = [
     '#attestation [name="responsibility"]',
     'Confirm personal review of this exact evidence before signing its review hash.',
   ],
+  [
+    '#save-reviewer',
+    'This name applies to the pending decisions. The preview shows their review time before Save.',
+  ],
+  ['#current-format', 'Download a copy of the displayed report to your browser.'],
   ['#report-format', 'Choose HTML or Markdown for the exported report.'],
   ['#report-path', 'Enter the destination path on the machine running the reviewer.'],
   [

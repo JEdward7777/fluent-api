@@ -8,6 +8,8 @@ const confirmation = document.getElementById('report-confirm');
 const confirmationPath = document.getElementById('report-confirm-path');
 const view = document.getElementById('report-dialog');
 const download = document.getElementById('report-download');
+const current = document.getElementById('current-report');
+let openCurrent;
 let previewKey = '';
 let blocked = false;
 let generation = 0;
@@ -67,7 +69,7 @@ export function invalidateReportSelection() {
 }
 
 export function renderReportControls(next, workflowBlocked) {
-  const nextKey = next.state === 'previewed' ? (next.preview?.token ?? '') : '';
+  const nextKey = ['saved', 'previewed'].includes(next.state) ? (next.preview?.token ?? '') : '';
   const nextBlocked = Boolean(workflowBlocked || next.activeOperationId);
   const previousPath = path.value;
   suggestPath(next.reportDir);
@@ -75,6 +77,11 @@ export function renderReportControls(next, workflowBlocked) {
   previewKey = nextKey;
   blocked = nextBlocked;
   if (changed) invalidateReportSelection();
+  current.querySelector('summary').textContent =
+    next.state === 'saved' ? 'View report from completed Save' : 'View report, results and impact';
+  current.hidden = !previewKey || blocked || next.practice;
+  if (current.hidden) current.open = false;
+  if (changed && current.open) openCurrent();
   renderControls();
 }
 
@@ -182,36 +189,37 @@ export function initReportControls(request, getSetup, recover, token, settingsPe
   });
 
   document.getElementById('report-close').addEventListener('click', () => view.close());
-  document.getElementById('report-open').addEventListener('click', () => {
-    if (!exportedReport) return;
+  function openReport(fields, target) {
     const form = document.createElement('form');
     form.action = './report-view';
     form.method = 'POST';
-    form.target = 'license-report-frame';
+    form.target = target;
     form.hidden = true;
-    for (const [name, value] of Object.entries({ token, id: exportedReport.operationId })) {
+    for (const [name, value] of Object.entries({ token, ...fields })) {
       const input = document.createElement('input');
       input.type = 'hidden';
       input.name = name;
       input.value = value;
       form.append(input);
     }
-    view.showModal();
     document.body.append(form);
     form.requestSubmit();
     form.remove();
-  });
-  download.addEventListener('click', async () => {
+  }
+  openCurrent = () => {
+    if (current.open && !current.hidden)
+      openReport({ id: previewKey, current: 'true' }, 'current-report-frame');
+  };
+  current.addEventListener('toggle', openCurrent);
+  document.getElementById('report-open').addEventListener('click', () => {
     if (!exportedReport) return;
-    const { operationId, filename } = exportedReport;
-    download.disabled = true;
+    view.showModal();
+    openReport({ id: exportedReport.operationId }, 'license-report-frame');
+  });
+  async function downloadReport(control, endpoint, filename, feedback) {
+    control.disabled = true;
     try {
-      const blob = await request(
-        `report/${encodeURIComponent(operationId)}`,
-        'GET',
-        undefined,
-        'blob'
-      );
+      const blob = await request(endpoint, 'GET', undefined, 'blob');
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -219,10 +227,29 @@ export function initReportControls(request, getSetup, recover, token, settingsPe
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch (error) {
-      message = `Download failed: ${error.message}`;
-      renderControls();
+      feedback.textContent = `Download failed: ${error.message}`;
     } finally {
-      download.disabled = false;
+      control.disabled = false;
     }
+  }
+  download.addEventListener('click', () => {
+    if (exportedReport)
+      void downloadReport(
+        download,
+        `report/${exportedReport.operationId}`,
+        exportedReport.filename,
+        status
+      );
+  });
+  const currentDownload = document.getElementById('current-download');
+  currentDownload.addEventListener('click', () => {
+    const type = document.getElementById('current-format').value;
+    if (!current.hidden)
+      void downloadReport(
+        currentDownload,
+        `current-report/${previewKey}/${type}`,
+        `license-impact.${type === 'html' ? 'html' : 'md'}`,
+        document.getElementById('current-report-status')
+      );
   });
 }

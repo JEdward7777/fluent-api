@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { LicenseReportModel } from './license-report-model';
 
 import { escapeReportHtml as html } from './license-report-formats';
+import { licenseReportRevisionLines } from './license-report-model';
 
 const reportSearchScript =
   "const search=document.getElementById('license-search');const status=document.getElementById('license-status');function filter(){let count=0;const q=search.value.toLowerCase();for(const entry of document.querySelectorAll('.license-entry')){entry.hidden=!(entry.dataset.search.toLowerCase().includes(q)&&(status.value==='all'||entry.dataset.status===status.value));if(!entry.hidden)count++;}document.getElementById('visible-count').textContent=count+' classification entries shown';}search.addEventListener('input',filter);status.addEventListener('change',filter);filter();";
@@ -49,17 +50,19 @@ ${entry.samples.map((sample) => `<details><summary>Model evidence: ${html(sample
 <style>body{font:16px system-ui;max-width:1000px;margin:2rem auto;padding:0 1rem;line-height:1.5}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f3f5;padding:1rem}.notice{border:2px solid #685300;padding:1rem}.license-entry{border-top:1px solid #aaa;padding:1rem 0}details{margin:.8rem 0}input,select{font:inherit;padding:.5rem}[hidden]{display:none}</style></head><body>
 <h1>License classification review</h1><p class="notice"><strong>${html(impact.context.disclaimer)}</strong></p>
 <p>Resource effects are projections after the next ordinary table-derived sync. This report and review do not update resource caches.</p>
-<p>Review content hash: <code>${model.reviewContentHash}</code><br>Whole-file SHA-256: <code>${model.wholeFileHash}</code><br>Revision: ${model.reviewState}</p>
-<h2>Summary</h2><p>Classification decisions: ${model.inventory.length}. Allowed: ${impact.classificationTotals.allowed}; forbidden: ${impact.classificationTotals.forbidden}; unknown: ${impact.classificationTotals.unknown}.</p>
-<p>Projected catalog resources: allowed ${impact.totals.allowed}; forbidden ${impact.totals.forbidden}; unknown ${impact.totals.unknown}.</p><p>Unchanged status/notice records: ${impact.unchanged ?? 'unavailable'}; TTS eligibility gains: ${impact.ttsGains ?? 'unavailable'}; losses: ${impact.ttsLosses ?? 'unavailable'}.</p>
+${licenseReportRevisionLines(model)
+  .map((line) => `<p>${html(line)}</p>`)
+  .join('\n')}
+<h2>Summary</h2><p>Classification decisions in the working review: ${model.inventory.length}. Allowed: ${impact.classificationTotals.allowed}; forbidden: ${impact.classificationTotals.forbidden}; unknown: ${impact.classificationTotals.unknown}.</p>
+<p>Projected catalog resources: allowed ${impact.totals.allowed}; forbidden ${impact.totals.forbidden}; unknown ${impact.totals.unknown}.</p><p>Projected status changes: ${impact.statusChangeCount ?? 'unavailable'}; unchanged status/notice records: ${impact.unchanged ?? 'unavailable'}; TTS eligibility gains: ${impact.ttsGains ?? 'unavailable'}; losses: ${impact.ttsLosses ?? 'unavailable'}.</p>
 <p>Recorded evidence diagnostics: ${impact.diagnostics.cacheHits} cache hits; ${impact.diagnostics.freshSamples} fresh samples; ${impact.diagnostics.newCalls} recorded provider calls; ${impact.diagnostics.unreportedSamples} samples without complete runtime diagnostics.</p>
 <p>Models: ${model.models.map((entry) => `${html(entry.provider)}:${html(entry.model)} (${entry.sampleCount} samples)`).join(', ')}.</p>
-${model.attestation ? `<p>Attested by ${html(model.attestation.reviewedBy)} at ${html(model.attestation.reviewedAt)}: ${html(model.attestation.reviewReason)}</p>` : ''}
+
 ${impact.preservationWarning ? `<p class="notice"><strong>${html(impact.preservationWarning)}</strong></p>` : ''}
 ${impact.classificationChanges ? `<h2>Planned scoped classification writes</h2><p>Deletes ${impact.classificationChanges.deletedKeys.length}; inserts ${impact.classificationChanges.insertedKeys.length}; changes ${impact.classificationChanges.changedKeys.length} (status, rationale, producer or recorded evidence).</p>${list([...impact.classificationChanges.deletedKeys.map((key) => `Delete: ${html(key)}`), ...impact.classificationChanges.insertedKeys.map((key) => `Insert: ${html(key)}`), ...impact.classificationChanges.changedKeys.map((key) => `Change: ${html(key)}`)])}` : ''}
 <h2>Proposed resource status changes</h2>${impact.context.kind === 'artifact-only' ? '<p>Unavailable without database context.</p>' : list(impact.changes.map((row) => `${bible(row)}: ${row.currentStatus ?? 'new catalog record'} → ${row.status}.`))}
 <h2>New catalog records</h2>${impact.context.kind === 'artifact-only' ? '<p>New membership cannot be determined without database context.</p>' : list(impact.newCatalogRows.map((row) => `${bible(row)}: proposed ${row.status}.`))}
-<h2>${impact.context.kind === 'database' && impact.context.classificationOnly ? 'Snapshot notice drift' : 'Notice changes'}</h2>${impact.noticeChanges.map((row) => `<h3>${bible(row)}</h3><p>Previous notice:</p><pre>${html(row.currentNotice ?? '(none)')}</pre><p>${impact.context.kind === 'database' && impact.context.classificationOnly ? 'Reviewed artifact snapshot notice (not written)' : 'Proposed notice'}:</p><pre>${html((impact.context.kind === 'database' && impact.context.classificationOnly ? row.snapshotNotice : row.rawNotice) ?? '(none)')}</pre>`).join('') || '<p>None identified in the supplied comparison.</p>'}
+<h2>${impact.context.kind === 'database' && impact.context.classificationOnly ? 'Snapshot notice drift' : 'Notice changes'}</h2>${impact.noticeChanges.map((row) => `<h3>${bible(row)}</h3><p>Previous notice:</p><pre>${html(row.currentNotice ?? '(none)')}</pre><p>${impact.context.kind === 'database' && impact.context.classificationOnly ? 'Reviewed artifact snapshot notice (not written)' : 'Proposed notice'}:</p><pre>${html((impact.context.kind === 'database' && impact.context.classificationOnly ? row.snapshotNotice : row.rawNotice) ?? '(none)')}</pre>`).join('') || (impact.context.kind === 'database' ? '<p>None identified in the supplied comparison.</p>' : '<p>Unavailable without database context.</p>')}
 <h2>Conflicts and review items</h2>${list([
     ...impact.disagreements.map(
       (row) =>
@@ -67,7 +70,7 @@ ${impact.classificationChanges ? `<h2>Planned scoped classification writes</h2><
     ),
     ...impact.unknownClassifications.map(
       (row) =>
-        `Unknown: ${html(row.normalizedText)} — ${html(row.rowNote ?? 'Human row note required to complete JSON review.')}`
+        `Unknown: ${html(row.normalizedText)} — ${html(row.rowNote ?? 'No historical row note.')}`
     ),
     ...impact.missingClassifications.map(
       (row) =>
@@ -75,7 +78,7 @@ ${impact.classificationChanges ? `<h2>Planned scoped classification writes</h2><
     ),
   ])}
 <h2>Normalization collisions</h2>${impact.collisions.map((collision) => `<h3>${html(collision.normalizedText)}</h3>${collision.notices.map((notice) => `<pre>${html(notice)}</pre>`).join('')}`).join('') || '<p>None.</p>'}
-<h2>Complete license inventory</h2><label>Search notices, reasons or Bible identities <input id="license-search" type="search"></label> <label>Status <select id="license-status"><option value="all">All</option><option value="allowed">Allowed</option><option value="forbidden">Forbidden</option><option value="unknown">Unknown</option></select></label><p id="visible-count"></p>
+<h2>Complete license inventory (working review)</h2><label>Search notices, reasons or Bible identities <input id="license-search" type="search"></label> <label>Status <select id="license-status"><option value="all">All</option><option value="allowed">Allowed</option><option value="forbidden">Forbidden</option><option value="unknown">Unknown</option></select></label><p id="visible-count"></p>
 ${inventory}
 <script>${reportSearchScript}</script>
 </body></html>\n`;

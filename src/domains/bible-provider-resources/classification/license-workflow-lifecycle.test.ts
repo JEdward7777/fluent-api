@@ -1,9 +1,21 @@
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import {
+  link,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  symlink,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { makeCommandFixture } from './license-command.test-fixtures';
+import { LicenseWorkbenchReports } from './license-workbench-reports';
 import { LicenseWorkflow } from './license-workflow';
+import { licenseFileIo } from './license-write';
 
 const fixtures: Awaited<ReturnType<typeof makeCommandFixture>>[] = [];
 async function fixture() {
@@ -131,6 +143,156 @@ describe('license workflow operation lifecycle', () => {
       await workflow.close();
     }
   });
+
+  it.each(['before staging', 'after staging'])(
+    'binds a missing report path through parent redirection %s',
+    async (timing) => {
+      const f = await fixture();
+      const original = join(f.dir, 'chosen');
+      const other = join(f.dir, 'other');
+      const alias = join(f.dir, 'reports');
+      await Promise.all([mkdir(original), mkdir(other)]);
+      await symlink(original, alias, 'dir');
+      const nested = join(alias, 'new', 'nested');
+      const path = join(nested, 'report.md');
+      const redirect = async () => {
+        await unlink(alias);
+        await symlink(other, alias, 'dir');
+      };
+      let injecting = false;
+      const workflow = new LicenseWorkflow(f.options, {
+        ...f.dependencies,
+        fs: {
+          ...licenseFileIo,
+          read: async (file) => {
+            const bytes = await licenseFileIo.read(file);
+            if (injecting && timing === 'before staging' && basename(file) === 'report.md') {
+              injecting = false;
+              await redirect();
+            }
+            return bytes;
+          },
+          write: async (file, bytes, opened) => {
+            await licenseFileIo.write(file, bytes, opened);
+            if (injecting && timing === 'after staging') {
+              injecting = false;
+              await redirect();
+            }
+          },
+        },
+      });
+      try {
+        await workflow.inspect(1);
+        await workflow.startAnalysis(1);
+        const preview = await workflow.preview(1, workflow.status.contentRevision);
+        const reports = new LicenseWorkbenchReports();
+        const selection = {
+          path,
+          format: 'markdown' as const,
+          previewToken: preview.token,
+          configurationRevision: 1,
+          contentRevision: preview.contentRevision,
+        };
+        const plan = await reports.inspect(workflow, 1, selection);
+        expect(plan.parent).toBe(join(original, 'new', 'nested'));
+        injecting = true;
+        const submit = (id: string) =>
+          reports.export(workflow, 1, {
+            planId: id,
+            operationId: crypto.randomUUID(),
+            agreeToOverwrite: false,
+          });
+        await expect(submit(plan.id)).rejects.toThrow('directory changed');
+        expect(await readdir(other)).toEqual([]);
+        const entries = await readdir(original, { recursive: true });
+        expect(
+          entries.filter((name) => name.endsWith('.tmp') || name.endsWith('report.md'))
+        ).toEqual([]);
+        expect(() => submit(plan.id)).toThrow('Inspect');
+        const fresh = await reports.inspect(workflow, 1, selection);
+        expect(fresh.parent).toBe(join(other, 'new', 'nested'));
+        const result = await submit(fresh.id);
+        expect(result.path).toBe(path);
+        expect(await readFile(join(other, 'new', 'nested', 'report.md'), 'utf8')).toBe(
+          result.bytes
+        );
+      } finally {
+        await workflow.close();
+      }
+    }
+  );
+
+  it.each(['new-name race', 'same bytes after inspection', 'same bytes after final read'])(
+    'preserves a concurrent report and requires fresh consent for %s',
+    async (race) => {
+      const f = await fixture();
+      const path = join(f.dir, 'report.md');
+      const concurrent = 'other writer';
+      let reads = 0;
+      let competingInode: number | undefined;
+      const replace = async () => {
+        const sibling = join(f.dir, 'replacement');
+        await writeFile(sibling, concurrent);
+        await rename(sibling, path);
+        competingInode = (await lstat(path)).ino;
+      };
+      if (race !== 'new-name race') await writeFile(path, concurrent);
+      const workflow = new LicenseWorkflow(f.options, {
+        ...f.dependencies,
+        fs: {
+          ...licenseFileIo,
+          read: async (file) => {
+            const bytes = await licenseFileIo.read(file);
+            if (
+              basename(file) === basename(path) &&
+              ++reads === 2 &&
+              race === 'same bytes after final read'
+            )
+              await replace();
+            return bytes;
+          },
+          link: async (from, to) => {
+            if (basename(to) === basename(path) && race === 'new-name race') await replace();
+            await link(from, to);
+          },
+        },
+      });
+      try {
+        await workflow.inspect(1);
+        await workflow.startAnalysis(1);
+        const preview = await workflow.preview(1, workflow.status.contentRevision);
+        const reports = new LicenseWorkbenchReports();
+        const selection = {
+          path,
+          format: 'markdown' as const,
+          previewToken: preview.token,
+          configurationRevision: 1,
+          contentRevision: preview.contentRevision,
+        };
+        const plan = await reports.inspect(workflow, 1, selection);
+        if (race === 'same bytes after inspection') await replace();
+        const submit = (id: string, agree: boolean) =>
+          reports.export(workflow, 1, {
+            planId: id,
+            operationId: crypto.randomUUID(),
+            agreeToOverwrite: agree,
+          });
+        await expect(submit(plan.id, plan.existed)).rejects.toThrow('changed');
+        expect(await readFile(path, 'utf8')).toBe(concurrent);
+        expect((await lstat(path)).ino).toBe(competingInode);
+        expect((await readdir(f.dir)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+        expect(() => submit(plan.id, true)).toThrow('Inspect');
+        const fresh = await reports.inspect(workflow, 1, selection);
+        expect(fresh.existed).toBe(true);
+        await expect(submit(fresh.id, false)).rejects.toThrow('agreement');
+        const confirmed = await reports.inspect(workflow, 1, selection);
+        const result = await submit(confirmed.id, true);
+        expect(await readFile(path, 'utf8')).toBe(result.bytes);
+      } finally {
+        await workflow.close();
+      }
+    }
+  );
 
   it('exports only an explicitly named report with destination freshness and deduplication', async () => {
     const f = await fixture();

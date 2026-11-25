@@ -1,9 +1,19 @@
+import type { Hono } from 'hono';
+
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { z } from 'zod';
 
+import type { ReportDirectory } from './license-report-directory';
+import type { LicenseWorkbenchSession } from './license-workbench-session';
 import type { LicenseWorkflow } from './license-workflow';
+import type { LicenseReportExportResult } from './license-workflow.types';
 
+import { LICENSE_REPORT_HTML_CSP } from '../license-report-html';
+import { inspectLicenseFile } from './license-file-identity';
+import { inspectReportDirectory, requireReportDirectory } from './license-report-directory';
+import { reportTargetChanged, reportTargetIdentity } from './license-workflow-report-export';
 import { licenseFileIo } from './license-write';
 
 interface ReportPlan {
@@ -13,12 +23,11 @@ interface ReportPlan {
   contentRevision: number;
   format: 'html' | 'markdown';
   path: string;
-  parent: string | undefined;
+  directory: ReportDirectory;
   previous: string | null;
   priorHash: string | null;
+  identity: string | null;
 }
-
-const reportParent = (path: string) => realpath(dirname(path)).catch(() => undefined);
 
 async function reportEntryExists(path: string) {
   try {
@@ -36,7 +45,7 @@ export class LicenseWorkbenchReports {
     string,
     {
       fingerprint: string;
-      result: ReturnType<LicenseWorkflow['exportReport']>;
+      result: Promise<LicenseReportExportResult & { parent: string }>;
     }
   >();
 
@@ -51,11 +60,11 @@ export class LicenseWorkbenchReports {
   async inspect(
     workflow: LicenseWorkflow,
     configurationRevision: number,
-    body: Omit<ReportPlan, 'id' | 'parent' | 'previous' | 'priorHash'>
+    body: Omit<ReportPlan, 'id' | 'directory' | 'previous' | 'priorHash' | 'identity'>
   ) {
     if (!workflow.previewed)
       throw new Error('Normal exact preview is required before report target inspection');
-    if (workflow.status.state !== 'previewed')
+    if (!['saved', 'previewed'].includes(workflow.status.state))
       throw new Error('Wait for the current operation before inspecting a report target');
     if (
       body.previewToken !== workflow.previewed.token ||
@@ -66,24 +75,36 @@ export class LicenseWorkbenchReports {
     const path = resolve(body.path);
     if (workflow.previewed.plan.expectedFiles.some((file) => file.path === path))
       throw new Error('Report target must differ from source and artifact paths');
-    const [parent, previous] = await Promise.all([reportParent(path), licenseFileIo.read(path)]);
+    const directory = await inspectReportDirectory(dirname(path));
+    const identity = await reportTargetIdentity(path);
+    const previous = await licenseFileIo.read(path);
     if (previous === null && (await reportEntryExists(path)))
       throw new Error(
         'The report path already exists without readable report bytes. Choose a different path.'
       );
+    if (
+      (identity === null) !== (previous === null) ||
+      (await reportTargetIdentity(path)) !== identity
+    )
+      throw reportTargetChanged(path);
+    const { canonical } = await inspectLicenseFile(path);
+    if (workflow.previewed.plan.expectedFiles.some((file) => file.path === canonical))
+      throw new Error('Report target must differ from source and artifact paths');
+    await requireReportDirectory(dirname(path), directory);
     const plan: ReportPlan = {
       ...body,
       path,
-      parent,
+      directory,
       id: randomUUID(),
       previous,
+      identity,
       priorHash: previous === null ? null : createHash('sha256').update(previous).digest('hex'),
     };
     this.plans.set(plan.id, plan);
     return {
       id: plan.id,
       path: plan.path,
-      parent: plan.parent,
+      parent: plan.directory.canonical,
       format: plan.format,
       existed: previous !== null,
       priorHash: plan.priorHash,
@@ -113,8 +134,7 @@ export class LicenseWorkbenchReports {
     )
       throw new Error('Report plan is stale; inspect its target again');
     const result = (async () => {
-      if ((await reportParent(plan.path)) !== plan.parent)
-        throw new Error('The report target directory changed after inspection.');
+      await requireReportDirectory(dirname(plan.path), plan.directory);
       if (plan.previous === null && (await reportEntryExists(plan.path)))
         throw new Error('The report target appeared after inspection.');
       if (this.plans.get(plan.id) !== plan)
@@ -126,11 +146,60 @@ export class LicenseWorkbenchReports {
         format: plan.format,
         path: plan.path,
         expectedPreviousBytes: plan.previous,
+        expectedReportIdentity: plan.identity,
+        reportDirectory: plan.directory,
         agreeToOverwrite: body.agreeToOverwrite,
       });
-      return { ...saved, configurationRevision: plan.configurationRevision };
-    })();
+      return {
+        ...saved,
+        parent: plan.directory.canonical,
+        configurationRevision: plan.configurationRevision,
+      };
+    })().finally(() => this.plans.delete(plan.id));
     this.operations.set(body.operationId, { fingerprint, result });
     return result;
   }
+}
+
+export function registerReportViews(
+  app: Hono,
+  session: LicenseWorkbenchSession,
+  authorized: (value: string) => boolean
+) {
+  const reportId = z.string().uuid();
+  app.get('/api/current-report/:id/:format', (c) => {
+    const format = z.enum(['html', 'markdown']).safeParse(c.req.param('format'));
+    const bytes = format.success && session.currentReport(c.req.param('id'), format.data);
+    if (!bytes) return c.text('The report preview changed.', 409);
+    c.header('Content-Type', 'application/octet-stream');
+    return c.body(bytes);
+  });
+  app.get('/api/report/:id', async (c) => {
+    const id = reportId.safeParse(c.req.param('id'));
+    const report = id.success ? await session.reports.exported(id.data) : undefined;
+    if (!report) return c.text('Unknown exported report', 404);
+    c.header('Content-Type', 'application/octet-stream');
+    return c.body(report.bytes);
+  });
+  app.post('/report-view', async (c) => {
+    if (c.req.header('origin') !== `http://${c.req.header('host')}`)
+      return c.text('Local Origin required', 403);
+    const parsed = z
+      .object({ token: z.string(), id: reportId, current: z.literal('true').optional() })
+      .strict()
+      .safeParse(await c.req.parseBody().catch(() => null));
+    if (!parsed.success || !authorized(parsed.data.token))
+      return c.text('Session token required', 403);
+    if (parsed.data.current) {
+      const bytes = session.currentReport(parsed.data.id, 'html');
+      if (!bytes) return c.text('The report preview changed.', 409);
+      c.header('Content-Security-Policy', LICENSE_REPORT_HTML_CSP);
+      return c.html(bytes);
+    }
+    const report = await session.reports.exported(parsed.data.id);
+    if (!report) return c.text('Unknown exported report', 404);
+    if (report.format === 'markdown') return c.text(report.bytes);
+    c.header('Content-Security-Policy', LICENSE_REPORT_HTML_CSP);
+    return c.html(report.bytes);
+  });
 }

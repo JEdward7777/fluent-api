@@ -1,11 +1,17 @@
 import { eq } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '@/db/schema';
 import { createTestSchema } from '@/db/testing/create-catalogue-schema';
 
-import { recordHumanLicenseDecision, serializeLicenseArtifact } from '../license-artifact';
+import {
+  attestLicenseArtifact,
+  recordHumanLicenseDecision,
+  serializeLicenseArtifact,
+} from '../license-artifact';
 import { createLicenseDatabaseAdapter } from './license-classifications.service';
 import { makeCommandFixture } from './license-command.test-fixtures';
 import { licenseReviewRowId } from './license-workbench-review';
@@ -38,6 +44,78 @@ beforeEach(async () => {
 afterAll(() => client.close());
 
 describe('save through actual classification adapter', () => {
+  it('exports separate working and JSON target assertions and the database forecast for Both', async () => {
+    const f = await makeCommandFixture();
+    const adapter = createLicenseDatabaseAdapter();
+    const workflow = new LicenseWorkflow(
+      { ...f.options, destination: 'both' },
+      {
+        ...f.dependencies,
+        database: async () => adapter,
+        destinationDatabase: async () => adapter,
+      }
+    );
+    try {
+      const stronger = recordHumanLicenseDecision(
+        f.artifact,
+        f.artifact.classifications[0].normalizedText,
+        'unknown',
+        'Newer target evidence',
+        'Target row reviewer',
+        '2099-01-01T00:00:00.000Z'
+      );
+      const target = attestLicenseArtifact(stronger, {
+        reviewedBy: 'Target file signer',
+        reviewedAt: '2099-01-01T00:01:00.000Z',
+        reviewReason: 'Checked target revision',
+      });
+      await writeFile(f.output, serializeLicenseArtifact(target).bytes);
+      await workflow.inspect(1);
+      const revision = {
+        configurationRevision: 1,
+        contentRevision: workflow.status.contentRevision,
+      };
+      const preview = await workflow.preview(1, revision.contentRevision);
+      const path = join(f.dir, 'classified.md');
+      await workflow.exportReport({
+        ...revision,
+        operationId: 'report',
+        format: 'markdown',
+        path,
+        expectedPreviousBytes: null,
+        agreeToOverwrite: false,
+      });
+      await workflow.save({
+        ...revision,
+        operationId: 'save',
+        previewToken: preview.token,
+        agreeToReplace: false,
+      });
+      const file = await readFile(f.output);
+      const report = await readFile(path, 'utf8');
+      expect(JSON.parse(file.toString()).attestation.reviewedBy).toBe('Target file signer');
+      expect(createHash('sha256').update(file).digest('hex')).not.toBe(
+        preview.reports.wholeFileHash
+      );
+      expect(report).toContain(`Working JSON whole-file SHA-256: ${preview.reports.wholeFileHash}`);
+      expect(report).toContain(
+        `Working whole-file assertion by ${f.artifact.attestation!.reviewedBy}`
+      );
+      expect(report).toContain(
+        `JSON target whole-file SHA-256: ${createHash('sha256').update(file).digest('hex')}`
+      );
+      expect(report).toContain('JSON target whole-file assertion by Target file signer');
+      expect(report).toContain(
+        `Database policy forecast review SHA-256: ${preview.plan.databaseForecast!.reviewContentHash}`
+      );
+      expect(preview.plan.databaseForecast!.reviewContentHash).not.toBe(
+        preview.plan.jsonArtifact!.reviewContentHash
+      );
+    } finally {
+      await workflow.close();
+      await f.cleanup();
+    }
+  });
   it('freezes pending reviews across retries and reports the candidate independently of Both winners', async () => {
     const f = await makeCommandFixture();
     const adapter = createLicenseDatabaseAdapter();

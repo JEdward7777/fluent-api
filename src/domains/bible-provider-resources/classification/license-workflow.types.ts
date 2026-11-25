@@ -58,6 +58,7 @@ export type LicenseReviewEdit =
 export interface LicensePreview {
   token: string;
   reviewer: string;
+  reviewedAt?: string;
   candidate: LicenseAnalysis;
   configurationRevision: number;
   contentRevision: number;
@@ -85,6 +86,8 @@ export interface LicenseReportExportRequest {
   format: 'html' | 'markdown';
   path: string;
   expectedPreviousBytes: string | null;
+  expectedReportIdentity?: string | null;
+  reportDirectory?: import('./license-report-directory').ReportDirectory;
   agreeToOverwrite: boolean;
 }
 

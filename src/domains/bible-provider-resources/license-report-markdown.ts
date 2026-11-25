@@ -1,6 +1,7 @@
 import type { LicenseReportModel } from './license-report-model';
 
 import { escapeReportHtml as html, escapeReportMarkdown as text } from './license-report-formats';
+import { licenseReportRevisionLines } from './license-report-model';
 
 export function renderLicenseMarkdown(model: LicenseReportModel): string {
   const { impact } = model;
@@ -11,24 +12,17 @@ export function renderLicenseMarkdown(model: LicenseReportModel): string {
     '',
     'Resource effects below are projections after the next ordinary table-derived sync. This report and review do not update resource caches.',
     '',
-    `Review content hash: ${model.reviewContentHash}`,
-    `Whole-file SHA-256: ${model.wholeFileHash}`,
-    `Revision: ${model.reviewState}`,
+    ...licenseReportRevisionLines(model, text),
     '',
     '## Summary',
     '',
-    `Classification decisions: ${model.inventory.length}. Allowed: ${impact.classificationTotals.allowed}; forbidden: ${impact.classificationTotals.forbidden}; unknown: ${impact.classificationTotals.unknown}.`,
+    `Classification decisions in the working review: ${model.inventory.length}. Allowed: ${impact.classificationTotals.allowed}; forbidden: ${impact.classificationTotals.forbidden}; unknown: ${impact.classificationTotals.unknown}.`,
     `Projected catalog resources: allowed ${impact.totals.allowed}; forbidden ${impact.totals.forbidden}; unknown ${impact.totals.unknown}.`,
-    `Unchanged status/notice records: ${impact.unchanged ?? 'unavailable'}; TTS eligibility gains: ${impact.ttsGains ?? 'unavailable'}; losses: ${impact.ttsLosses ?? 'unavailable'}.`,
+    `Projected status changes: ${impact.statusChangeCount ?? 'unavailable'}; unchanged status/notice records: ${impact.unchanged ?? 'unavailable'}; TTS eligibility gains: ${impact.ttsGains ?? 'unavailable'}; losses: ${impact.ttsLosses ?? 'unavailable'}.`,
     `Recorded evidence diagnostics: ${impact.diagnostics.cacheHits} cache hits; ${impact.diagnostics.freshSamples} fresh samples; ${impact.diagnostics.newCalls} recorded provider calls; ${impact.diagnostics.unreportedSamples} samples without complete runtime diagnostics.`,
     `Models: ${model.models.map((entry) => `${text(entry.provider)}:${text(entry.model)} (${entry.sampleCount} samples)`).join(', ')}.`,
     '',
   ];
-  if (model.attestation)
-    rows.push(
-      `Attested by ${text(model.attestation.reviewedBy)} at ${text(model.attestation.reviewedAt)}: ${text(model.attestation.reviewReason)}`,
-      ''
-    );
   if (impact.preservationWarning) rows.push(`**${text(impact.preservationWarning)}**`, '');
   if (impact.classificationChanges) {
     const changes = impact.classificationChanges;
@@ -76,7 +70,12 @@ export function renderLicenseMarkdown(model: LicenseReportModel): string {
       `<pre>${html((targetOnly ? bible.snapshotNotice : bible.rawNotice) ?? '(none)')}</pre>`,
       ''
     );
-  if (!impact.noticeChanges.length) rows.push('None identified in the supplied comparison.');
+  if (!impact.noticeChanges.length)
+    rows.push(
+      impact.context.kind === 'database'
+        ? 'None identified in the supplied comparison.'
+        : 'Unavailable without database context.'
+    );
   rows.push('', '## Conflicts and review items', '');
   for (const bible of impact.disagreements)
     rows.push(
@@ -84,7 +83,7 @@ export function renderLicenseMarkdown(model: LicenseReportModel): string {
     );
   for (const row of impact.unknownClassifications)
     rows.push(
-      `- Unknown: ${text(row.normalizedText)} — ${text(row.rowNote ?? 'Human row note required to complete JSON review.')}`
+      `- Unknown: ${text(row.normalizedText)} — ${text(row.rowNote ?? 'No historical row note.')}`
     );
   for (const bible of impact.missingClassifications)
     rows.push(
@@ -104,7 +103,7 @@ export function renderLicenseMarkdown(model: LicenseReportModel): string {
       ''
     );
   if (!impact.collisions.length) rows.push('None.');
-  rows.push('', '## Complete license inventory', '');
+  rows.push('', '## Complete license inventory (working review)', '');
   for (const entry of model.inventory) {
     rows.push(
       `### ${text(entry.normalizedText || '(empty normalized notice)')}`,

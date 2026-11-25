@@ -11,6 +11,8 @@ import { createDraftDatabaseTest } from './database-test.js';
 import { createStageNavigation, renderSetupContext, trackActionFocus } from './guide.js';
 import { createPaidControls } from './paid-controls.js';
 import {
+  createAutomaticPreview,
+  initAttestation,
   renderExactPreview as updateExactPreview,
   syncPracticeDraftControls as updatePracticeDraftControls,
 } from './preview-ui.js';
@@ -58,8 +60,7 @@ const observer = watchSession(
   mayObserve
 );
 const { request } = observer;
-const previewButton = document.getElementById('normal-preview-button');
-const attestation = document.getElementById('attestation');
+const saveReviewer = document.getElementById('save-reviewer');
 const draftDatabase = createDraftDatabaseTest(
   form,
   request,
@@ -92,6 +93,7 @@ function settingsRequestActive(next = setup) {
 
 function workbenchBusy(next) {
   return (
+    practiceBusy ||
     Boolean(analysisProgress.starting) ||
     sessionUnconfirmed ||
     saveStatusUnconfirmed() ||
@@ -108,6 +110,7 @@ const stages = createStageNavigation(form, {
   draftStatus: draftDatabase.draftStatus,
   onVisit: observer.refresh,
   syncRoleActions,
+  onStage: visitStage,
   hasAiDraft: () => Boolean(pending('ai')),
 });
 const paidControls = createPaidControls(getSetup, syncSettingsActions, start);
@@ -159,10 +162,28 @@ const previewFlags = () => ({
   sessionUnconfirmed,
   settingsBusy: settingsRequestActive(),
 });
+const schedulePreview = createAutomaticPreview(
+  getSetup,
+  saveReviewer,
+  () =>
+    stages.current === 'save' &&
+    !saveChanges() &&
+    !workbenchBusy(setup) &&
+    !settingsRequestActive() &&
+    !practiceBusy &&
+    !hasUnsavedReviewDraft(),
+  practiceAction
+);
+function visitStage(stage) {
+  schedulePreview(true);
+  if (stage === 'save' && setup?.analysis?.pendingReviews && !saveReviewer.value.trim())
+    saveReviewer.focus();
+}
 const renderExactPreview = (next) => updateExactPreview(next, previewFlags());
 const syncPracticeDraftControls = () => updatePracticeDraftControls(setup, previewFlags());
 
 function syncReviewAvailability(next) {
+  schedulePreview();
   renderExactPreview(next);
   renderSave(next);
   syncPracticeDraftControls();
@@ -252,6 +273,7 @@ function render(raw, populate = false, accepted, passive = false) {
   practiceReview.hidden = !next.practice || !next.analysis;
   syncReviewAvailability(next);
   renderGuide(next);
+  schedulePreview();
   if (!analysisProgress.starting) operationFocus.observe(next.latestOperation);
 }
 const { refresh, pollEvidence } = createEvidencePolling(getSetup, request, render, () => {
@@ -401,17 +423,18 @@ async function practiceAction(path, body) {
   )
     return;
   if (hasUnsavedReviewDraft()) {
-    status.textContent = 'Apply or discard the open row edit before previewing or saving.';
+    status.textContent = 'Wait for the row edit to be kept in this session.';
     return;
   }
   practiceBusy = true;
+  syncSettingsActions(setup);
   invalidateReportSelection();
   renderExactPreview(setup);
   setReviewBusy(true);
   renderGuide(setup);
   let failure;
-  for (const id of ['practice-preview', 'practice-save'])
-    document.getElementById(id).disabled = true;
+  renderSave(setup);
+  syncPracticeDraftControls();
   try {
     render(await request(path, 'POST', body));
   } catch (error) {
@@ -420,11 +443,11 @@ async function practiceAction(path, body) {
     practiceBusy = false;
     setReviewBusy(false);
     renderGuide(setup);
-    if (failure) await recoverActionFailure(failure);
+    if (failure) await recoverActionFailure(failure, path.endsWith('preview'));
     else render(setup);
   }
 }
-async function recoverActionFailure(message) {
+async function recoverActionFailure(message, previewFailure = false) {
   try {
     render(await request('setup'));
     status.textContent = `${message} ${setup.state === 'configuring' ? 'Inspect inputs again.' : 'Check the current session before retrying.'}`;
@@ -439,7 +462,12 @@ async function recoverActionFailure(message) {
     }
     status.textContent = `${message} Session status unavailable; inspect actual targets and reload before retrying.`;
   }
-  status.focus();
+  if (previewFailure && stages.current === 'save' && setup && !setup.preview) {
+    document.getElementById(
+      setup.practice ? 'practice-preview-result' : 'preview-result'
+    ).textContent = `Preview failed: ${message} Check the settings, then return to Save to retry.`;
+  }
+  if (!previewFailure) status.focus();
 }
 initSave({
   request,
@@ -458,44 +486,13 @@ initSave({
     }
   },
 });
-const saveReviewer = document.getElementById('save-reviewer');
 saveReviewer.addEventListener('input', () => syncReviewAvailability(setup));
-function preview(path) {
-  if (setup.analysis?.pendingReviews && !saveReviewer.value.trim()) {
-    status.textContent = 'Enter a reviewer name for pending decisions.';
-    saveReviewer.focus();
-    return;
-  }
-  return practiceAction(path, {
-    reviewedBy: saveReviewer.value,
-    configurationRevision: setup.configurationRevision,
-    contentRevision: setup.contentRevision,
-  });
-}
-previewButton.addEventListener('click', () => void preview('preview'));
-attestation.addEventListener('submit', (event) => {
-  event.preventDefault();
-  if (
-    saveChanges() ||
-    sessionUnconfirmed ||
-    saveStatusUnconfirmed() ||
-    !setup.preview ||
-    !attestation.elements.responsibility.checked
-  )
-    return;
-  void practiceAction('attest', {
-    configurationRevision: setup.configurationRevision,
-    contentRevision: setup.contentRevision,
-    reviewContentHash: setup.preview.reviewContentHash,
-    reviewedBy: attestation.elements.reviewedBy.value,
-    reviewReason: attestation.elements.reviewReason.value,
-    responsibility: true,
-  });
-});
+initAttestation(
+  getSetup,
+  practiceAction,
+  () => saveChanges() || sessionUnconfirmed || saveStatusUnconfirmed()
+);
 initReportControls(request, getSetup, recoverActionFailure, token, saveChanges);
-document
-  .getElementById('practice-preview')
-  .addEventListener('click', () => void preview('practice/preview'));
 if (!token) {
   status.textContent = 'Open the printed local URL, including its session token after #.';
 } else {

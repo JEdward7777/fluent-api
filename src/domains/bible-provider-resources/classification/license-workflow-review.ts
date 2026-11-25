@@ -76,7 +76,15 @@ export abstract class LicenseWorkflowReview {
   get reviewDrafts(): Pick<LicenseReviewDrafts, 'epoch' | 'size' | 'values'> {
     return this.drafts;
   }
-  private candidate?: { baseline: LicenseAnalysis; reviewer: string; analysis: LicenseAnalysis };
+  private candidate?: {
+    baseline: LicenseAnalysis;
+    reviewer: string;
+    analysis: LicenseAnalysis;
+    instant: string;
+  };
+  protected get candidateReviewedAt() {
+    return this.candidate?.instant;
+  }
   protected acceptSave(preview: LicensePreview) {
     const pending = this.reviewDrafts.size;
     this.analysis = Object.freeze({
@@ -117,7 +125,7 @@ export abstract class LicenseWorkflowReview {
       }
     });
     const analysis = Object.freeze({ ...baseline, artifact: freezeLicenseRevision(artifact) });
-    this.candidate = { baseline, reviewer, analysis };
+    this.candidate = { baseline, reviewer, analysis, instant };
     return analysis;
   }
   protected analysis?: LicenseAnalysis;

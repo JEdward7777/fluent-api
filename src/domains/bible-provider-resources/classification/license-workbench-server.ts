@@ -14,11 +14,11 @@ import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseReviewerContainer } from './license-reviewer-container';
 import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
-import { LICENSE_REPORT_HTML_CSP } from '../license-report-html';
 import { draftCommandSchema } from './license-review-drafts';
 import { describeLicenseReportPath } from './license-reviewer-container';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
 import { DatabaseTestUnavailableError } from './license-workbench-database-tests';
+import { registerReportViews } from './license-workbench-reports';
 import { reviewQuerySchema } from './license-workbench-review';
 import {
   databaseConnectionSchema,
@@ -330,41 +330,19 @@ function createLicenseWorkbenchApp(
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.text('Invalid report export', 400);
     try {
-      const { bytes: _bytes, ...report } = await session.exportReport(parsed.data);
+      const { bytes: _bytes, parent, ...report } = await session.exportReport(parsed.data);
       return c.json({
         ...report,
         filename: basename(report.path),
         displayPath: container
-          ? await describeLicenseReportPath(report.path, container)
+          ? await describeLicenseReportPath(report.path, container, { parent })
           : report.path,
       });
     } catch (error) {
       return c.text(error instanceof Error ? error.message : 'Report export failed', 409);
     }
   });
-  const reportId = z.string().uuid();
-  app.get('/api/report/:id', async (c) => {
-    const id = reportId.safeParse(c.req.param('id'));
-    const report = id.success ? await session.reports.exported(id.data) : undefined;
-    if (!report) return c.text('Unknown exported report', 404);
-    c.header('Content-Type', 'application/octet-stream');
-    return c.body(report.bytes);
-  });
-  app.post('/report-view', async (c) => {
-    if (c.req.header('origin') !== `http://${c.req.header('host')}`)
-      return c.text('Local Origin required', 403);
-    const parsed = z
-      .object({ token: z.string(), id: reportId })
-      .strict()
-      .safeParse(await c.req.parseBody().catch(() => null));
-    if (!parsed.success || !sameToken(parsed.data.token, token))
-      return c.text('Session token required', 403);
-    const report = await session.reports.exported(parsed.data.id);
-    if (!report) return c.text('Unknown exported report', 404);
-    if (report.format === 'markdown') return c.text(report.bytes);
-    c.header('Content-Security-Policy', LICENSE_REPORT_HTML_CSP);
-    return c.html(report.bytes);
-  });
+  registerReportViews(app, session, (value) => sameToken(value, token));
   app.post('/api/practice/save', async (c) => {
     const parsed = revisionSchema
       .extend({ previewToken: z.string().uuid(), operationId: z.string().uuid() })

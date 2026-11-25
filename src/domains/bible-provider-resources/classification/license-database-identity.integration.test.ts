@@ -11,6 +11,7 @@ import { license_classifications, licenseReviewStateEnum, ttsLicenseStatusEnum }
 import { createOwnedLicenseDatabaseAdapter } from './license-classifications.service';
 import { makeCommandFixture } from './license-command.test-fixtures';
 import { exerciseDeferredRetirement } from './license-output-retirement.test-fixtures';
+import { testSavedReportResourceDrift } from './license-report-export.test-fixtures';
 import {
   exerciseBothDrift,
   exerciseDelayedSave,
@@ -501,5 +502,6 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
       },
       20000
     );
+    testSavedReportResourceDrift(endpoints);
   }
 );

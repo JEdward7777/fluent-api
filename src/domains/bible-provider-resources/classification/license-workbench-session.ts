@@ -7,6 +7,8 @@ import type { VisibleOperation } from './license-workbench-operation.types';
 import type { operationSchema } from './license-workbench-schema';
 import type { LicenseReviewEdit } from './license-workflow.types';
 
+import { renderLicenseHtml } from '../license-report-html';
+import { renderLicenseMarkdown } from '../license-report-markdown';
 import { licenseApiKey } from './license-api-key';
 import { createLicensePractice } from './license-practice';
 import { LicenseWorkbenchConfiguration } from './license-workbench-configuration';
@@ -17,6 +19,20 @@ import { LicenseWriteUncertainError } from './license-write';
 
 export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
   private uncertainReceipt?: VisibleOperation['result'];
+
+  currentReport(token: string, format: 'html' | 'markdown') {
+    const preview = this.workflow?.previewed;
+    if (
+      this.practiceMode ||
+      !preview ||
+      preview.token !== token ||
+      !['saved', 'previewed'].includes(this.workflow?.status.state ?? '')
+    )
+      return undefined;
+    return format === 'html'
+      ? renderLicenseHtml(preview.reports.model)
+      : renderLicenseMarkdown(preview.reports.model);
+  }
 
   reconcileSource(resolution?: {
     token: string;
@@ -380,8 +396,14 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     this.latestSaveOperationId = body.operationId;
     const changes = preview.plan.jsonChanges;
     const receipt = {
+      reviewer: preview.reviewer,
+      reviewedAt: preview.reviewedAt,
+      reviewContentHash: preview.plan.reviewContentHash,
       json: preview.plan.jsonArtifact
         ? {
+            artifactBytes: preview.plan.artifactBytes,
+            reviewContentHash: preview.plan.jsonArtifact.reviewContentHash,
+            artifactRows: preview.plan.jsonArtifact.classifications.length,
             inserted: changes.inserted.length,
             updated: changes.updated.length,
             metadataChanges: changes.metadataChanges.length,
@@ -400,6 +422,10 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       })),
       policy: policy
         ? {
+            target: this.visible.preview?.destinationDatabaseLabel ?? undefined,
+            unchanged: preview.plan.databaseChanges.unchanged.length,
+            metadataChanges: preview.plan.databaseChanges.metadataChanges.length,
+            permissionChanges: preview.plan.databaseChanges.permissionChanges.length,
             inserts: policy.inserts.length,
             updates: policy.updates.length,
             deletes: policy.deletes.length,

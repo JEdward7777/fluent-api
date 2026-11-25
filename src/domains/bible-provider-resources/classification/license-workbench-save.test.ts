@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { readFile, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -79,6 +80,11 @@ describe('workbench Save operation', () => {
       expect((await (await api('setup')).json()).saveOutcome).toEqual(operation);
       const bytes = await readFile(fixture.output, 'utf8');
       expect(bytes).toContain('classifications');
+      expect(operation.result.json.artifactBytes).toBe(Buffer.byteLength(bytes));
+      const current = await api(`current-report/${preview.token}/markdown`);
+      expect(current.status).toBe(200);
+      expect(await current.text()).toContain('#');
+      expect((await api(`current-report/${crypto.randomUUID()}/markdown`)).status).toBe(409);
       expect((await api('save', 'POST', retry)).status).toBe(202);
       expect(await readFile(fixture.output, 'utf8')).toBe(bytes);
       expect(

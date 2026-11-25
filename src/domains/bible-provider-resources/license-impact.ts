@@ -116,6 +116,7 @@ export function computeLicenseImpact(
     .sort((a, b) =>
       a.normalizedText < b.normalizedText ? -1 : a.normalizedText > b.normalizedText ? 1 : 0
     );
+  const changes = rows.filter((row) => row.statusChanged);
   const samples = artifact.classifications.flatMap((row) => row.samples);
   return {
     context: database
@@ -139,7 +140,8 @@ export function computeLicenseImpact(
     rows,
     totals,
     classificationTotals,
-    changes: rows.filter((row) => row.statusChanged),
+    changes,
+    statusChangeCount: database ? changes.length : null,
     newCatalogRows: rows.filter((row) => row.isNew),
     noticeChanges: rows.filter((row) => row.noticeChanged),
     disagreements: rows.filter((row) => row.disagreement),

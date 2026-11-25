@@ -11,6 +11,7 @@ import { makeLicenseArtifact, REVIEWER } from './license-artifact.test-fixtures'
 import { parseLicenseVote } from './license-model-contract';
 import { normalizeLicenseNotice } from './license-normalizer';
 import { escapeReportHtml, selectLicenseReportFormats } from './license-report-formats';
+import { licenseInlineSummary } from './license-report-model';
 import { makeLicenseImpactFixture } from './license-report.test-fixtures';
 import { renderLicenseReports } from './license-reports';
 
@@ -123,6 +124,9 @@ describe('selectable frozen license reports', () => {
       );
       expect(report.reports[0].bytes).toContain('artifact-only report');
       expect(report.model.impact.ttsGains).toBeNull();
+      expect(report.model.impact.statusChangeCount).toBeNull();
+      expect(report.reports[0].bytes).toContain('Projected status changes: unavailable');
+      expect(licenseInlineSummary(report.model)).toContain('Projected status changes: unavailable');
     }
     const none = renderLicenseReports(artifact, { formats: 'none' });
     expect(none.reports).toEqual([]);

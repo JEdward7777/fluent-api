@@ -17,9 +17,15 @@ export interface VisibleOperation {
   reconciliation?: LicenseReconciliation;
   recovery?: LicenseWriteRecovery;
   result?: {
+    reviewer: string;
+    reviewedAt?: string;
+    reviewContentHash: string;
     wholeFileHash: string;
     targets: Array<{ path: string; role: 'output' | 'signed-source'; hash: string }>;
     json?: {
+      artifactBytes: number;
+      reviewContentHash: string;
+      artifactRows: number;
       inserted: number;
       updated: number;
       metadataChanges: number;
@@ -30,6 +36,10 @@ export interface VisibleOperation {
       deletedCatalog: Array<{ provider: string; externalId: string }>;
     };
     policy: {
+      target?: string;
+      unchanged: number;
+      metadataChanges: number;
+      permissionChanges: number;
       inserts: number;
       updates: number;
       deletes: number;

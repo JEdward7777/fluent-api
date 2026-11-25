@@ -22,6 +22,7 @@ export function licenseWorkbenchPreviewView(input: {
   return {
     token: preview.token,
     reviewer: preview.reviewer,
+    reviewedAt: preview.reviewedAt,
     configurationRevision,
     sourceLabel: options.source === 'database' ? input.loadedDatabaseTarget : options.input,
     destinationDatabaseLabel:
@@ -47,6 +48,9 @@ export function licenseWorkbenchPreviewView(input: {
           operation:
             (preview.plan.overwriteJson ?? options.source === 'json') ? 'overwrite' : 'sync',
           ...preview.plan.jsonChanges,
+          assertion: preview.plan.jsonArtifact.attestation,
+          artifactBytes: preview.plan.artifactBytes,
+          reviewContentHash: preview.plan.jsonArtifact.reviewContentHash,
           artifactRows: preview.plan.jsonArtifact.classifications.length,
           wholeFileHash: preview.plan.wholeFileHash,
         }
@@ -73,7 +77,7 @@ export function licenseWorkbenchPreviewView(input: {
     forecast: impact
       ? {
           context: impact.context,
-          changedStatuses: impact.changes.length,
+          changedStatuses: impact.statusChangeCount,
           gains: impact.ttsGains,
           losses: impact.ttsLosses,
           missingClassifications: impact.missingClassifications.length,
@@ -83,6 +87,7 @@ export function licenseWorkbenchPreviewView(input: {
     review: review
       ? { status: review.status, reasons: 'reasons' in review ? review.reasons : [] }
       : null,
+    assertion: practiceMode ? undefined : preview.candidate.artifact.attestation,
     incomplete: practiceMode || review?.status !== 'ready',
   };
 }

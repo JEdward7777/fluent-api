@@ -489,3 +489,9 @@ td button {
 #status[data-state='ready'] {
   border-color: #357753;
 }
+
+#current-report iframe {
+  width: 100%;
+  height: 65vh;
+  border: 1px solid currentColor;
+}

@@ -48,7 +48,7 @@ function configureStageHelp(practice) {
 
 export function createStageNavigation(
   form,
-  { getSetup, pushStage, draftStatus, onVisit, syncRoleActions, hasAiDraft }
+  { getSetup, pushStage, draftStatus, onVisit, syncRoleActions, hasAiDraft, onStage }
 ) {
   const links = [...document.querySelectorAll('[data-route]')];
   const nextLink = document.getElementById('stage-next');
@@ -145,13 +145,17 @@ export function createStageNavigation(
       history.replaceState(history.state, '', fallback);
     }
     onVisit();
-    if (target === stage) return;
+    if (target === stage) {
+      if (!traversal) onStage(stage);
+      return;
+    }
     const url = new URL(location.href);
     url.searchParams.set('stage', target);
     if (!traversal && !(await pushStage(url))) return;
     stage = target;
     display(getSetup());
     heading.focus();
+    onStage(stage);
   }
   for (const link of [...links, nextLink, ...statusLinks])
     link.addEventListener('click', async (event) => {

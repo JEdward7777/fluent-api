@@ -316,29 +316,65 @@
         </label>
         <div data-stage="save" id="practice-review" hidden>
           <h2>Practice output</h2>
-          <p>Preview the scratch JSON before saving it.</p>
+          <p id="practice-preview-result" role="status"></p>
           <div class="actions">
-            <button id="practice-preview" type="button">Preview scratch output</button
-            ><button id="practice-save" type="button" disabled>Save incomplete scratch JSON</button>
+            <!-- prettier-ignore -->
+            <button
+              id="practice-save"
+              type="button"
+              aria-describedby="practice-preview-result"
+              disabled
+            >
+              Save incomplete scratch JSON
+            </button>
           </div>
-          <p id="practice-preview-result"></p>
         </div>
         <section data-stage="save" id="normal-preview" hidden aria-labelledby="preview-heading">
           <h2 id="preview-heading">Preview exact changes</h2>
           <p>Preview checks the inspected sources and target. No policy or artifact is written.</p>
-          <button id="normal-preview-button" type="button">Preview current revision</button>
+
           <div id="preview-result" role="status"></div>
-          <form id="attestation" hidden>
-            <h3>Optional whole-file assertion</h3>
-            <p>This assertion is optional and separate from named row decisions.</p>
-            <p>The assertion changes JSON bytes. Preview again afterward.</p>
-            <label>Reviewer name <input name="reviewedBy" required maxlength="200" /></label>
-            <label>Reason <textarea name="reviewReason" required></textarea></label>
-            <label><input name="responsibility" type="checkbox" required /> I reviewed.</label>
-            <button type="submit">Attest exact review hash</button>
-          </form>
-          <div id="report-export">
-            <h3>Export a report separately</h3>
+          <div id="normal-save" hidden>
+            <h3>Save this preview</h3>
+            <p>Save writes the independent JSON and policy results shown above.</p>
+            <label id="save-replacement" hidden>
+              <input id="save-replacement-agreement" type="checkbox" />
+              <span>I agree to replace policy.</span>
+            </label>
+            <button id="normal-save-button" type="button" disabled>Save previewed decisions</button>
+          </div>
+          <details id="current-report">
+            <summary>View report, results and impact</summary>
+            <p id="current-report-status" role="status"></p>
+            <!-- prettier-ignore -->
+            <iframe
+              name="current-report-frame"
+              title="Current license report"
+              sandbox="allow-scripts"
+            ></iframe>
+            <label
+              >Download format
+              <select id="current-format">
+                <option value="html">HTML</option>
+                <option value="markdown">Markdown</option>
+              </select></label
+            >
+            <button id="current-download" type="button">Download report</button>
+          </details>
+          <details id="assertion-section" hidden>
+            <summary>Optional whole-file assertion</summary>
+            <form id="attestation">
+              <p>This assertion is optional and separate from named row decisions.</p>
+              <p>The assertion changes JSON bytes. The preview refreshes afterward.</p>
+              <label>Reviewer name <input name="reviewedBy" required maxlength="200" /></label>
+              <label>Reason <textarea name="reviewReason" required></textarea></label>
+              <label><input name="responsibility" type="checkbox" required /> I reviewed.</label>
+              <button type="submit">Attest exact review hash</button>
+            </form>
+          </details>
+          <details id="report-export">
+            <summary>Export report to a file</summary>
+
             <p>Choose a format and path. Export writes only the report.</p>
             <label
               >Format
@@ -356,16 +392,7 @@
               <button id="report-open" type="button">Open report</button>
               <button id="report-download" type="button">Download report</button>
             </div>
-          </div>
-          <div id="normal-save" hidden>
-            <h3>Save this preview</h3>
-            <p>Save writes the independent JSON and policy results shown above.</p>
-            <label id="save-replacement" hidden>
-              <input id="save-replacement-agreement" type="checkbox" />
-              <span>I agree to replace policy.</span>
-            </label>
-            <button id="normal-save-button" type="button" disabled>Save previewed decisions</button>
-          </div>
+          </details>
         </section>
         <section data-stage="save" id="source-drift" hidden>
           <h3>The loaded source changed</h3>
@@ -382,13 +409,20 @@
       <section data-stage="save" aria-labelledby="operations-heading">
         <details>
           <summary id="operations-heading">What the selections mean</summary>
+          <!-- prettier-ignore -->
           <ul>
-            <li><strong>JSON → JSON:</strong> overwrite JSON from the current draft.</li>
-            <li><strong>Database → JSON:</strong> sync JSON; database stays unchanged.</li>
-            <li><strong>JSON → database:</strong> sync by rank; retain omissions.</li>
-            <li><strong>Database → database:</strong> overwrite selected rows only.</li>
-            <li><strong>JSON → both:</strong> overwrite JSON and sync the database.</li>
-            <li><strong>Database → both:</strong> sync JSON and overwrite selected rows.</li>
+            <li>
+              Saving to the loaded JSON file overwrites that artifact. A different JSON file uses
+              sync.
+            </li>
+            <li>
+              A verified match to the loaded database overwrites selected policy rows. A different
+              or unverified database uses sync.
+            </li>
+            <li>
+              Sync retains omitted rows and preserves stronger destination decisions. Both applies
+              these rules to each target independently.
+            </li>
           </ul>
           <p id="alternatives-note">Both writes file and database targets.</p>
         </details>
