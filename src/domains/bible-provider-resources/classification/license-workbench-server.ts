@@ -20,7 +20,12 @@ import { describeLicenseReportPath } from './license-reviewer-container';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
 import { DatabaseTestUnavailableError } from './license-workbench-database-tests';
 import { reviewQuerySchema } from './license-workbench-review';
-import { databaseConnectionSchema, operationSchema, setupSchema } from './license-workbench-schema';
+import {
+  databaseConnectionSchema,
+  operationSchema,
+  paidOperationSchema,
+  setupSchema,
+} from './license-workbench-schema';
 import { LicenseWorkbenchSession } from './license-workbench-session';
 
 const assetDirectory = join(dirname(fileURLToPath(import.meta.url)), 'assets');
@@ -28,6 +33,7 @@ const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/paid-controls.js', ['paid-controls.js', 'text/javascript; charset=utf-8']],
   ['/analysis-progress.js', ['analysis-progress.js', 'text/javascript; charset=utf-8']],
   ['/database-test.js', ['database-test.js', 'text/javascript; charset=utf-8']],
   ['/preview-ui.js', ['preview-ui.js', 'text/javascript; charset=utf-8']],
@@ -155,9 +161,11 @@ function createLicenseWorkbenchApp(
       );
     }
   });
-  for (const kind of ['inspect', 'analysis'] as const) {
+  for (const kind of ['inspect', 'analysis', 'paid'] as const) {
     app.post(`/api/${kind}`, async (c) => {
-      const parsed = operationSchema.safeParse(await c.req.json().catch(() => null));
+      const parsed = (kind === 'paid' ? paidOperationSchema : operationSchema).safeParse(
+        await c.req.json().catch(() => null)
+      );
       if (!parsed.success) return c.text('Invalid operation fields', 400);
       try {
         return c.json(session.start(kind, parsed.data), 202);
@@ -385,6 +393,7 @@ function createLicenseWorkbenchApp(
         | '/'
         | '/app.css'
         | '/app.js'
+        | '/paid-controls.js'
         | '/analysis-progress.js'
         | '/database-test.js'
         | '/preview-ui.js'

@@ -1,10 +1,12 @@
 import { LicenseDestinationRecheckError } from './license-freshness';
+import { PaidBatchError } from './license-paid-batch';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
 import { LicenseSourceReadError } from './license-workflow-inspect';
 import { LicenseWriteUncertainError } from './license-write';
 
 export function licenseWorkbenchBrowserError(error: unknown) {
-  if (error instanceof LicenseDestinationRecheckError) return error.message;
+  if (error instanceof PaidBatchError || error instanceof LicenseDestinationRecheckError)
+    return error.message;
   if (error instanceof LicenseSourceReadError || error instanceof LicenseWorkbenchDatabaseError)
     return error.message;
   if (error instanceof Error && 'code' in error && error.code === '42P01')

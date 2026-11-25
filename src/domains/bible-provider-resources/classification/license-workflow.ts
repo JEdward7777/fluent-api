@@ -1,8 +1,5 @@
-import { randomUUID } from 'node:crypto';
-
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
-import type { FreeSelection } from './license-free-preparation';
 import type {
   LicenseAnalysis,
   LicenseInspection,
@@ -16,10 +13,9 @@ import type {
   LicenseWorkflowDependencies,
 } from './license-workflow.types';
 
-import { freezeLicenseRevision, freezeReviewValue } from '../license-review-revision';
+import { freezeReviewValue } from '../license-review-revision';
 import { LicenseAnalysisStoppedError } from './license-analysis';
 import { LicensePolicyDriftError } from './license-database.types';
-import { stageFreePreparation } from './license-free-preparation';
 import { LicenseDestinationRecheckError, LicenseInspectionStaleError } from './license-freshness';
 import { analyzeInspectedLicenses } from './license-workflow-analyze';
 import { LicenseWorkflowDestination } from './license-workflow-destination';
@@ -30,8 +26,8 @@ import {
   requirePracticeOptions,
 } from './license-workflow-inspect';
 import { LicenseOperationRegistry } from './license-workflow-operations';
+import { LicenseWorkflowPreparation } from './license-workflow-preparation';
 import { exportPreviewedLicenseReport } from './license-workflow-report-export';
-import { LicenseWorkflowReview } from './license-workflow-review';
 import {
   destinationSaveFailure,
   licenseSaveFingerprint,
@@ -42,24 +38,15 @@ import { LicenseFileDriftError } from './license-write';
 
 export type { LicenseReviewEdit } from './license-workflow.types';
 
-export class LicenseWorkflow extends LicenseWorkflowReview {
-  private options: LicenseCommandOptions;
+export class LicenseWorkflow extends LicenseWorkflowPreparation {
+  protected options: LicenseCommandOptions;
   private database?: LicenseDatabaseAdapter;
   private readonly destination = new LicenseWorkflowDestination();
-  private inspection?: LicenseInspection;
+  protected inspection?: LicenseInspection;
   private previewPromise?: Promise<LicensePreview>;
   private closePromise?: Promise<void>;
   private readonly saveOperations = new Map<string, LicenseSaveOperation>();
   private readonly operations = new LicenseOperationRegistry();
-  private readonly completedLaunchSelections = new Set<string>();
-  private confirmationNonce = randomUUID();
-  private estimate?: Awaited<ReturnType<typeof stageFreePreparation>>['estimate'];
-  get paidEstimate() {
-    return this.estimate?.contentRevision === this.contentRevision ? this.estimate : undefined;
-  }
-
-  private stopAnalysisRequested = false;
-
   constructor(options: LicenseCommandOptions, dependencies: LicenseWorkflowDependencies) {
     super(dependencies);
     this.options = freezeReviewValue(options);
@@ -103,7 +90,7 @@ export class LicenseWorkflow extends LicenseWorkflowReview {
         this.inspection = freezeReviewValue({ ...this.inspection, preflight });
       this.options = freezeReviewValue(options);
       if (aiChanged) {
-        this.estimate = undefined;
+        this.invalidatePaidEstimate();
         this.completedLaunchSelections.clear();
       }
       this.invalidateConfiguredPreview();
@@ -136,7 +123,7 @@ export class LicenseWorkflow extends LicenseWorkflowReview {
       this.previewResult = undefined;
       this.configurationRevision++;
       this.contentRevision = 0;
-      this.estimate = undefined;
+      this.invalidatePaidEstimate();
       this.completedLaunchSelections.clear();
       this.resetDrafts();
       this.state = 'configuring';
@@ -193,80 +180,6 @@ export class LicenseWorkflow extends LicenseWorkflowReview {
     } finally {
       this.endBusy();
     }
-  }
-
-  cancelFreeSelection(contentRevision: number, selection: FreeSelection) {
-    this.requireContentRevision(this.configurationRevision, contentRevision);
-    if (
-      this.busyDone ||
-      !selection.confirmation ||
-      !this.paidEstimate?.replacements.some(
-        (row) =>
-          row.id === selection.id &&
-          row.kind === selection.kind &&
-          row.confirmation === selection.confirmation
-      )
-    )
-      throw new Error('Stale reassessment confirmation');
-    this.estimate = undefined;
-  }
-
-  async prepareFree(contentRevision: number, selection?: FreeSelection) {
-    this.requireContentRevision(this.configurationRevision, contentRevision);
-    if (this.busyDone || !['inspected', 'reviewing', 'saved', 'previewed'].includes(this.state))
-      throw new Error('Cannot prepare assessment while an operation runs');
-    const prior = this.state;
-    this.state = 'analyzing';
-    this.stopAnalysisRequested = false;
-    this.beginBusy();
-    try {
-      await this.prepareLoadedFree(selection);
-      return this.paidEstimate!;
-    } finally {
-      if (this.state === 'analyzing') this.state = prior;
-      this.endBusy();
-    }
-  }
-
-  private async prepareLoadedFree(selection?: FreeSelection) {
-    if (!this.analysis || !this.inspection?.sourceOnly)
-      throw new Error('Load a review source first');
-    if (
-      selection?.confirmation &&
-      !this.paidEstimate?.replacements.some(
-        (row) => row.id === selection.id && row.confirmation === selection.confirmation
-      )
-    )
-      throw new Error('Stale reassessment confirmation');
-    const confirmationNonce = selection?.confirmation ? this.confirmationNonce : randomUUID();
-    const staged = await stageFreePreparation({
-      confirmationNonce,
-      completedLaunchSelections: this.completedLaunchSelections,
-      options: this.options,
-      artifact: this.analysis.artifact,
-      eligibility: this.inspection.preflight.rows,
-      drafts: this.reviewDrafts,
-      contentRevision: this.contentRevision,
-      selection,
-      now: this.dependencies.now,
-    });
-    if (this.closing || this.stopAnalysisRequested) throw new LicenseAnalysisStoppedError();
-    const estimate = freezeReviewValue(staged.estimate);
-    if (staged.free.length) {
-      const analysis = freezeReviewValue({
-        ...this.analysis,
-        artifact: freezeLicenseRevision(staged.artifact),
-        contentRevision: estimate.contentRevision,
-      });
-      this.acceptPreparedRows(staged.free.map((row) => row.normalizedText));
-      this.analysis = analysis;
-      this.contentRevision = estimate.contentRevision;
-      this.previewResult = undefined;
-      this.state = 'reviewing';
-    }
-    for (const key of staged.completedLaunchSelections) this.completedLaunchSelections.add(key);
-    this.estimate = estimate;
-    this.confirmationNonce = confirmationNonce;
   }
 
   startAnalysis(request: number | LicenseReadOperationRequest): Promise<LicenseAnalysis> {

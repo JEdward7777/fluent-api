@@ -20,6 +20,7 @@ type ClassifierOptions = {
   model?: string;
   sampleCount?: number;
   cacheDir?: string;
+  plannedResponses?: ReadonlyMap<string, string>;
   noCache?: boolean;
   sleep?: (milliseconds: number) => Promise<unknown>;
   random?: () => number;
@@ -88,9 +89,11 @@ export function createLicenseClassifier(options: ClassifierOptions) {
       Array.from({ length: sampleCount }, async (_, offset) => {
         const index = offset + 1;
         const request = buildLicenseSampleRequest(notice, 'google', model, index);
-        if ('cachedResponses' in options) {
+        const cachedResponses =
+          'cachedResponses' in options ? options.cachedResponses : options.plannedResponses;
+        if ('cachedResponses' in options || cachedResponses?.has(llmRequestHash(request))) {
           const requestHash = llmRequestHash(request);
-          const response = options.cachedResponses.get(requestHash);
+          const response = cachedResponses?.get(requestHash);
           if (response === undefined) throw new Error('Incomplete cached classification evidence');
           return {
             index,
@@ -125,7 +128,7 @@ export function createLicenseClassifier(options: ClassifierOptions) {
             transport,
             cache,
             parse: parseLicenseVote,
-            noCache: options.noCache,
+            noCache: Boolean(options.plannedResponses) || options.noCache,
             sleep: options.sleep,
             random: options.random,
           })),

@@ -66,6 +66,19 @@ export const operationSchema = z
   })
   .strict();
 
+export const paidOperationSchema = operationSchema
+  .pick({ operationId: true, configurationRevision: true })
+  .extend({
+    paid: z
+      .object({
+        fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+        maximumRequests: z.number().int().positive(),
+        replacementConfirmations: z.array(z.string().regex(/^[a-f0-9]{64}$/)),
+      })
+      .strict(),
+  })
+  .strict();
+
 export function applyLicenseWorkbenchOptions(
   current: LicenseCommandOptions,
   body: z.infer<typeof setupSchema>

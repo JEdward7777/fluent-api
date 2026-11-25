@@ -2,11 +2,17 @@ import type { LicenseWriteRecovery } from './license-write';
 
 export interface VisibleOperation {
   operationId: string;
-  kind: 'inspect' | 'analysis' | 'save';
+  kind: 'inspect' | 'analysis' | 'paid' | 'save';
   state: 'running' | 'succeeded' | 'failed';
   configurationRevision?: number;
   contentRevision?: number;
   error?: string;
+  progress?: {
+    attempts: number;
+    completedRows: number;
+    totalRows: number;
+    stopRequested?: boolean;
+  };
   cleanupWarning?: string;
   recovery?: LicenseWriteRecovery;
   result?: {

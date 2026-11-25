@@ -6,6 +6,7 @@ import {
 } from './analysis-progress.js';
 import { createDraftDatabaseTest } from './database-test.js';
 import { renderGuide as updateGuide } from './guide.js';
+import { createPaidControls } from './paid-controls.js';
 import {
   renderExactPreview as updateExactPreview,
   syncPracticeDraftControls as updatePracticeDraftControls,
@@ -15,6 +16,7 @@ import { reassessmentStatus } from './review-rerun.js';
 import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
 import { initSave, renderSave, saveStatusUnconfirmed } from './save.js';
 import {
+  equivalentCliCommand,
   pendingSettings,
   populateSettings,
   roleConnectionDrafts,
@@ -87,6 +89,7 @@ function workbenchBusy(next) {
   );
 }
 
+const paidControls = createPaidControls(() => setup, syncSettingsActions, start);
 function syncSettingsActions(next) {
   const busy = workbenchBusy(next);
   syncSettingsFields(form, busy || applyingSettings, next.practice);
@@ -96,6 +99,7 @@ function syncSettingsActions(next) {
   applySettings.disabled = blocked || Boolean(drafts.conflict);
   restoreSettings.disabled = blocked;
   const actions = evidenceActions(next, blocked, dirty, hasUnsavedReviewDraft());
+  paidControls.update(next, actions.analyze);
   inspect.disabled = !actions.inspect;
   analyze.disabled = !actions.analyze;
   inspection.hidden = !next.inspected;
@@ -235,22 +239,7 @@ function render(next, populate = false) {
     if (item.textContent === step) item.setAttribute('aria-current', 'step');
     else item.removeAttribute('aria-current');
   }
-  const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
-  document.getElementById('cli-command').textContent = [
-    'npm run db:classify:licenses -- --ui=cli',
-    ...(next.source ? [`--source=${quote(next.source)}`] : []),
-    ...(next.destination ? [`--destination=${quote(next.destination)}`] : []),
-    `--input=${quote(next.input)}`,
-    `--output=${quote(next.output)}`,
-    `--model=${quote(next.model)}`,
-    `--sample-count=${next.sampleCount}`,
-    `--report-formats=${quote(next.reportFormats)}`,
-    ...(next.reportDir ? [`--report-dir=${quote(next.reportDir)}`] : []),
-    ...(next.cacheDir ? [`--cache-dir=${quote(next.cacheDir)}`] : []),
-    ...(next.noCache ? ['--no-cache'] : []),
-    ...(next.force ? ['--force'] : []),
-    ...(next.preserveExistingNonUnknowns ? ['--preserve-existing-non-unknowns'] : []),
-  ].join(' ');
+  document.getElementById('cli-command').textContent = equivalentCliCommand(next);
   const busy = workbenchBusy(next);
   syncSettingsActions(next);
   databaseTest.hidden = next.practice;
@@ -260,7 +249,8 @@ function render(next, populate = false) {
     form.elements.input.placeholder = 'Bundled example or an absolute saved JSON path';
   }
   stop.hidden = next.state !== 'analyzing';
-  stop.disabled = next.state !== 'analyzing';
+  stop.disabled =
+    next.state !== 'analyzing' || Boolean(next.latestOperation?.progress?.stopRequested);
   analysisProgress.update(next);
   status.textContent = workflowStatus(next, { busy, dirty, starting: analysisProgress.starting });
   const practiceReview = document.getElementById('practice-review');
@@ -364,16 +354,19 @@ databaseTest.addEventListener('click', () => {
   if (!setup || databaseTest.disabled || settingsRequestActive()) return;
   void draftDatabase.run(setup[`${drafts.role}Revision`], drafts.role);
 });
-async function start(kind) {
-  if (hasUnsavedReviewDraft() || (kind === 'analysis' ? analyze.disabled : inspect.disabled))
-    return;
+async function start(kind, paidBody) {
+  if (hasUnsavedReviewDraft() || (kind === 'inspect' ? inspect.disabled : analyze.disabled)) return;
   if (!setup || workbenchBusy(setup) || settingsRequestActive() || checkPendingSettings()) return;
   const begin = async () => {
-    await request(kind, 'POST', {
-      operationId: crypto.randomUUID(),
-      configurationRevision: setup.configurationRevision,
-      ...drafts.discardConfirmation(),
-    });
+    await request(
+      kind,
+      'POST',
+      paidBody ?? {
+        operationId: crypto.randomUUID(),
+        configurationRevision: setup.configurationRevision,
+        ...drafts.discardConfirmation(),
+      }
+    );
     await refresh();
   };
   try {
@@ -381,7 +374,8 @@ async function start(kind) {
   } catch (error) {
     if (sessionUnconfirmed) return;
     status.textContent = error.message;
-    if (kind === 'analysis') analysisProgress.update(setup, error.message);
+    if (kind !== 'inspect') analysisProgress.update(setup, error.message);
+    if (kind === 'paid' && error.requestRejected) paidControls.resetReceipt();
   }
 }
 inspect.addEventListener('click', () => start('inspect'));
@@ -390,6 +384,7 @@ stop.addEventListener('click', async () => {
   if (stop.disabled || sessionUnconfirmed) return;
   try {
     await request('stop', 'POST');
+    stop.disabled = true;
     status.textContent = 'Stop requested after the current key.';
   } catch (error) {
     status.textContent = error.message;

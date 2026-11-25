@@ -70,7 +70,9 @@ export function validateLicenseEvidence(
     throw new Error('Classification key does not match exact notice normalization');
   }
   validateReviewFacts(row);
-  for (const prior of row.reviewHistory ?? []) validateReviewFacts(prior);
+  for (const prior of row.reviewHistory ?? []) {
+    if (prior.reviewState !== 'pending_human_review') validateReviewFacts(prior);
+  }
   const proposal = row.source === 'manual' ? row.automaticDecision : row;
   // The live manual record also has its underlying proposal available for validation.
   if (

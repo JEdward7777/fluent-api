@@ -200,3 +200,22 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
     },
   };
 }
+
+export function equivalentCliCommand(next) {
+  const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
+  return [
+    'npm run db:classify:licenses -- --ui=cli',
+    ...(next.source ? [`--source=${quote(next.source)}`] : []),
+    ...(next.destination ? [`--destination=${quote(next.destination)}`] : []),
+    `--input=${quote(next.input)}`,
+    `--output=${quote(next.output)}`,
+    `--model=${quote(next.model)}`,
+    `--sample-count=${next.sampleCount}`,
+    `--report-formats=${quote(next.reportFormats)}`,
+    ...(next.reportDir ? [`--report-dir=${quote(next.reportDir)}`] : []),
+    ...(next.cacheDir ? [`--cache-dir=${quote(next.cacheDir)}`] : []),
+    ...(next.noCache ? ['--no-cache'] : []),
+    ...(next.force ? ['--force'] : []),
+    ...(next.preserveExistingNonUnknowns ? ['--preserve-existing-non-unknowns'] : []),
+  ].join(' ');
+}

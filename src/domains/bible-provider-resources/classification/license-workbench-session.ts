@@ -2,6 +2,7 @@ import type { z } from 'zod';
 
 import { createHash } from 'node:crypto';
 
+import type { PaidAuthorization } from './license-paid-batch';
 import type { LicensePractice } from './license-practice';
 import type { DraftCommand } from './license-review-drafts';
 import type { VisibleOperation } from './license-workbench-operation.types';
@@ -18,12 +19,16 @@ import { LicenseWriteUncertainError } from './license-write';
 
 export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
   private pendingLoad?: Promise<void>;
-  start(kind: VisibleOperation['kind'], body: z.infer<typeof operationSchema>) {
+  start(
+    kind: VisibleOperation['kind'],
+    body: z.infer<typeof operationSchema> & { paid?: PaidAuthorization }
+  ) {
     const fingerprint = JSON.stringify([
       kind,
       body.configurationRevision,
       Boolean(body.discardReviewedState),
       body.expectedContentRevision,
+      body.paid,
     ]);
     if (this.rerunOperations.get(body.operationId))
       throw new Error('Operation ID was reused with different arguments');
@@ -40,7 +45,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     if (body.configurationRevision !== this.visible.configurationRevision)
       throw new Error('Configuration changed; reload setup before continuing');
     if (!this.options.source) throw new Error('Choose a source');
-    if (kind === 'analysis') this.requireSelectedSourceLoaded();
+    if (kind === 'analysis' || kind === 'paid') this.requireSelectedSourceLoaded();
     let candidate: LicenseWorkflow | undefined;
     let candidatePractice: LicensePractice | undefined;
     if (kind === 'inspect') {
@@ -99,6 +104,14 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
         ...body,
         configurationRevision: workflow.status.configurationRevision,
       };
+      if (kind === 'paid' && body.paid) {
+        operation.progress = {
+          attempts: 0,
+          completedRows: 0,
+          totalRows: workflow.paidEstimate?.outstanding.length ?? 0,
+        };
+        return workflow.runPaid(body.paid, operation.progress);
+      }
       return kind === 'inspect'
         ? workflow.inspect(coreRequest)
         : workflow.startAnalysis(coreRequest);
@@ -165,7 +178,10 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
   }
   stop() {
     if (!this.workflow) throw new Error('No analysis is running');
-    return this.workflow.requestStopAnalysis();
+    const status = this.workflow.requestStopAnalysis();
+    const operation = this.activeOperationId && this.operations.get(this.activeOperationId);
+    if (operation && operation.snapshot.progress) operation.snapshot.progress.stopRequested = true;
+    return status;
   }
   mutateDraft(body: DraftCommand) {
     if (!this.workflow)

@@ -21,6 +21,7 @@ export interface FreeSelection {
 export async function stageFreePreparation(input: {
   completedLaunchSelections: ReadonlySet<string>;
   confirmationNonce: string;
+  estimateGeneration: string;
   artifact: LicenseArtifact;
   options: LicenseCommandOptions;
   eligibility: LicenseEligibilityRow[];
@@ -41,6 +42,8 @@ export async function stageFreePreparation(input: {
   const outstanding: Array<{
     id: string;
     human: boolean;
+    replacementConfirmation?: string;
+    exampleNotice?: string;
     missing: number[];
     sampleHashes: (string | null)[];
   }> = [];
@@ -99,7 +102,27 @@ export async function stageFreePreparation(input: {
       }
     }
     if (missing.length) {
-      outstanding.push({ id, human, missing, sampleHashes });
+      outstanding.push({
+        id,
+        human,
+        missing,
+        sampleHashes,
+        ...(human && {
+          exampleNotice: notice,
+          replacementConfirmation: licenseKeyDigest(
+            JSON.stringify([
+              input.confirmationNonce,
+              drafts.epoch,
+              id,
+              row,
+              values,
+              settings,
+              action,
+              sampleHashes,
+            ])
+          ),
+        }),
+      });
       continue;
     }
     if (human) {
@@ -152,6 +175,7 @@ export async function stageFreePreparation(input: {
   const contentRevision = input.contentRevision + Number(free.length > 0);
   const expectedUncachedRequests = outstanding.reduce((sum, row) => sum + row.missing.length, 0);
   return {
+    responses,
     artifact: { ...artifact, classifications },
     free,
     completedLaunchSelections,
@@ -161,6 +185,7 @@ export async function stageFreePreparation(input: {
         JSON.stringify([
           drafts.epoch,
           contentRevision,
+          input.estimateGeneration,
           settings,
           selection?.id,
           selection?.kind,

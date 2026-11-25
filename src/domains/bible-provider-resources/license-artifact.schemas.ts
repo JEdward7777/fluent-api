@@ -112,12 +112,24 @@ const reviewSnapshot = z
   })
   .strict();
 
+// A displaced working decision has never received Save-time attribution.
+const pendingReviewSnapshot = reviewSnapshot.omit({ rowNoteProvenance: true }).extend({
+  source: z.literal('manual'),
+  reviewState: z.literal('pending_human_review'),
+  reviewComment: z.string().max(2000).nullable(),
+  rationale: z.null(),
+  rowNote: z.null(),
+  decisionAt: z.null(),
+  reviewedBy: z.null(),
+  humanReviewedAt: z.null(),
+});
+
 export const licenseClassificationSchema = v3ClassificationSchema.extend({
   exampleNotice: z.string().nullable(),
   rationale: z.union([text, z.literal('')]),
   reviewComment: text.optional(),
   rowNoteProvenance: rowNoteProvenance.optional(),
-  reviewHistory: z.array(reviewSnapshot).optional(),
+  reviewHistory: z.array(z.union([reviewSnapshot, pendingReviewSnapshot])).optional(),
 });
 
 const artifactShape = {
