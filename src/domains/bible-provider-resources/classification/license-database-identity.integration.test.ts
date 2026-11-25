@@ -14,6 +14,7 @@ import { exerciseDeferredRetirement } from './license-output-retirement.test-fix
 import {
   exerciseBothDrift,
   exerciseDelayedSave,
+  exerciseSavedSourceDrift,
   withEmptyLicenseTarget,
 } from './license-save-fence.test-fixtures';
 import {
@@ -428,6 +429,15 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
           operationId: 'save-source',
         });
         expect(await reviewer(source)).toBe('Saved as reviewer');
+        const unchanged = await workflow.preview(1, 2);
+        expect(unchanged.plan.databaseChanges.updated).toEqual([]);
+        expect(unchanged.plan.databaseArtifact?.classifications).toEqual([]);
+        await workflow.save({
+          ...request,
+          previewToken: unchanged.token,
+          operationId: 'save-source-again',
+        });
+        expect(await reviewer(source)).toBe('Saved as reviewer');
         const reloaded = new LicenseWorkflow(options, {
           ...dependencies,
           database: async () => createOwnedLicenseDatabaseAdapter(sourceUrl, undefined, 'source'),
@@ -440,6 +450,7 @@ describe.runIf(process.env.LICENSE_IDENTITY_POSTGRES_TEST === '1')(
         } finally {
           await reloaded.close();
         }
+        await exerciseSavedSourceDrift(workflow, source, key);
       } finally {
         await Promise.all([workflow.close(), copy.close!(), f.cleanup()]);
       }

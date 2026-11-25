@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 
 import type { LicenseCommandOptions } from './license-command-options';
-import type { StoredLicenseClassification } from './license-database.types';
 import type { LicenseWorkflow } from './license-workflow';
 
 import { checkLicenseArtifactReview } from '../license-artifact';
@@ -13,15 +12,13 @@ export function licenseWorkbenchPreviewView(input: {
   destinationDatabaseTarget: string;
   options: LicenseCommandOptions;
   configurationRevision: number;
-  policyBaseline?: StoredLicenseClassification[];
   practiceMode: boolean;
 }) {
-  const { workflow, options, configurationRevision, policyBaseline, practiceMode } = input;
+  const { workflow, options, configurationRevision, practiceMode } = input;
   const preview = workflow?.previewed;
   if (!preview) return null;
   const impact = preview.reports.model.impact;
   const review = checkLicenseArtifactReview(preview.candidate.artifact);
-  void policyBaseline;
   return {
     token: preview.token,
     reviewer: preview.reviewer,

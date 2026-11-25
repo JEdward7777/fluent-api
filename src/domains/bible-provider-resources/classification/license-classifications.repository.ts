@@ -201,6 +201,8 @@ export async function applyClassifications(
           ),
         });
     }
+    if (identity?.capturePolicy)
+      identity.capturePolicy(await loadClassificationSnapshot(tx, console));
     if (capture) identity?.registerFence?.(await capture());
     await beforeCommit?.();
   };

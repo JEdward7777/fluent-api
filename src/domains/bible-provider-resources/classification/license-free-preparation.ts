@@ -19,7 +19,7 @@ export interface FreeSelection {
 }
 
 export async function stageFreePreparation(input: {
-  completedLaunchSelections: ReadonlySet<string>;
+  completedLaunchSelections: Pick<ReadonlySet<string>, 'has'>;
   confirmationNonce: string;
   estimateGeneration: string;
   artifact: LicenseArtifact;
@@ -43,7 +43,7 @@ export async function stageFreePreparation(input: {
     id: string;
     human: boolean;
     replacementConfirmation?: string;
-    exampleNotice?: string;
+    exampleNotice: string;
     missing: number[];
     sampleHashes: (string | null)[];
   }> = [];
@@ -105,10 +105,10 @@ export async function stageFreePreparation(input: {
       outstanding.push({
         id,
         human,
+        exampleNotice: notice,
         missing,
         sampleHashes,
         ...(human && {
-          exampleNotice: notice,
           replacementConfirmation: licenseKeyDigest(
             JSON.stringify([
               input.confirmationNonce,

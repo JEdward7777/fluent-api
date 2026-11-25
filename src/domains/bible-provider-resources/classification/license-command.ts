@@ -182,7 +182,11 @@ export async function runLicenseCommand(
       workflow.status.contentRevision
     );
     await emitReports(preview.reports);
-    const changes = (label: string, operation: string, value: typeof preview.plan.jsonChanges) =>
+    const changes = (
+      label: string,
+      operation: string,
+      value: typeof preview.plan.databaseChanges
+    ) =>
       `${label} ${operation}: ${value.inserted.length} inserts, ${value.updated.length} updates, ${value.preserved.length} preserved, ${value.unchanged.length} unchanged (${value.permissionChanges.length} permission updates, ${value.metadataChanges.length} metadata-only updates)`;
     await io.write(
       preview.plan.jsonArtifact
@@ -193,6 +197,14 @@ export async function runLicenseCommand(
           )
         : 'JSON remains unchanged'
     );
+    if (preview.plan.jsonChanges.deleted.length)
+      await io.write(
+        `JSON classification deletions: ${preview.plan.jsonChanges.deleted.join(' | ')}`
+      );
+    if (preview.plan.jsonChanges.deletedCatalog.length)
+      await io.write(
+        `JSON catalog deletions: ${preview.plan.jsonChanges.deletedCatalog.map(({ provider, externalId }) => `${provider}/${externalId}`).join(' | ')}`
+      );
     await io.write(
       preview.plan.databaseArtifact
         ? changes(

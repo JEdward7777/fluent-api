@@ -4,7 +4,6 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { LicenseCommandOptions } from './license-command-options';
-import type { StoredLicenseClassification } from './license-database.types';
 import type { LicensePractice } from './license-practice';
 import type { WorkbenchDatabase } from './license-workbench-database';
 import type { RecordedOperation } from './license-workbench-operation.types';
@@ -12,7 +11,7 @@ import type { LicenseRerunSelection } from './license-workbench-rerun';
 import type { LicenseReviewQuery } from './license-workbench-review';
 import type { setupSchema } from './license-workbench-schema';
 import type { LicenseWorkflow } from './license-workflow';
-import type { LicenseInspection, LicenseWorkflowDependencies } from './license-workflow.types';
+import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
 import {
   selectWorkbenchDatabase,
@@ -43,9 +42,7 @@ export class LicenseWorkbenchConfiguration {
   private readonly launchId = randomUUID();
   protected workflow?: LicenseWorkflow;
   protected configurationRevision = 1;
-  protected inspected?: Pick<LicenseInspection, 'inspectedAt' | 'preflight'>;
-  protected sourceHash?: string;
-  protected policyBaseline?: StoredLicenseClassification[];
+
   protected databaseConnection: WorkbenchDatabase = { mode: 'environment' };
   protected readonly databaseTests = new LicenseWorkbenchDatabaseTests();
   protected destinationConnection: WorkbenchDatabase = { mode: 'environment' };
@@ -163,9 +160,6 @@ export class LicenseWorkbenchConfiguration {
         practice: this.practice,
         selectedPracticePath: this.selectedPracticePath,
         configurationRevision: this.configurationRevision,
-        inspected: this.inspected,
-        sourceHash: this.sourceHash,
-        policyBaseline: this.policyBaseline,
         databaseTarget: this.practiceMode
           ? 'Offline practice: no database connection or provider requests'
           : workbenchDatabaseIdentity(legacy.connection),
@@ -364,14 +358,8 @@ export class LicenseWorkbenchConfiguration {
         source: this.loadedOptions?.source ?? options.source,
         input: this.loadedOptions?.input ?? options.input,
       };
-      const inspection = await this.workflow.configureLoadedSettings(
-        loadedOptions,
-        destinationChanged,
-        aiChanged
-      );
+      await this.workflow.configureLoadedSettings(loadedOptions, destinationChanged, aiChanged);
       if (this.loadedOptions) this.loadedOptions = loadedOptions;
-      if (inspection)
-        this.inspected = { inspectedAt: inspection.inspectedAt, preflight: inspection.preflight };
     }
     this.configurationRevision++;
     this.options = options;

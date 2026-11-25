@@ -14,6 +14,16 @@ export function licenseWorkbenchPreviewLines(next) {
     preview.json
       ? `JSON ${preview.json.operation}: ${preview.json.inserted.length} inserts, ${preview.json.updated.length} updates (${preview.json.permissionChanges.length} permission, ${preview.json.metadataChanges.length} metadata only), ${preview.json.preserved.length} preserved, ${preview.json.unchanged.length} unchanged. File contains ${preview.json.artifactRows} rows. Whole JSON SHA-256: ${preview.json.wholeFileHash}.`
       : 'No JSON write selected.',
+    ...(preview.json?.deleted?.length
+      ? [
+          `JSON classification deletions (${preview.json.deleted.length}): ${preview.json.deleted.join(' | ')}.`,
+        ]
+      : []),
+    ...(preview.json?.deletedCatalog?.length
+      ? [
+          `JSON catalog deletions (${preview.json.deletedCatalog.length}): ${preview.json.deletedCatalog.map(({ provider, externalId }) => `${provider}/${externalId}`).join(' | ')}.`,
+        ]
+      : []),
     preview.database
       ? `Database ${preview.database.operation}: ${preview.database.inserted.length} inserts, ${preview.database.updated.length} updates (${preview.database.permissionChanges.length} permission, ${preview.database.metadataChanges.length} metadata only), ${preview.database.preserved.length} preserved, ${preview.database.unchanged.length} unchanged; no deletes or resource-cache writes. Forecast review SHA-256: ${preview.database.reviewContentHash}.`
       : 'Database remains unchanged.',

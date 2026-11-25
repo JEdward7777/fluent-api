@@ -38,6 +38,7 @@ export interface LicensePreflight {
 
 /** Mirrors analysis precedence and the structured-request cache validation without transport calls. */
 export async function inspectLicensePreflight(input: {
+  source?: 'json' | 'database';
   database?: LicenseDatabaseSnapshot;
   reviewedRuleSelection?: boolean;
   priorNotices?: (string | null)[];
@@ -70,13 +71,14 @@ export async function inspectLicensePreflight(input: {
     stored.set(row.normalizedText, decision);
   }
   for (const row of input.jsonClassifications ?? []) stored.set(row.normalizedText, row);
+  const source = input.source ?? (input.database ? 'database' : 'json');
   const rows = planLicenseEligibility({
     reviewedRuleSelection: input.reviewedRuleSelection,
     notices,
     stored,
     ruleDigests: input.rerunRule ?? [],
     modelDigests: input.rerunModel ?? [],
-    source: input.database ? 'database' : 'json',
+    source,
   });
   for (const row of rows) {
     if (row.action === 'retain') {
@@ -125,9 +127,9 @@ export async function inspectLicensePreflight(input: {
   const validCacheHits = samples.filter((sample) => sample.validCacheHit).length;
   const expectedUncachedRequests = samples.length - validCacheHits;
   return {
-    source: input.database ? 'database' : 'json',
+    source,
     distinctKeys: rows.length,
-    historicalClassificationKeys: input.database ? 0 : stored.size,
+    historicalClassificationKeys: source === 'database' ? 0 : stored.size,
     tableHits,
     ruleHits,
     modelKeys,

@@ -5,6 +5,14 @@ export type IdentityTransaction = Parameters<
   Parameters<typeof import('@/db').db.transaction>[0]
 >[0];
 
+export async function requireLoadedSourceMarker(tx: IdentityTransaction, marker: string) {
+  const [row] = await tx.execute<{ marker: string | null }>(
+    sql`SELECT current_setting('fluent.license_loaded_source', true) AS marker`
+  );
+  if (row.marker !== marker)
+    throw new Error('The loaded database connection changed. Select and load it explicitly.');
+}
+
 export interface LicenseRelation {
   database: string;
   relation: string;

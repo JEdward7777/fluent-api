@@ -10,7 +10,7 @@ afterEach(async () => {
 });
 
 describe('local license preview, attestation and report export', () => {
-  it('hides inspected source details after detected preview drift', async () => {
+  it('retains inspected source details for reconciliation after detected preview drift', async () => {
     const fixture = await makeCommandFixture(false);
     const previousKey = process.env.GOOGLE_AI_API_KEY;
     process.env.GOOGLE_AI_API_KEY = 'offline-test-key';
@@ -51,10 +51,11 @@ describe('local license preview, attestation and report export', () => {
         ).status
       ).toBe(409);
       const after = await (await api('setup')).json();
-      expect(after.state).toBe('configuring');
-      expect(after.inspected).toBeNull();
+      expect(after.state).toBe('reviewing');
+      expect(after.sourceChanged).toBe(true);
+      expect(after.inspected).toEqual(before.inspected);
       expect(after.preview).toBeNull();
-      expect(after.analysis).toBeNull();
+      expect(after.analysis).toEqual(before.analysis);
     } finally {
       if (previousKey === undefined) delete process.env.GOOGLE_AI_API_KEY;
       else process.env.GOOGLE_AI_API_KEY = previousKey;

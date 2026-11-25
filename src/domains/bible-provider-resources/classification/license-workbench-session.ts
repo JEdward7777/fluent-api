@@ -1,7 +1,5 @@
 import type { z } from 'zod';
 
-import { createHash } from 'node:crypto';
-
 import type { PaidAuthorization } from './license-paid-batch';
 import type { LicensePractice } from './license-practice';
 import type { DraftCommand } from './license-review-drafts';
@@ -19,6 +17,17 @@ import { LicenseWriteUncertainError } from './license-write';
 
 export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
   private uncertainReceipt?: VisibleOperation['result'];
+
+  reconcileSource(resolution?: {
+    token: string;
+    choices: Record<string, 'working' | 'source' | 'source-with-mark'>;
+  }) {
+    this.requireSelectedSourceLoaded();
+    const workflow = this.workflow;
+    if (!workflow || this.activeOperationId)
+      throw new Error('Source reconciliation is unavailable');
+    return this.reserve(() => workflow.reconcileSource(resolution));
+  }
 
   async reconcileSave(operationId: string) {
     const operation = this.operations.get(operationId)?.snapshot;
@@ -148,7 +157,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     };
     this.pendingLoad = promise
       .then(
-        async (result) => {
+        async () => {
           if (kind === 'inspect') {
             this.loadRevision++;
             if (this.options.source === 'database' && !this.destinationInitialized) {
@@ -176,15 +185,6 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
               await closeReplacedWorkflow(prior, priorPractice);
             }
           }
-          if (kind === 'inspect' && 'preflight' in result)
-            this.inspected = { inspectedAt: result.inspectedAt, preflight: result.preflight };
-          if (kind === 'inspect' && 'inputBytes' in result)
-            this.sourceHash =
-              result.inputBytes === null
-                ? undefined
-                : createHash('sha256').update(result.inputBytes).digest('hex');
-          if (kind === 'inspect' && 'database' in result)
-            this.policyBaseline = result.database?.classifications;
           operation.state = 'succeeded';
         },
         async (error: unknown) => {
@@ -378,7 +378,20 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     this.activeOperationId = body.operationId;
     this.latestOperationId = body.operationId;
     this.latestSaveOperationId = body.operationId;
+    const changes = preview.plan.jsonChanges;
     const receipt = {
+      json: preview.plan.jsonArtifact
+        ? {
+            inserted: changes.inserted.length,
+            updated: changes.updated.length,
+            metadataChanges: changes.metadataChanges.length,
+            permissionChanges: changes.permissionChanges.length,
+            preserved: changes.preserved.length,
+            unchanged: changes.unchanged.length,
+            deleted: changes.deleted,
+            deletedCatalog: changes.deletedCatalog,
+          }
+        : undefined,
       wholeFileHash: preview.plan.wholeFileHash,
       targets: preview.plan.targets.map((target) => ({
         path: target.path,

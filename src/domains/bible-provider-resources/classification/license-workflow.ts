@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
 import type { LicenseCommandOptions } from './license-command-options';
-import type { LicenseDatabaseAdapter } from './license-database.types';
 import type {
   LicenseAnalysis,
   LicenseInspection,
@@ -19,16 +18,14 @@ import { freezeReviewValue } from '../license-review-revision';
 import { LicenseAnalysisStoppedError } from './license-analysis';
 import { LicensePolicyDriftError } from './license-database.types';
 import { LicenseDestinationRecheckError, LicenseInspectionStaleError } from './license-freshness';
+import { LicenseSourceReconciliation } from './license-source-reconciliation';
 import { analyzeInspectedLicenses } from './license-workflow-analyze';
-import { LicenseWorkflowDestination } from './license-workflow-destination';
 import {
   inspectLicenseWorkflowInputs,
-  inspectLoadedLicensePreflight,
   loadedLicenseReview,
   requirePracticeOptions,
 } from './license-workflow-inspect';
 import { LicenseOperationRegistry } from './license-workflow-operations';
-import { LicenseWorkflowPreparation } from './license-workflow-preparation';
 import { exportPreviewedLicenseReport } from './license-workflow-report-export';
 import {
   compensatedLicenseInspection,
@@ -46,10 +43,8 @@ import {
 
 export type { LicenseReviewEdit } from './license-workflow.types';
 
-export class LicenseWorkflow extends LicenseWorkflowPreparation {
+export class LicenseWorkflow extends LicenseSourceReconciliation {
   protected options: LicenseCommandOptions;
-  private database?: LicenseDatabaseAdapter;
-  private readonly destination = new LicenseWorkflowDestination();
   protected inspection?: LicenseInspection;
   private previewReviewer = '';
   private previewPromise?: Promise<LicensePreview>;
@@ -58,6 +53,7 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
     request: LicenseSaveRequest;
     preview: LicensePreview;
     error: LicenseWriteUncertainError;
+    capture: Partial<LicenseInspection>;
   };
   private readonly saveOperations = new Map<string, LicenseSaveOperation>();
   private readonly operations = new LicenseOperationRegistry();
@@ -85,35 +81,6 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
     return this.status;
   }
 
-  async configureLoadedSettings(
-    options: LicenseCommandOptions,
-    destinationChanged: boolean,
-    aiChanged: boolean
-  ) {
-    this.requireRevision(this.configurationRevision);
-    if (this.busyDone || this.state === 'uncertain')
-      throw new Error('Cannot configure while an operation runs');
-    this.beginBusy();
-    try {
-      const preflight =
-        aiChanged && this.inspection
-          ? await inspectLoadedLicensePreflight(options, this.inspection)
-          : undefined;
-      if (destinationChanged) await this.destination.release(this.database);
-      if (preflight && this.inspection)
-        this.inspection = freezeReviewValue({ ...this.inspection, preflight });
-      this.options = freezeReviewValue(options);
-      if (aiChanged) {
-        this.invalidatePaidEstimate();
-        this.completedLaunchSelections.clear();
-      }
-      this.invalidateConfiguredPreview();
-      return this.inspection;
-    } finally {
-      this.endBusy();
-    }
-  }
-
   async configure(
     options: LicenseCommandOptions,
     expectedRevision: number,
@@ -132,6 +99,8 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
       await this.destination.closePools(this.database);
       this.database = undefined;
       this.options = freezeReviewValue(options);
+      this.sourceDrift = false;
+      this.proposal = undefined;
       this.inspection = undefined;
       this.analysis = undefined;
       this.previewResult = undefined;
@@ -255,6 +224,10 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
     reviewedBy = ''
   ): Promise<LicensePreview> {
     this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
+    if (this.sourceDrift)
+      throw new Error(
+        'The loaded source changed. Compare the source and session before previewing.'
+      );
     const reviewer = this.reviewDrafts.size ? reviewedBy.trim() : '';
     if (this.state === 'previewing' && this.previewPromise) {
       if (this.previewReviewer !== reviewer) throw new Error('Another reviewer preview is running');
@@ -264,7 +237,7 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
       this.busyDone ||
       !this.analysis ||
       !this.inspection ||
-      !['inspected', 'reviewing', 'previewed'].includes(this.state)
+      !['inspected', 'reviewing', 'previewed', 'saved'].includes(this.state)
     )
       throw new Error(`Cannot preview while ${this.state}`);
     this.previewResult = undefined;
@@ -302,7 +275,10 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
       return this.previewResult;
     } catch (error) {
       this.previewResult = undefined;
-      if (error instanceof LicenseInspectionStaleError && !this.reviewDrafts.size) {
+      if (error instanceof LicenseInspectionStaleError && inspection.sourceOnly) {
+        this.sourceDrift = true;
+        this.state = 'reviewing';
+      } else if (error instanceof LicenseInspectionStaleError && !this.reviewDrafts.size) {
         this.inspection = undefined;
         this.analysis = undefined;
         this.state = 'configuring';
@@ -368,23 +344,32 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
     preview: LicensePreview,
     inspection: LicenseInspection
   ): Promise<LicenseSaveResult> {
+    const capture: Partial<LicenseInspection> = {};
     try {
       const result = await writePreviewedLicenseSave({
+        capture,
         request,
         preview,
         options: this.options,
         ...this.destination.publication(inspection, this.database),
         fs: this.dependencies.fs,
       });
+      this.inspection = freezeReviewValue({ ...inspection, ...capture });
       this.acceptSave(preview);
       return result;
     } catch (error) {
+      if (
+        inspection.sourceOnly &&
+        (error instanceof LicenseInspectionStaleError ||
+          (error instanceof LicenseFileDriftError && !destinationSaveFailure(error, this.options)))
+      )
+        this.sourceDrift = true;
       if (error instanceof LicenseWritePreflightError)
         this.inspection = compensatedLicenseInspection(this.inspection, error.restoredFiles);
       if (
         error instanceof LicenseWritePreflightError ||
         error instanceof LicenseSavePreflightError ||
-        (this.reviewDrafts.size &&
+        ((inspection.sourceOnly || this.reviewDrafts.size) &&
           (error instanceof LicenseInspectionStaleError ||
             error instanceof LicenseFileDriftError ||
             error instanceof LicensePolicyDriftError)) ||
@@ -404,7 +389,7 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
       } else {
         this.state = 'uncertain';
         if (error instanceof LicenseWriteUncertainError)
-          this.uncertainSave = { request, preview, error };
+          this.uncertainSave = { request, preview, error, capture };
       }
       throw error;
     } finally {
@@ -425,6 +410,7 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
     try {
       const status = await pending.error.reconcile();
       if (status.outcome === 'planned') {
+        this.inspection = freezeReviewValue({ ...this.inspection!, ...pending.capture });
         this.acceptSave(pending.preview);
         const result = confirmedLicenseSave(pending.request, pending.preview);
         this.saveOperations.get(operationId)!.promise = Promise.resolve(result);
@@ -483,7 +469,10 @@ export class LicenseWorkflow extends LicenseWorkflowPreparation {
       this.state = 'previewed';
       return result;
     } catch (error) {
+      if (this.inspection?.sourceOnly && error instanceof LicenseInspectionStaleError)
+        this.sourceDrift = true;
       if (
+        this.sourceDrift ||
         error instanceof LicenseDestinationRecheckError ||
         (this.reviewDrafts.size && error instanceof LicenseInspectionStaleError)
       ) {

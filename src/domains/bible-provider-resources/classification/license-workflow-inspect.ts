@@ -1,12 +1,18 @@
 import { resolve } from 'node:path';
 
+import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { LicenseDatabaseAdapter } from './license-database.types';
 import type { LicenseInspection, LicenseWorkflowDependencies } from './license-workflow.types';
 
-import { savedLicenseNotices } from '../license-normalizer';
+import {
+  catalogLicenseNotices,
+  indexLicenseNoticeExamples,
+  savedLicenseNotices,
+} from '../license-normalizer';
 import { freezeReviewValue } from '../license-review-revision';
 import { analyzeDatabaseLicenses } from './license-analysis';
+import { licenseKeyDigest } from './license-eligibility';
 import { inspectLicenseFile, matchesLicenseFile, reviewerJsonRoot } from './license-file-identity';
 import { isIssuedLicensePractice } from './license-practice';
 import { inspectLicensePreflight } from './license-preflight';
@@ -155,6 +161,37 @@ export function inspectLoadedLicensePreflight(
     ),
     rerunRule: options.rerunRule,
     rerunModel: options.rerunModel,
+    model: options.model,
+    sampleCount: options.sampleCount,
+    cacheDir: options.cacheDir,
+    noCache: options.noCache,
+  });
+}
+
+/** Plan subsequent assessments from accepted row evidence and accepted catalog variants. */
+export function inspectWorkingLicensePreflight(
+  artifact: LicenseArtifact,
+  options: LicenseCommandOptions
+) {
+  const catalog = catalogLicenseNotices(artifact.catalog);
+  const examples = indexLicenseNoticeExamples(catalog);
+  const available = new Set(
+    artifact.classifications
+      .filter((row) => row.exampleNotice !== null || examples.has(row.normalizedText))
+      .map((row) => licenseKeyDigest(row.normalizedText))
+  );
+  return inspectLicensePreflight({
+    source: options.source,
+    reviewedRuleSelection: true,
+    jsonClassifications: artifact.classifications,
+    jsonNotices: [
+      ...artifact.classifications.flatMap((row) =>
+        row.exampleNotice === null ? [] : [row.exampleNotice]
+      ),
+      ...catalog,
+    ],
+    rerunRule: options.rerunRule?.filter((id) => available.has(id)),
+    rerunModel: options.rerunModel?.filter((id) => available.has(id)),
     model: options.model,
     sampleCount: options.sampleCount,
     cacheDir: options.cacheDir,

@@ -1,10 +1,15 @@
+import { createHash } from 'node:crypto';
+
 import type { LicenseAnalysis, LicenseInspection } from './license-workflow.types';
 
-export function visibleWorkbenchInspection(
-  inspected: Pick<LicenseInspection, 'inspectedAt' | 'preflight'> | undefined,
-  sourceHash: string | undefined
-) {
+const hashes = new WeakMap<LicenseInspection, string>();
+export function visibleWorkbenchInspection(inspected: LicenseInspection | undefined) {
   if (!inspected) return null;
+  let sourceHash = hashes.get(inspected);
+  if (!sourceHash && inspected.inputBytes !== null) {
+    sourceHash = createHash('sha256').update(inspected.inputBytes).digest('hex');
+    hashes.set(inspected, sourceHash);
+  }
   return {
     inspectedAt: inspected.inspectedAt,
     sourceHash: sourceHash ?? null,

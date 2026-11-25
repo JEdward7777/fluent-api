@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseCommandOptions } from './license-command-options';
@@ -6,8 +7,13 @@ import type { FreeSelection } from './license-free-preparation';
 import type { PaidAuthorization } from './license-paid-batch';
 import type { LicenseInspection } from './license-workflow.types';
 
-import { freezeLicenseRevision, freezeReviewValue } from '../license-review-revision';
+import {
+  freezeLicenseRevision,
+  freezeReviewValue,
+  licenseRowRevision,
+} from '../license-review-revision';
 import { LicenseAnalysisStoppedError } from './license-analysis';
+import { licenseKeyDigest } from './license-eligibility';
 import { stageFreePreparation } from './license-free-preparation';
 import { PaidBatchError, stagePaidBatch } from './license-paid-batch';
 import { LicenseWorkflowReview } from './license-workflow-review';
@@ -15,7 +21,39 @@ import { LicenseWorkflowReview } from './license-workflow-review';
 export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
   protected abstract options: LicenseCommandOptions;
   protected abstract inspection?: LicenseInspection;
-  protected readonly completedLaunchSelections = new Set<string>();
+  protected readonly completedLaunchSelections = new Map<
+    string,
+    ReturnType<typeof licenseRowRevision>
+  >();
+
+  private recordCompletedSelections(keys: string[], artifact: LicenseArtifact) {
+    if (!keys.length) return;
+    const byId = new Map(
+      artifact.classifications.map((row) => [licenseKeyDigest(row.normalizedText), row])
+    );
+    for (const key of keys) {
+      const id = key.slice(key.indexOf(':') + 1);
+      const row = byId.get(id)!;
+      this.completedLaunchSelections.set(key, licenseRowRevision(row, artifact.classificationRun));
+    }
+  }
+
+  protected reconcileCompletedSelections(
+    artifact: LicenseArtifact,
+    preflight: LicenseInspection['preflight']
+  ) {
+    const rows = new Map(artifact.classifications.map((row) => [row.normalizedText, row]));
+    const notices = new Map(preflight.rows.map((row) => [row.normalizedText, row.exampleNotice]));
+    for (const [key, basis] of this.completedLaunchSelections) {
+      const row = rows.get(basis.row.normalizedText);
+      if (
+        !row ||
+        notices.get(row.normalizedText) !== basis.row.exampleNotice ||
+        !isDeepStrictEqual(licenseRowRevision(row, artifact.classificationRun), basis)
+      )
+        this.completedLaunchSelections.delete(key);
+    }
+  }
   private estimateGeneration = randomUUID();
   protected invalidatePaidEstimate() {
     this.estimate = undefined;
@@ -99,7 +137,7 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
         staged.artifact,
         staged.free.map((row) => row.normalizedText)
       );
-    for (const key of staged.completedLaunchSelections) this.completedLaunchSelections.add(key);
+    this.recordCompletedSelections(staged.completedLaunchSelections, this.analysis.artifact);
     this.estimate = estimate;
     this.confirmationNonce = confirmationNonce;
     this.estimateGeneration = estimateGeneration;
@@ -181,7 +219,6 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
         authorization,
         artifact: this.analysis.artifact,
         options: this.options,
-        eligibility: this.inspection.preflight.rows,
         dependencies: this.dependencies,
         stop,
         progress,
@@ -191,7 +228,11 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
         result.artifact,
         result.eligibility.map((row) => row.normalizedText)
       );
-      for (const row of estimate.outstanding) this.completedLaunchSelections.add(`model:${row.id}`);
+      const launch = new Set(this.options.rerunModel);
+      this.recordCompletedSelections(
+        estimate.outstanding.filter((row) => launch.has(row.id)).map((row) => `model:${row.id}`),
+        analysis.artifact
+      );
       this.invalidatePaidEstimate();
       return analysis;
     } catch (error) {

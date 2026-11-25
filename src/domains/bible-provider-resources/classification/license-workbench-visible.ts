@@ -1,9 +1,7 @@
 import type { LicenseCommandOptions } from './license-command-options';
-import type { StoredLicenseClassification } from './license-database.types';
 import type { LicensePractice } from './license-practice';
 import type { WorkbenchDatabase } from './license-workbench-database';
 import type { LicenseWorkflow } from './license-workflow';
-import type { LicenseInspection } from './license-workflow.types';
 
 import { visibleWorkbenchDatabase } from './license-workbench-database';
 import { licenseWorkbenchPreviewView } from './license-workbench-preview-view';
@@ -22,9 +20,6 @@ export function visibleLicenseWorkbench(input: {
   practice?: LicensePractice;
   selectedPracticePath: string | null;
   configurationRevision: number;
-  inspected?: Pick<LicenseInspection, 'inspectedAt' | 'preflight'>;
-  sourceHash?: string;
-  policyBaseline?: StoredLicenseClassification[];
   databaseTarget: string;
   loadedDatabaseTarget: string | null;
   destinationDatabaseTarget: string;
@@ -39,7 +34,7 @@ export function visibleLicenseWorkbench(input: {
   const status = workflow?.status;
   const inspected =
     status && !['configuring', 'error', 'closed'].includes(status.state)
-      ? input.inspected
+      ? workflow?.inspectedSource
       : undefined;
   return {
     step: 'Choose inputs',
@@ -71,7 +66,7 @@ export function visibleLicenseWorkbench(input: {
     databaseConnection: visibleWorkbenchDatabase(input.databaseConnection),
     databaseTest: input.databaseTest,
     testingDatabase: input.testingDatabase,
-    inspected: visibleWorkbenchInspection(inspected, input.sourceHash),
+    inspected: visibleWorkbenchInspection(inspected),
     analysis: visibleWorkbenchAnalysis(workflow?.analyzed, workflow?.reviewDrafts.size ?? 0),
     preview: licenseWorkbenchPreviewView({
       workflow,
@@ -79,9 +74,9 @@ export function visibleLicenseWorkbench(input: {
       destinationDatabaseTarget: input.destinationDatabaseTarget,
       options: input.loadedOptions ?? options,
       configurationRevision: input.configurationRevision,
-      policyBaseline: input.policyBaseline,
       practiceMode: input.practiceMode,
     }),
+    sourceChanged: workflow?.sourceChanged ?? false,
     saveOutcome: input.saveOutcome,
     activeOperationId: input.activeOperationId ?? null,
     latestOperation: input.latestOperation,

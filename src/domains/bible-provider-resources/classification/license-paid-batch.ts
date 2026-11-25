@@ -2,7 +2,6 @@ import { createGoogleTransport } from '@/lib/llm/google-transport';
 
 import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseCommandOptions } from './license-command-options';
-import type { LicenseEligibilityRow } from './license-eligibility';
 import type { stageFreePreparation } from './license-free-preparation';
 import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
@@ -23,7 +22,6 @@ export async function stagePaidBatch(input: {
   authorization: PaidAuthorization;
   artifact: LicenseArtifact;
   options: LicenseCommandOptions;
-  eligibility: LicenseEligibilityRow[];
   dependencies: LicenseWorkflowDependencies;
   stop: () => boolean;
   progress: { attempts: number; completedRows: number };
@@ -46,13 +44,12 @@ export async function stagePaidBatch(input: {
     throw new PaidBatchError('Confirm the selected human replacements for this estimate.');
   if (!dependencies.apiKey.trim() || dependencies.practice)
     throw new Error('GOOGLE_AI_API_KEY is required for a paid batch');
-  const outstanding = new Set(estimate.outstanding.map((row) => row.id));
-  const notices = new Map(input.eligibility.map((row) => [row.normalizedText, row.exampleNotice]));
+  const notices = new Map(estimate.outstanding.map((row) => [row.id, row.exampleNotice]));
   const eligibility = input.artifact.classifications
-    .filter((row) => outstanding.has(licenseKeyDigest(row.normalizedText)))
+    .filter((row) => notices.has(licenseKeyDigest(row.normalizedText)))
     .map((row) => ({
       normalizedText: row.normalizedText,
-      exampleNotice: notices.get(row.normalizedText) ?? row.exampleNotice!,
+      exampleNotice: notices.get(licenseKeyDigest(row.normalizedText))!,
       action: 'model' as const,
       reason: 'Authorized paid classification',
       savedEvidenceReuse: false,

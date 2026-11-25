@@ -21,7 +21,7 @@ function eventInstant(value: string | null | undefined) {
   return value == null ? null : Date.parse(value);
 }
 
-export function ownedDecision(row: LicenseClassification, includeDecisionAt = true): string {
+function ownedDecision(row: LicenseClassification, includeDecisionAt = true): string {
   return hashCanonicalJson({
     ...ownedLicenseClassification(row, includeDecisionAt),
     decisionAt: includeDecisionAt ? eventInstant(row.decisionAt) : null,

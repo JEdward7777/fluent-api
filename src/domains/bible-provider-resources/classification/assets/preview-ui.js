@@ -22,7 +22,7 @@ export function renderExactPreview(
     practiceBusy ||
     settingsBusy ||
     Boolean(next.activeOperationId) ||
-    !['reviewing', 'previewed'].includes(next.state);
+    !['inspected', 'reviewing', 'previewed', 'saved'].includes(next.state);
   const attestation = document.getElementById('attestation');
   attestation.hidden =
     !next.preview ||

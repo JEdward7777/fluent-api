@@ -16,6 +16,7 @@ import {
   availableLicenseRelation,
   issueLicenseChallenge,
   proveLicenseDatabase,
+  requireLoadedSourceMarker,
 } from './license-database-identity';
 import { sameLicenseDatabaseSnapshot } from './license-freshness';
 import { licenseSyncGuidance } from './license-sync-policy';
@@ -140,9 +141,12 @@ export function createOwnedLicenseDatabaseAdapter(
         const proof = challenge ? await proveLicenseDatabase(tx, challenge) : undefined;
         return { snapshot, proof, marker };
       }),
-    load: (selected) =>
+    load: (selected, expectedSourceMarker) =>
       (selected === 'source' ? drizzle(sourcePool(), { schema }) : database).transaction(
-        loadSnapshot
+        async (tx) => {
+          if (expectedSourceMarker) await requireLoadedSourceMarker(tx, expectedSourceMarker);
+          return loadSnapshot(tx);
+        }
       ),
     apply: (artifact, replace, beforeCommit, force, expectedPolicy, identity) =>
       repo.applyClassifications(

@@ -46,7 +46,7 @@ export interface LicenseDatabaseAdapter {
   loadSource?: () => Promise<LicenseDatabaseSnapshot>;
   challenge?: (sourceMarker?: string) => ChallengeConnection;
   prove?: (challenge?: ChallengeConnection) => Promise<DatabaseProof>;
-  load: (role?: 'source') => Promise<LicenseDatabaseSnapshot>;
+  load: (role?: 'source', expectedSourceMarker?: string) => Promise<LicenseDatabaseSnapshot>;
   apply: (
     artifact: LicenseArtifact,
     replace: boolean,
@@ -55,6 +55,7 @@ export interface LicenseDatabaseAdapter {
     expectedPolicy?: StoredLicenseClassification[],
     identity?: {
       expectedContext?: LicenseDatabaseSnapshot['context'];
+      capturePolicy?: (snapshot: LicenseDatabaseSnapshot) => void;
       registerFence?: (fence: DatabaseFence) => void;
       marker?: string;
       expected?: DatabaseProof;

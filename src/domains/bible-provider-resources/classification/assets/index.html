@@ -335,6 +335,12 @@
             <button id="normal-save-button" type="button" disabled>Save previewed decisions</button>
           </div>
         </section>
+        <section id="source-drift" hidden>
+          <h3>The loaded source changed</h3>
+          <button type="button" id="source-inspect">Compare source and session</button>
+          <form id="source-resolution" hidden></form>
+          <p id="source-resolution-status" role="status"></p>
+        </section>
         <p id="session-save-status" role="status" hidden></p>
         <button id="reconcile-save" type="button" hidden>Check actual Save targets</button>
         <p id="save-result" role="status" hidden></p>

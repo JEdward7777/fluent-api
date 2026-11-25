@@ -131,6 +131,7 @@ export function saveStatusUnconfirmed() {
 export function initSave(dependencies) {
   ({ request, getSetup, refresh, recover, hasDraft, isBlocked, setPracticeBusy } = dependencies);
   document.getElementById('practice-save').addEventListener('click', () => void practiceSave());
+  document.getElementById('source-inspect')?.addEventListener('click', inspectSourceChanges);
   agreement.addEventListener('change', () => renderSave(getSetup()));
   button.addEventListener('click', () => void startSave());
   document.getElementById('reconcile-save')?.addEventListener('click', async (event) => {
@@ -164,7 +165,72 @@ function describeRecovery(recovery) {
     : '';
 }
 
+async function inspectSourceChanges() {
+  if (hasDraft() || isBlocked() || unresolved) return;
+  const form = document.getElementById('source-resolution');
+  const status = document.getElementById('source-resolution-status');
+  try {
+    const proposal = await request('source/reconcile', 'POST', {});
+    form.replaceChildren();
+    for (const change of proposal.changes) {
+      const details = document.createElement('details');
+      const title = document.createElement('summary');
+      title.textContent = change.label + (change.conflict ? ' (conflict)' : '');
+      const records = document.createElement('pre');
+      records.textContent = JSON.stringify(
+        {
+          original: change.original,
+          working: change.working,
+          pending: change.pending,
+          source: change.source,
+        },
+        null,
+        2
+      );
+      details.append(title, records);
+      const control = document.createElement('select');
+      control.name = change.id;
+      control.setAttribute('aria-label', change.label);
+      control.required = change.conflict;
+      const proposed =
+        change.proposed === 'working' ? 'Keep session version' : 'Use refreshed source';
+      control.add(new Option(change.conflict ? 'Choose a version' : `Proposed: ${proposed}`, ''));
+      control.add(new Option('Keep session version', 'working'));
+      control.add(
+        new Option(
+          change.source === null ? 'Accept deletion from source' : 'Use refreshed source',
+          'source'
+        )
+      );
+      if (change.pending && change.source)
+        control.add(new Option('Use refreshed source and keep pending mark', 'source-with-mark'));
+      form.append(details, control);
+    }
+    const accept = document.createElement('button');
+    accept.textContent = 'Accept reconciliation';
+    form.append(accept);
+    form.hidden = false;
+    status.textContent = '';
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      if (hasDraft() || isBlocked() || unresolved) return;
+      try {
+        const choices = Object.fromEntries([...new FormData(form)].filter(([, value]) => value));
+        await request('source/reconcile', 'POST', { token: proposal.token, choices });
+        form.hidden = true;
+        await refresh();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
 export function renderSave(setup) {
+  const drift = document.getElementById('source-drift');
+  if (drift) drift.hidden = !setup.sourceChanged || setup.state !== 'reviewing';
   if (!setup) return;
   panel.hidden = setup.practice || (!setup.preview && !setup.saveOutcome);
   const reconcile = document.getElementById('reconcile-save');
@@ -214,7 +280,18 @@ export function renderSave(setup) {
   const outcome = setup.saveOutcome;
   if (outcome?.state === 'succeeded') {
     const saved = outcome.result;
-    result.textContent = `Save completed. Operation ${outcome.operationId}. ${saved.targets.map((target) => `${target.role} written: ${target.path} (SHA-256 ${target.hash}).`).join(' ')} ${saved.policy ? `Policy changed: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates, ${saved.policy.deletes} deletes.${saved.policy.preserved !== undefined ? ` ${saved.policy.preserved} destination records preserved.` : ''}${saved.policy.reviewContentHash ? ` Database review SHA-256 ${saved.policy.reviewContentHash}.` : ''} No resource-cache rows were written by Save.` : 'No policy rows were written.'}`;
+    const json = saved.json;
+    const jsonSummary = json
+      ? `JSON decisions: ${json.inserted} inserts, ${json.updated} updates (${json.permissionChanges} permission, ${json.metadataChanges} metadata only), ${json.preserved} preserved, ${json.unchanged} unchanged, ${json.deleted.length} deletions.`
+      : '';
+    const deletions = [
+      ...(json?.deleted ?? []),
+      ...(json?.deletedCatalog ?? []).map(
+        ({ provider, externalId }) => `${provider}/${externalId}`
+      ),
+    ];
+    const deleted = deletions.length ? ` Deleted from JSON: ${deletions.join(' | ')}.` : '';
+    result.textContent = `Save completed. Operation ${outcome.operationId}. ${saved.targets.map((target) => `${target.role} written: ${target.path} (SHA-256 ${target.hash}).`).join(' ')} ${jsonSummary}${deleted} ${saved.policy ? `Policy changed: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates, ${saved.policy.deletes} deletes.${saved.policy.preserved !== undefined ? ` ${saved.policy.preserved} destination records preserved.` : ''}${saved.policy.reviewContentHash ? ` Database review SHA-256 ${saved.policy.reviewContentHash}.` : ''} No resource-cache rows were written by Save.` : 'No policy rows were written.'}`;
   } else if (outcome?.state === 'failed') {
     const recoveryText = describeRecovery(outcome.recovery);
     const checked = outcome.reconciliation;

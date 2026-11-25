@@ -51,7 +51,8 @@ export async function requireFreshLicenseSources(
   options: LicenseCommandOptions,
   fs: LicenseFileIo,
   adapter?: LicenseDatabaseAdapter,
-  destinationOnly = false
+  destinationOnly = false,
+  expectedSourceMarker?: string
 ) {
   const checkInput = !destinationOnly && options.source === 'json';
   if (checkInput && inspected.inputIdentity && !(await matchesLicenseFile(inspected.inputIdentity)))
@@ -74,7 +75,7 @@ export async function requireFreshLicenseSources(
     throw new LicenseInspectionStaleError();
   const database =
     !destinationOnly && options.source === 'database' && adapter?.loadSource
-      ? await adapter?.load('source')
+      ? await adapter?.load('source', expectedSourceMarker)
       : await adapter?.load();
   if (!sameLicenseDatabaseSnapshot(database, inspected.database))
     throw new LicenseInspectionStaleError();

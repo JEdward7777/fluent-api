@@ -19,6 +19,16 @@ export interface VisibleOperation {
   result?: {
     wholeFileHash: string;
     targets: Array<{ path: string; role: 'output' | 'signed-source'; hash: string }>;
+    json?: {
+      inserted: number;
+      updated: number;
+      metadataChanges: number;
+      permissionChanges: number;
+      preserved: number;
+      unchanged: number;
+      deleted: string[];
+      deletedCatalog: Array<{ provider: string; externalId: string }>;
+    };
     policy: {
       inserts: number;
       updates: number;

@@ -131,6 +131,7 @@ export async function writeLicenseDestinations(options: {
   databaseIdentity?: Parameters<LicenseDatabaseAdapter['apply']>[5];
   checkAbortedDatabase?: DatabaseFence;
   targetIdentity?: LicenseFileIdentity;
+  captureFile?: (path: string, inode?: string) => void;
   checkSourceBeforePublish?: () => Promise<void>;
   checkFileIdentities?: () => Promise<void>;
 }) {
@@ -275,6 +276,7 @@ export async function writeLicenseDestinations(options: {
       staged.push(stagedFile);
       await stageTemporary(fs, stagedFile.temporary, bytes);
       stagedFile.stagedInode = stagedFile.temporary.inode;
+      options.captureFile?.(stagedFile.path, stagedFile.stagedInode);
     }
     await requireExpectedFiles();
     const publish = async () => {

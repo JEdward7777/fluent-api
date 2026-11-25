@@ -27,6 +27,7 @@ import {
   setupSchema,
 } from './license-workbench-schema';
 import { LicenseWorkbenchSession } from './license-workbench-session';
+import { registerSourceReconciliation } from './license-workbench-source';
 
 const assetDirectory = join(dirname(fileURLToPath(import.meta.url)), 'assets');
 const assets = new Map<string, readonly [string, string]>([
@@ -373,6 +374,7 @@ function createLicenseWorkbenchApp(
       return c.text(error instanceof Error ? error.message : 'Save failed', 409);
     }
   });
+  registerSourceReconciliation(app, session);
   app.post('/api/save/reconcile', async (c) => {
     const parsed = z
       .object({ operationId: z.string().uuid() })

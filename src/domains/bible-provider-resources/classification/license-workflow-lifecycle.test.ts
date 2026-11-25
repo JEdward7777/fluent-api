@@ -123,8 +123,9 @@ describe('license workflow operation lifecycle', () => {
       await expect(
         workflow.exportReport({ ...request, operationId: 'source-drift' })
       ).rejects.toThrow('Inspected inputs changed');
-      expect(workflow.status.state).toBe('configuring');
-      expect(workflow.analyzed).toBeUndefined();
+      expect(workflow.status.state).toBe('reviewing');
+      expect(workflow.analyzed).toEqual(edit.analysis);
+      expect(workflow.sourceChanged).toBe(true);
       await expect(readFile(request.path)).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       await workflow.close();

@@ -138,6 +138,15 @@ describe('shared workflow exact-preview Save', () => {
         operationId: 'save-original',
       });
       expect(await readFile(f.input, 'utf8')).toBe(await readFile(f.output, 'utf8'));
+      const unchanged = await workflow.preview(1, 2);
+      expect(unchanged.plan.jsonChanges.updated).toEqual([]);
+      expect(unchanged.plan.jsonChanges.unchanged).toHaveLength(3);
+      await workflow.save({
+        ...request,
+        previewToken: unchanged.token,
+        operationId: 'save-original-again',
+      });
+      expect(await readFile(f.input, 'utf8')).toBe(await readFile(f.output, 'utf8'));
       const reloaded = new LicenseWorkflow(options, dependencies);
       try {
         await reloaded.inspect(1);

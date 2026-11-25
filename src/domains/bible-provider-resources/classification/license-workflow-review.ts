@@ -60,6 +60,7 @@ export abstract class LicenseWorkflowReview {
   private finishBusy?: () => void;
   protected configurationRevision = 1;
   abstract get reviewDatabaseContext(): LicenseDatabaseContext | undefined;
+  protected sourceDrift = false;
   private stateBeforeDrafts: LicenseWorkflowState = 'reviewing';
   private drafts = new LicenseReviewDrafts();
   get status() {
@@ -77,12 +78,19 @@ export abstract class LicenseWorkflowReview {
   }
   private candidate?: { baseline: LicenseAnalysis; reviewer: string; analysis: LicenseAnalysis };
   protected acceptSave(preview: LicensePreview) {
-    if (this.reviewDrafts.size) {
-      this.analysis = preview.candidate;
+    const pending = this.reviewDrafts.size;
+    this.analysis = Object.freeze({
+      ...preview.candidate,
+      ...(preview.plan.overwriteJson && preview.plan.jsonArtifact
+        ? { originalSourceArtifact: preview.plan.jsonArtifact }
+        : {}),
+      contentRevision: pending ? ++this.contentRevision : this.contentRevision,
+    });
+    if (pending)
       this.acceptPreparedRows(
         preview.candidate.artifact.classifications.map((row) => row.normalizedText)
       );
-    }
+    this.candidate = undefined;
     this.state = 'saved';
   }
 
@@ -183,7 +191,7 @@ export abstract class LicenseWorkflowReview {
       this.previewResult = undefined;
       if (!hadDrafts)
         this.stateBeforeDrafts = this.state === 'previewed' ? 'reviewing' : this.state;
-      this.state = this.drafts.size ? 'reviewing' : this.stateBeforeDrafts;
+      this.state = this.drafts.size || this.sourceDrift ? 'reviewing' : this.stateBeforeDrafts;
     }
     return result;
   }

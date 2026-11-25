@@ -10,6 +10,7 @@ import type {
 } from './license-workflow.types';
 import type { LicenseFileIo } from './license-write';
 
+import { serializeLicenseArtifact } from '../license-artifact';
 import { freezeReviewValue } from '../license-review-revision';
 import { LicensePolicyDriftError } from './license-database.types';
 import { matchesLicenseFile } from './license-file-identity';
@@ -64,6 +65,7 @@ export async function writePreviewedLicenseSave(input: {
   options: LicenseCommandOptions;
   database?: LicenseDatabaseAdapter;
   loadedSource?: { inspection: LicenseInspection; database?: LicenseDatabaseAdapter };
+  capture?: Partial<LicenseInspection>;
   fs?: LicenseFileIo;
 }): Promise<LicenseSaveResult> {
   const { request, preview, inspection, options, database, fs } = input;
@@ -102,6 +104,17 @@ export async function writePreviewedLicenseSave(input: {
       preview.plan.databaseProof ||
       inspection.database?.relation !== undefined
         ? {
+            capturePolicy:
+              preview.plan.databaseProof?.mode === 'same' &&
+              input.loadedSource?.inspection.database &&
+              input.capture
+                ? (snapshot) => {
+                    input.capture!.database = {
+                      ...input.loadedSource!.inspection.database!,
+                      classifications: snapshot.classifications,
+                    };
+                  }
+                : undefined,
             expectedContext: inspection.database?.context,
             marker: preview.plan.targetMarker,
             expected: preview.plan.databaseProof,
@@ -111,6 +124,14 @@ export async function writePreviewedLicenseSave(input: {
             ),
           }
         : undefined,
+    captureFile: (path, inode) => {
+      const source = input.loadedSource?.inspection;
+      if (!input.capture || !source || !preview.plan.overwriteJson || !preview.plan.jsonArtifact)
+        return;
+      input.capture.inputBytes = serializeLicenseArtifact(preview.plan.jsonArtifact).bytes;
+      if (source.inputIdentity && inode && path === source.inputIdentity.canonical)
+        input.capture.inputIdentity = { ...source.inputIdentity, inode, links: '1' };
+    },
     checkAbortedDatabase:
       preview.plan.targetMarker && inspection.database && database?.checkAbortedTarget
         ? (checkFiles) =>

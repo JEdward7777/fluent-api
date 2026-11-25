@@ -4,7 +4,7 @@ import { expect, vi } from 'vitest';
 
 import type { LicenseDatabaseAdapter } from './license-database.types';
 
-import { serializeLicenseArtifact } from '../license-artifact';
+import { recordHumanLicenseDecision, serializeLicenseArtifact } from '../license-artifact';
 import { createOwnedLicenseDatabaseAdapter } from './license-classifications.service';
 import { makeCommandFixture } from './license-command.test-fixtures';
 import { licenseReviewRowId } from './license-workbench-review';
@@ -359,4 +359,35 @@ export async function withEmptyLicenseTarget(
     await independent.end();
     await target.close?.();
   }
+}
+
+export async function exerciseSavedSourceDrift(
+  workflow: LicenseWorkflow,
+  source: LicenseDatabaseAdapter,
+  key: string
+) {
+  const external = recordHumanLicenseDecision(
+    workflow.analyzed!.artifact,
+    key,
+    'forbidden',
+    { reviewComment: 'The physical policy changed again.' },
+    'External editor',
+    '2026-11-25T10:00:00.000Z'
+  );
+  await source.apply(external, true);
+  await expect(workflow.preview(1, 2)).rejects.toThrow('Inspected inputs changed');
+  const proposal = await workflow.reconcileSource();
+  if (!proposal.changes) throw new Error('Missing database changes');
+  const changed = proposal.changes.find((entry) => entry.label === `Classification ${key}`);
+  expect(changed).toMatchObject({
+    conflict: false,
+    original: { row: { reviewedBy: 'Saved as reviewer' } },
+    source: { row: { reviewedBy: 'External editor' } },
+  });
+  await workflow.reconcileSource({ token: proposal.token, choices: {} });
+  expect(
+    workflow.analyzed!.artifact.classifications.find((item) => item.normalizedText === key)
+      ?.reviewedBy
+  ).toBe('External editor');
+  expect((await workflow.preview(1, 3)).plan.databaseChanges.updated).toEqual([]);
 }

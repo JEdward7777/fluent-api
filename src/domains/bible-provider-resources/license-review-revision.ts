@@ -1,3 +1,5 @@
+import type { LicenseArtifact, LicenseClassification } from './license-artifact.schemas';
+
 import { checkLicenseArtifactReview } from './license-artifact';
 
 /** Freeze detached data, including nested extensions, without retaining caller-owned aliases. */
@@ -16,4 +18,15 @@ export function freezeLicenseRevision(value: unknown) {
   const checked = checkLicenseArtifactReview(value);
   if (checked.status === 'invalid') throw new Error(checked.reason);
   return freezeReviewValue(checked.artifact);
+}
+
+/** Preserve the raw decision and the producing run for evidence that inherits it. */
+export function licenseRowRevision(
+  row: LicenseClassification,
+  run: LicenseArtifact['classificationRun']
+) {
+  return {
+    row,
+    inheritedContract: (row.samples.length || row.rule) && !row.evidenceContract ? run : undefined,
+  };
 }

@@ -7,8 +7,9 @@ import { checkLicenseArtifactReview, createLicenseArtifact } from '../license-ar
 import { computeLicenseReviewHash } from '../license-artifact.hash';
 import { licenseArtifactSchema } from '../license-artifact.schemas';
 import { normalizeLicenseNotice } from '../license-normalizer';
+import { licenseRowRevision } from '../license-review-revision';
 import { planLicenseDatabaseChanges } from './license-database-projection';
-import { ownedDecision, planLicenseDecisionMerge } from './license-decision-merge';
+import { planLicenseDecisionMerge } from './license-decision-merge';
 import { storedLicenseDecision } from './license-stored-decision';
 import { parseLicenseArtifactBytes } from './license-workflow-freshness';
 
@@ -66,7 +67,10 @@ export interface DestinationDecisionPlan {
   jsonArtifact?: LicenseArtifact;
   databaseArtifact?: LicenseArtifact;
   databaseForecast?: LicenseArtifact;
-  jsonChanges: ReturnType<typeof emptyChanges>;
+  jsonChanges: ReturnType<typeof emptyChanges> & {
+    deleted: string[];
+    deletedCatalog: Array<Pick<LicenseArtifact['catalog'][number], 'provider' | 'externalId'>>;
+  };
   databaseChanges: ReturnType<typeof emptyChanges>;
   conflicts: string[];
 }
@@ -132,7 +136,7 @@ export function planLicenseSaveDestinations(input: {
 }): DestinationDecisionPlan {
   const { destination, artifact } = input;
   const result: DestinationDecisionPlan = {
-    jsonChanges: emptyChanges(),
+    jsonChanges: { ...emptyChanges(), deleted: [], deletedCatalog: [] },
     databaseChanges: emptyChanges(),
     conflicts: [],
   };
@@ -145,12 +149,24 @@ export function planLicenseSaveDestinations(input: {
         const before = priorByKey.get(row.normalizedText);
         if (!before) result.jsonChanges.inserted.push(row.normalizedText);
         else if (
-          ownedDecision(withContract(row, artifact.classificationRun)) ===
-          ownedDecision(withContract(before, prior!.classificationRun))
+          isDeepStrictEqual(
+            licenseRowRevision(row, artifact.classificationRun),
+            licenseRowRevision(before, prior!.classificationRun)
+          )
         )
           result.jsonChanges.unchanged.push(row.normalizedText);
         else recordUpdate(result.jsonChanges, row, before);
+        priorByKey.delete(row.normalizedText);
       }
+      result.jsonChanges.deleted.push(...priorByKey.keys());
+      const catalogKeys = new Set(
+        artifact.catalog.map(({ provider, externalId }) => JSON.stringify([provider, externalId]))
+      );
+      result.jsonChanges.deletedCatalog = (prior?.catalog ?? [])
+        .filter(
+          ({ provider, externalId }) => !catalogKeys.has(JSON.stringify([provider, externalId]))
+        )
+        .map(({ provider, externalId }) => ({ provider, externalId }));
     } else {
       const sourceRows = artifact.classifications;
       const destinationRows = prior?.classifications ?? [];
