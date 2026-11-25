@@ -10,10 +10,8 @@ export function createAnalysisProgress(getSetup, render, isUnconfirmed) {
     const operation = next.latestOperation;
     const text = busy
       ? running
-        ? next.inspected?.preflight.expectedUncachedRequests === 0
-          ? 'Preparing review evidence without new model requests…'
-          : 'Analyzing the inspected evidence…'
-        : 'Starting analysis…'
+        ? 'Preparing free review evidence…'
+        : 'Starting free preparation…'
       : (error ??
         (operation?.kind === 'analysis' && operation.state === 'failed' ? operation.error : ''));
     actions.setAttribute('aria-busy', String(busy));
@@ -47,7 +45,7 @@ export function workflowStatus(next, { busy, dirty, starting }) {
   const operation = next.latestOperation;
   if (starting === 'inspect' || (operation?.kind === 'inspect' && operation.state === 'running'))
     return 'Inspecting the selected source…';
-  if (starting === 'analysis') return 'Starting analysis…';
+  if (starting === 'analysis') return 'Starting free preparation…';
   if (operation?.kind === 'inspect') {
     if (operation.state === 'failed')
       return [operation.error, operation.cleanupWarning].filter(Boolean).join(' ');
@@ -61,10 +59,9 @@ export function workflowStatus(next, { busy, dirty, starting }) {
   if (next.analysis)
     return next.practice
       ? `Practice analysis ready: ${next.analysis.rows} rows. Review the evidence below, then save only to scratch.`
-      : `Analysis ready: ${next.analysis.rows} rows. Review the evidence below before previewing changes.`;
+      : `Review available for ${next.analysis.rows} rows. Open a row to inspect its evidence.`;
   if (operation?.state === 'failed') return operation.error;
-  if (next.state === 'inspected')
-    return 'Inputs inspected. Review the request estimate, then start analysis.';
+  if (next.state === 'inspected') return 'Inputs inspected. Prepare free evidence to continue.';
   if (busy) return `${next.state}… Reloading keeps the operation.`;
   if (dirty) return 'Apply the changes or restore the applied settings.';
   return next.readyForInspect
@@ -79,6 +76,50 @@ export function evidenceActions(next, blocked, dirtySettings, dirtyRow) {
       available &&
       next.readyForInspect &&
       (next.sourceDraftPending || ['configuring', 'error'].includes(next.state)),
-    analyze: available && !next.sourceDraftPending && next.state === 'inspected',
+    analyze:
+      available &&
+      !next.sourceDraftPending &&
+      (next.state === 'inspected' ||
+        (!next.practice && ['reviewing', 'previewed', 'saved'].includes(next.state))),
   };
+}
+
+export function ruleNonmatchMessage(estimate) {
+  const count = estimate?.unmatchedRuleIds?.length;
+  if (!count) return '';
+  return estimate.selection || count === 1
+    ? 'No rule matched the selected notice. Its decision was kept.'
+    : `No rule matched ${count} selected notices. Their decisions were kept.`;
+}
+
+export function inspectionSummary(next, dirtySettings) {
+  const loaded = next.inspected;
+  if (!loaded) return '';
+  const inventory = `Inspected ${loaded.inspectedAt}. ${loaded.preflight.distinctKeys} distinct keys.`;
+  if (next.practice) return `${inventory} Offline practice uses saved evidence.`;
+  if (dirtySettings)
+    return `${inventory} Apply or restore your settings to see the current estimate.`;
+  if (next.sourceDraftPending)
+    return `${inventory} Inspect the newly selected source for its estimate.`;
+  const estimate = next.paidEstimate;
+  if (!estimate || estimate.contentRevision !== next.contentRevision)
+    return `${inventory} The estimate needs refreshing. Click Prepare free evidence to recalculate it.`;
+  const nonmatch = ruleNonmatchMessage(estimate);
+  const requests = estimate.expectedUncachedRequests;
+  const scope = estimate.selection ? 'Selected row' : 'Loaded source';
+  const revision = `${scope}, revision ${estimate.contentRevision}.`;
+  if (!requests) {
+    const outcome =
+      [nonmatch, estimate.replacements.length ? 'Free replacement awaits confirmation.' : '']
+        .filter(Boolean)
+        .join(' ') || 'No AI work needed.';
+    return `${inventory} ${revision} 0 outstanding model requests. ${outcome}`;
+  }
+  const ruleResult = nonmatch ? ` ${nonmatch}` : '';
+  const protectedRows =
+    estimate.outstanding?.some((row) => row.human) || estimate.replacements.length;
+  const humanReview = protectedRows
+    ? ' Replacing a selected human decision requires confirmation.'
+    : '';
+  return `${inventory} ${revision} ${requests} outstanding model request${requests === 1 ? '' : 's'}, up to ${estimate.maximumAttempts} attempts. ${estimate.provider}:${estimate.model}, ${estimate.sampleCount} samples per row. Cost unavailable. ${estimate.cost.reason}${humanReview}${ruleResult}`;
 }

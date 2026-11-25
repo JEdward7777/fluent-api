@@ -171,7 +171,7 @@ export class LicenseAnalysisStoppedError extends Error {
 }
 
 /** JSON source is a saved draft; only explicitly selected keys are reassessed. */
-export async function analyzeJsonLicenses(input: {
+interface JsonAnalysisInput {
   classify: ReturnType<typeof createLicenseClassifier>;
   artifact: LicenseArtifact;
   eligibility: LicenseEligibilityRow[];
@@ -179,7 +179,9 @@ export async function analyzeJsonLicenses(input: {
   sampleCount: number;
   now?: () => string;
   shouldStop?: () => boolean;
-}): Promise<LicenseArtifact> {
+}
+
+export async function assessJsonLicenseRows(input: JsonAnalysisInput) {
   const currentRun: LicenseArtifact['classificationRun'] = {
     prompt: LICENSE_CLASSIFICATION_PROMPT,
     promptHash: LICENSE_CLASSIFICATION_PROMPT_HASH,
@@ -226,5 +228,10 @@ export async function analyzeJsonLicenses(input: {
       })
     );
   }
+  return classifications;
+}
+
+export async function analyzeJsonLicenses(input: JsonAnalysisInput): Promise<LicenseArtifact> {
+  const classifications = await assessJsonLicenseRows(input);
   return createLicenseArtifact({ ...input.artifact, classifications });
 }

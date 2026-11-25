@@ -1,4 +1,9 @@
-import { createAnalysisProgress, evidenceActions, workflowStatus } from './analysis-progress.js';
+import {
+  createAnalysisProgress,
+  evidenceActions,
+  inspectionSummary,
+  workflowStatus,
+} from './analysis-progress.js';
 import { createDraftDatabaseTest } from './database-test.js';
 import { renderGuide as updateGuide } from './guide.js';
 import {
@@ -6,6 +11,7 @@ import {
   syncPracticeDraftControls as updatePracticeDraftControls,
 } from './preview-ui.js';
 import { initReportControls, invalidateReportSelection } from './report-controls.js';
+import { reassessmentStatus } from './review-rerun.js';
 import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
 import { initSave, renderSave, saveStatusUnconfirmed } from './save.js';
 import {
@@ -92,6 +98,8 @@ function syncSettingsActions(next) {
   const actions = evidenceActions(next, blocked, dirty, hasUnsavedReviewDraft());
   inspect.disabled = !actions.inspect;
   analyze.disabled = !actions.analyze;
+  inspection.hidden = !next.inspected;
+  inspection.textContent = inspectionSummary(next, dirty);
 }
 
 const renderGuide = (next) =>
@@ -115,7 +123,7 @@ function syncReviewAvailability(next) {
   renderExactPreview(next);
   renderSave(next);
   syncPracticeDraftControls();
-  setReviewBusy(workbenchBusy(next) || practiceBusy || settingsRequestActive(next));
+  setReviewBusy(workbenchBusy(next) || practiceBusy || settingsRequestActive(next), Boolean(dirty));
 }
 
 function checkPendingSettings() {
@@ -138,7 +146,11 @@ async function request(path, method = 'GET', body, responseType = 'json') {
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+    const error = new Error(await response.text());
+    error.requestRejected = [400, 403, 409].includes(response.status);
+    throw error;
+  }
   return responseType === 'blob' ? response.blob() : response.json();
 }
 initReview(
@@ -158,10 +170,19 @@ initReview(
     }
   },
   async (body) => {
+    if (checkPendingSettings()) throw new Error('Apply or restore settings before reassessment.');
     const next = await request('review/rerun', 'POST', body);
-    render(next, true);
-    status.textContent =
-      'Row reassessment selected. Inspect to review exact rule and model request estimates before Analyze.';
+    if (
+      next.configurationRevision < setup.configurationRevision ||
+      (next.configurationRevision === setup.configurationRevision &&
+        next.contentRevision < setup.contentRevision)
+    )
+      throw Object.assign(new Error('The review changed. Select reassessment again.'), {
+        requestRejected: true,
+      });
+    render(next);
+    if (!dirty) status.textContent = reassessmentStatus(body, next.paidEstimate);
+    return next;
   }
 );
 function render(next, populate = false) {
@@ -186,7 +207,7 @@ function render(next, populate = false) {
     : 'Inspect reads selected files, database and request cache as needed.';
   document.getElementById('analysis-help').textContent = next.practice
     ? 'Practice analysis uses saved JSON evidence without model requests.'
-    : `Analysis uses the inspected eligibility plan${next.inspected?.preflight.modelKeys ? ` and may make ${next.inspected.preflight.expectedUncachedRequests} uncached model requests` : ' without model requests'}; it does not publish policy or artifacts.`;
+    : 'Prepare free evidence applies rule matches and complete cached assessments. Missing samples stay unchanged and are counted below. This action sends zero model requests.';
   if (next.practice) {
     for (const key of ['output', 'cacheDir', 'reportDir', 'reportFormats'])
       form.elements[key].value = next[key] ?? '';
@@ -241,11 +262,6 @@ function render(next, populate = false) {
   stop.hidden = next.state !== 'analyzing';
   stop.disabled = next.state !== 'analyzing';
   analysisProgress.update(next);
-  inspection.hidden = !next.inspected;
-  if (next.inspected) {
-    const preflight = next.inspected.preflight;
-    inspection.textContent = `Inspected ${next.inspected.inspectedAt}. ${preflight.distinctKeys} distinct keys; ${preflight.tableHits} saved decisions (${preflight.savedEvidenceReuse} complete saved model assessments reused); ${preflight.ruleHits} rule matches; ${preflight.modelKeys} model keys. ${preflight.validCacheHits} valid cache hits; ${preflight.expectedUncachedRequests} expected uncached requests, up to ${preflight.maximumAttempts} attempts. ${preflight.rows.map((row) => `${row.normalizedText}: ${row.action} (${row.reason}${row.ruleMatches ? '; rule match' : '; rule nonmatch'})`).join(' | ')} Cost unavailable: ${preflight.cost.reason}`;
-  }
   status.textContent = workflowStatus(next, { busy, dirty, starting: analysisProgress.starting });
   const practiceReview = document.getElementById('practice-review');
   practiceReview.hidden = !next.practice || !next.analysis;

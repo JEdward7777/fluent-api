@@ -7,9 +7,7 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed, sta
     : ' Choose a source and destination. Click Apply settings if you change the form; it records your choices without reading inputs.';
   document.getElementById('guide-analyze-effect').textContent = next.practice
     ? ' It uses saved JSON evidence without a model request.'
-    : next.source === 'json'
-      ? ` It uses saved JSON evidence${next.inspected?.preflight.modelKeys ? ` and may make ${next.inspected.preflight.expectedUncachedRequests} previewed model requests` : ' without a model request'}; it does not publish policy.`
-      : ' It may call the configured model and write request cache when Inspect shows uncached requests; it does not save policy or artifacts.';
+    : ' It applies available rules and complete cached evidence. Missing model samples remain in the request estimate.';
   document.getElementById('guide-preview-effect').textContent = next.practice
     ? ' It shows the exact incomplete scratch JSON without changing the source.'
     : ' It checks and shows the exact changes without saving them.';
@@ -37,7 +35,7 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed, sta
       'Session status is unavailable. Reload before another action; check destinations if Save may have started.';
   } else if (startingAnalysis && next.state !== 'analyzing') {
     step = 'analyze';
-    message = 'Starting analysis…';
+    message = 'Starting free preparation…';
   } else if (
     next.activeOperationId ||
     practiceBusy ||
@@ -76,7 +74,7 @@ export function renderGuide(next, { dirty, practiceBusy, sessionUnconfirmed, sta
       : 'Next: Review the evidence below, then click Preview current revision.';
   } else if (next.state === 'inspected') {
     step = 'analyze';
-    message = 'Next: Check the inspection estimate, then click Start analysis.';
+    message = 'Next: Click Prepare free evidence.';
   } else if (next.readyForInspect) {
     step = 'inspect';
     message = 'Next: Click Inspect inputs. Apply settings first only if you change the form.';

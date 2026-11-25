@@ -9,8 +9,8 @@ For a loopback CodeServer proxy, add --local-proxy-url=http://localhost:8454/pro
 with the proxy port matching --port. This explicitly permits that local Host and Origin.
 With both stdin and stdout on a terminal, no UI flag opens browser setup. Non-terminal
 invocations use the CLI unless --ui=web is explicit. --ui=cli retains terminal review.
-Browser setup never reads inputs or spends model requests before Inspect inputs; Start analysis
-is separate and may call Gemini and write the request cache. Save publishes policy/artifacts.
+Browser Inspect and Start analysis prepare free rule and available cache results. Uncached
+samples are estimated without sending requests. Save publishes policy/artifacts.
 CLI --plan-only with a database source may call Gemini and write cache, reports, or JSON;
 it never commits classification policy. --yes and --plan-only select CLI automation.
 --open-report stays in CLI. Browser mode cannot use --yes, --plan-only or --open-report.

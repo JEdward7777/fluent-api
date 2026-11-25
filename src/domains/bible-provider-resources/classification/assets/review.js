@@ -1,7 +1,7 @@
 import { reviewEditFeedback, validateReviewEdit } from './review-edit-feedback.js';
 import { initReviewNavigation } from './review-navigation.js';
 import { initReviewPagination } from './review-pagination.js';
-import { reviewRerunActions } from './review-rerun.js';
+import { reassessmentUnavailable, reviewRerunActions, syncRerunButtons } from './review-rerun.js';
 
 const section = document.getElementById('review');
 const form = document.getElementById('review-filter');
@@ -22,6 +22,7 @@ let listRequest = 0;
 let detailRequest = 0;
 let editBusy = false;
 let externalBusy = false;
+let dirtySettings = false;
 let editDirty = false;
 let editMessage = '';
 let updateEditorControls = () => {};
@@ -357,22 +358,17 @@ async function openDetail(id) {
       facts,
       reviewEditor(item)
     );
-    if (!currentSetup.practice) {
+    if (!currentSetup.practice)
       detail.append(
         node('h4', 'Explicit reassessment'),
         reviewRerunActions(item, {
           selectRerun,
-          hasDraft: () => editDirty,
-          isBusy: () =>
-            externalBusy ||
-            Boolean(currentSetup.activeOperationId) ||
-            !['reviewing', 'previewed'].includes(currentSetup.state),
+          isBusy: rerunUnavailable,
           showError: (message) => {
             summary.textContent = message;
           },
         })
       );
-    }
     const variants = node('div');
     if (item.missingNoticeLabel) variants.append(node('p', item.missingNoticeLabel));
     for (const [index, label] of item.variantLabels.entries())
@@ -446,10 +442,15 @@ export function initReview(fetchReview, sendEdit, draftChanged, onRerun = async 
   onDraftChange = draftChanged;
 }
 
-export function setReviewBusy(busy) {
+function rerunUnavailable() {
+  const busy = dirtySettings || editDirty || editBusy || externalBusy;
+  return reassessmentUnavailable(currentSetup, busy);
+}
+export function setReviewBusy(busy, settingsChanged = dirtySettings) {
+  dirtySettings = settingsChanged;
   externalBusy = busy;
   updateEditorControls();
-  for (const button of detail.querySelectorAll('[data-rerun]')) button.disabled = busy;
+  syncRerunButtons(detail, rerunUnavailable());
 }
 
 export function updateReview(setup) {
@@ -458,9 +459,7 @@ export function updateReview(setup) {
   const previous = renderedView;
   renderedView = view;
   updateEditorControls();
-  for (const button of detail.querySelectorAll('[data-rerun]'))
-    button.disabled =
-      Boolean(setup.activeOperationId) || !['reviewing', 'previewed'].includes(setup.state);
+  syncRerunButtons(detail, rerunUnavailable());
   section.hidden = !setup.analysis;
   if (!setup.analysis) {
     listRequest++;
@@ -471,7 +470,9 @@ export function updateReview(setup) {
     editMessage = '';
     updateEditorControls = () => {};
     rows.replaceChildren();
-    summary.textContent = 'Start analysis to review evidence.';
+    summary.textContent = setup.practice
+      ? 'Prepare free evidence to review the practice rows.'
+      : 'Inspect a source to review its classifications.';
     detail.replaceChildren();
     detail.hidden = true;
     results.hidden = false;

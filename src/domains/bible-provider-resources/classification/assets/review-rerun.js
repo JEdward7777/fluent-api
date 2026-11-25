@@ -1,16 +1,18 @@
-function confirmDiscard(kind) {
+import { ruleNonmatchMessage } from './analysis-progress.js';
+
+function confirmReplacement(kind) {
   return new Promise((resolve) => {
     const dialog = document.createElement('dialog');
     dialog.className = 'rerun-confirmation';
-    dialog.setAttribute('aria-label', 'Confirm discarding unsaved review edits');
+    dialog.setAttribute('aria-label', 'Replace this human review?');
     const message = document.createElement('p');
-    message.textContent = `Reassessing this row restarts Inspect and discards every unsaved review edit in this session, including decisions or notes on other rows. Continue with ${kind} reassessment?`;
+    message.textContent = `Replace this row’s human decision with the prepared ${kind === 'rule' ? 'rule' : 'cached model'} result?`;
     const cancel = document.createElement('button');
     cancel.type = 'button';
-    cancel.textContent = 'Cancel and keep edits';
+    cancel.textContent = 'Keep human review';
     const accept = document.createElement('button');
     accept.type = 'button';
-    accept.textContent = 'Discard edits and select reassessment';
+    accept.textContent = 'Replace this decision';
     const finish = (accepted) => {
       dialog.close();
       dialog.remove();
@@ -29,48 +31,75 @@ function confirmDiscard(kind) {
   });
 }
 
-export function reviewRerunActions(item, { selectRerun, hasDraft, isBusy, showError }) {
+export function reviewRerunActions(item, { selectRerun, isBusy, showError }) {
   const actions = document.createElement('div');
   actions.className = 'actions';
-  for (const [kind, label, description] of [
-    [
-      'rule',
-      'Reevaluate this row with rules',
-      'Inspect shows the current rule match or nonmatch before Analyze.',
-    ],
-    [
-      'model',
-      'Select model reassessment',
-      'Inspect shows valid cache hits and expected uncached model requests before Analyze.',
-    ],
+  for (const [kind, label] of [
+    ['rule', 'Reevaluate this row with rules'],
+    ['model', 'Prepare model reassessment'],
   ]) {
-    if (kind === 'rule' && item.reviewState !== 'unreviewed') continue;
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.rerun = kind;
     button.textContent = label;
-    button.title = description;
+    button.disabled = isBusy();
+    let request;
     button.addEventListener('click', async () => {
-      if (hasDraft() || isBusy()) {
-        showError('Apply or discard the open row edit before reassessment.');
-        return;
-      }
-      if (!(await confirmDiscard(kind))) return;
+      if (isBusy()) return;
+      button.dataset.running = 'true';
       button.disabled = true;
       try {
-        await selectRerun({
+        request ??= {
+          operationId: crypto.randomUUID(),
           configurationRevision: item.configurationRevision,
           contentRevision: item.contentRevision,
           id: item.id,
           kind,
-          discardReviewedState: true,
-        });
+        };
+        const result = await selectRerun(request);
+        const replacement = result.paidEstimate?.replacements.find((row) => row.id === item.id);
+        if (replacement && !isBusy()) {
+          const accepted = await confirmReplacement(kind);
+          request = {
+            ...request,
+            operationId: crypto.randomUUID(),
+            confirmation: replacement.confirmation,
+            ...(accepted ? {} : { cancel: true }),
+          };
+          await selectRerun(request);
+        }
+        request = undefined;
       } catch (error) {
+        if (error.requestRejected) request = undefined;
         showError(error.message);
-        button.disabled = false;
+      } finally {
+        delete button.dataset.running;
+        button.disabled = isBusy();
       }
     });
     actions.append(button);
   }
   return actions;
+}
+
+export function reassessmentUnavailable(setup, busy) {
+  return (
+    busy ||
+    setup?.sourceDraftPending ||
+    Boolean(setup?.activeOperationId) ||
+    !['inspected', 'reviewing', 'previewed', 'saved'].includes(setup?.state)
+  );
+}
+
+export function syncRerunButtons(detail, unavailable) {
+  for (const button of detail.querySelectorAll('[data-rerun]'))
+    button.disabled = unavailable || button.dataset.running === 'true';
+}
+
+export function reassessmentStatus(request, estimate) {
+  if (request.cancel) return 'Human review kept.';
+  if (estimate?.replacements.length) return 'Confirm replacement of this human decision.';
+  if (estimate?.expectedUncachedRequests)
+    return `Reassessment needs ${estimate.expectedUncachedRequests} uncached model requests. No requests were sent.`;
+  return ruleNonmatchMessage(estimate) || 'Free reassessment complete.';
 }

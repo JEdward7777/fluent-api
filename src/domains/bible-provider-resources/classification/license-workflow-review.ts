@@ -5,16 +5,19 @@ import type {
   LicenseAnalysis,
   LicensePreview,
   LicenseReviewEdit,
+  LicenseWorkflowDependencies,
   LicenseWorkflowState,
 } from './license-workflow.types';
 
 import {
+  attestLicenseArtifact,
   licenseOverrideWarning,
   recordAnonymousLicenseNote,
   recordHumanLicenseDecision,
   reviseLicenseArtifact,
+  serializeLicenseArtifact,
 } from '../license-artifact';
-import { freezeLicenseRevision } from '../license-review-revision';
+import { freezeLicenseRevision, freezeReviewValue } from '../license-review-revision';
 import { LicenseReviewDrafts } from './license-review-drafts';
 import { licenseReviewRowId, listLicenseWorkbenchReview } from './license-workbench-review';
 
@@ -52,9 +55,19 @@ export function applyLicenseReviewEdit(
 }
 
 export abstract class LicenseWorkflowReview {
+  constructor(protected readonly dependencies: LicenseWorkflowDependencies) {}
+  private finishBusy?: () => void;
+  protected configurationRevision = 1;
   abstract get reviewDatabaseContext(): LicenseDatabaseContext | undefined;
   private stateBeforeDrafts: LicenseWorkflowState = 'reviewing';
   private drafts = new LicenseReviewDrafts();
+  get status() {
+    return freezeReviewValue({
+      state: this.state,
+      configurationRevision: this.configurationRevision,
+      contentRevision: this.contentRevision,
+    });
+  }
   get analyzed() {
     return this.analysis;
   }
@@ -74,6 +87,10 @@ export abstract class LicenseWorkflowReview {
     if (this.drafts.size) {
       if (this.stateBeforeDrafts !== 'inspected') this.stateBeforeDrafts = 'reviewing';
     } else if (this.state !== 'inspected') this.state = 'reviewing';
+  }
+  protected acceptPreparedRows(keys: string[]) {
+    this.drafts.removeReplaced(keys);
+    this.stateBeforeDrafts = 'reviewing';
   }
   protected resetDrafts() {
     this.drafts = new LicenseReviewDrafts();
@@ -131,5 +148,88 @@ export abstract class LicenseWorkflowReview {
       this.state = this.drafts.size ? 'reviewing' : this.stateBeforeDrafts;
     }
     return result;
+  }
+  editReview(
+    edit: LicenseReviewEdit,
+    expectedConfigurationRevision: number,
+    expectedContentRevision: number
+  ) {
+    this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
+    if (!this.analysis || !['inspected', 'reviewing', 'previewed'].includes(this.state))
+      throw new Error(`Cannot edit review while ${this.state}`);
+    if (this.reviewDrafts.size)
+      throw new Error('Revert pending session edits before using this operation');
+    const before = this.analysis.artifact;
+    const { artifact, warning } = applyLicenseReviewEdit(
+      before,
+      edit,
+      this.dependencies.now ?? (() => new Date().toISOString())
+    );
+    if (serializeLicenseArtifact(artifact).bytes !== serializeLicenseArtifact(before).bytes) {
+      this.analysis = freezeReviewValue({
+        ...this.analysis,
+        contentRevision: ++this.contentRevision,
+        artifact,
+      });
+      this.previewResult = undefined;
+      this.state = 'reviewing';
+    }
+    return freezeReviewValue({ analysis: this.analysis, warning });
+  }
+
+  attest(
+    metadata: { reviewedBy: string; reviewReason: string; reviewedAt: string },
+    expectedConfigurationRevision: number,
+    expectedContentRevision: number,
+    expectedReviewHash: string
+  ) {
+    if (this.dependencies.practice) throw new Error('Practice cannot attest a review');
+    this.requireContentRevision(expectedConfigurationRevision, expectedContentRevision);
+    if (!this.analysis || this.state !== 'previewed' || !this.previewResult)
+      throw new Error('Preview this exact revision before attestation');
+    if (this.analysis.artifact.reviewContentHash !== expectedReviewHash)
+      throw new Error('Stale license review hash');
+    if (!metadata.reviewedBy.trim() || !metadata.reviewReason.trim())
+      throw new Error('Reviewer identity and review reason are required');
+    const artifact = freezeLicenseRevision(attestLicenseArtifact(this.analysis.artifact, metadata));
+    if (
+      serializeLicenseArtifact(artifact).bytes !==
+      serializeLicenseArtifact(this.analysis.artifact).bytes
+    )
+      this.analysis = freezeReviewValue({
+        ...this.analysis,
+        contentRevision: ++this.contentRevision,
+        artifact,
+      });
+    this.previewResult = undefined;
+    this.state = 'reviewing';
+    return this.analysis;
+  }
+
+  protected requireRevision(expectedRevision: number) {
+    if (expectedRevision !== this.configurationRevision)
+      throw new Error('Stale license workflow configuration revision');
+    if (this.state === 'closed' || this.closing) throw new Error('License workflow is closed');
+  }
+
+  protected requireContentRevision(
+    expectedConfigurationRevision: number,
+    expectedContentRevision: number
+  ) {
+    this.requireRevision(expectedConfigurationRevision);
+    if (expectedContentRevision !== this.contentRevision)
+      throw new Error('Stale license workflow content revision');
+  }
+
+  protected beginBusy() {
+    this.busyDone = new Promise<void>((resolve) => {
+      this.finishBusy = resolve;
+    });
+  }
+
+  protected endBusy() {
+    this.finishBusy?.();
+    this.finishBusy = undefined;
+    this.busyDone = undefined;
   }
 }

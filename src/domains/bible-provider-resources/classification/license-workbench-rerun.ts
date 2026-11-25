@@ -1,24 +1,9 @@
-import type { LicenseCommandOptions } from './license-command-options';
+import type { FreeSelection } from './license-free-preparation';
 
-import { licenseKeyDigest } from './license-eligibility';
-
-export interface LicenseRerunSelection {
+export interface LicenseRerunSelection extends FreeSelection {
+  operationId?: string;
   configurationRevision: number;
   contentRevision: number;
-  id: string;
-  kind: 'rule' | 'model';
-  discardReviewedState: boolean;
-}
-
-export function selectedLicenseRerunOptions(
-  options: LicenseCommandOptions,
-  normalizedText: string,
-  kind: 'rule' | 'model'
-): LicenseCommandOptions {
-  const digest = licenseKeyDigest(normalizedText);
-  return {
-    ...options,
-    rerunRule: kind === 'rule' ? [digest] : [],
-    rerunModel: kind === 'model' ? [digest] : [],
-  };
+  cancel?: true;
+  discardReviewedState?: boolean;
 }

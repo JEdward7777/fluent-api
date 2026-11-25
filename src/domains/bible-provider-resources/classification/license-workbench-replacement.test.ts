@@ -336,7 +336,8 @@ it('blocks a fresh analysis operation with a pending replacement even when the l
       cacheDir: loaded.cacheDir,
       reportDir: loaded.reportDir,
       configurationRevision: loaded.configurationRevision,
-      discardReviewedState: false,
+      discardReviewedState: true,
+      expectedContentRevision: loaded.contentRevision,
     });
     const blocked = {
       operationId: crypto.randomUUID(),

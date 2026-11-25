@@ -39,6 +39,7 @@ export interface LicensePreflight {
 /** Mirrors analysis precedence and the structured-request cache validation without transport calls. */
 export async function inspectLicensePreflight(input: {
   database?: LicenseDatabaseSnapshot;
+  reviewedRuleSelection?: boolean;
   priorNotices?: (string | null)[];
   jsonClassifications?: LicenseClassification[];
   jsonNotices?: string[];
@@ -70,6 +71,7 @@ export async function inspectLicensePreflight(input: {
   }
   for (const row of input.jsonClassifications ?? []) stored.set(row.normalizedText, row);
   const rows = planLicenseEligibility({
+    reviewedRuleSelection: input.reviewedRuleSelection,
     notices,
     stored,
     ruleDigests: input.rerunRule ?? [],

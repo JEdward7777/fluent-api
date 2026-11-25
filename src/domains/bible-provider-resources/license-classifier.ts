@@ -2,7 +2,7 @@ import type { TtsLicenseStatus } from '@/domains/bibles/bibles.types';
 import type { LlmTransport } from '@/lib/llm/structured-request';
 
 import { createGoogleTransport } from '@/lib/llm/google-transport';
-import { createRequestCache } from '@/lib/llm/request-cache';
+import { createRequestCache, llmRequestHash } from '@/lib/llm/request-cache';
 import { requestStructuredResponse } from '@/lib/llm/structured-request';
 
 import {
@@ -16,16 +16,16 @@ import {
 import { LICENSE_NORMALIZER_VERSION, normalizeLicenseNotice } from './license-normalizer';
 import { LICENSE_RULE_SET_HASH, matchLicenseRule } from './license-rules';
 
-interface ClassifierOptions {
-  apiKey: string;
+type ClassifierOptions = {
   model?: string;
   sampleCount?: number;
   cacheDir?: string;
   noCache?: boolean;
-  transport?: LlmTransport;
   sleep?: (milliseconds: number) => Promise<unknown>;
   random?: () => number;
-}
+} & (
+  { cachedResponses: ReadonlyMap<string, string> } | { apiKey: string; transport?: LlmTransport }
+);
 interface AuthoritativeClassification {
   status: TtsLicenseStatus;
   rationale: string;
@@ -42,7 +42,7 @@ export function createLicenseClassifier(options: ClassifierOptions) {
     throw new Error('Sample count must be an integer of at least two');
   const model = match[1];
   const transport: LlmTransport = (request) => {
-    if (!options.apiKey.trim())
+    if (!('apiKey' in options) || !options.apiKey.trim())
       throw new Error('A nonempty GOOGLE_AI_API_KEY is required before a model request');
     return (options.transport ?? createGoogleTransport(options.apiKey))(request);
   };
@@ -88,6 +88,22 @@ export function createLicenseClassifier(options: ClassifierOptions) {
       Array.from({ length: sampleCount }, async (_, offset) => {
         const index = offset + 1;
         const request = buildLicenseSampleRequest(notice, 'google', model, index);
+        if ('cachedResponses' in options) {
+          const requestHash = llmRequestHash(request);
+          const response = options.cachedResponses.get(requestHash);
+          if (response === undefined) throw new Error('Incomplete cached classification evidence');
+          return {
+            index,
+            request,
+            requestHash,
+            response,
+            result: parseLicenseVote(response),
+            provider: request.provider,
+            model: request.model,
+            cacheHit: true,
+            attempts: 0,
+          };
+        }
         if (!options.apiKey.trim()) {
           const cached = options.noCache ? null : await cache.read(request);
           let validCachedVote = false;

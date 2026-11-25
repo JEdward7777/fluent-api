@@ -38,6 +38,10 @@ export class LicenseReviewDrafts {
   private readonly rows = new Map<string, Draft>();
   private readonly receipts = new Map<string, { fingerprint: string; ack: DraftAck }>();
 
+  removeReplaced(keys: string[]) {
+    for (const key of keys) this.rows.delete(key);
+  }
+
   get size() {
     return this.rows.size;
   }

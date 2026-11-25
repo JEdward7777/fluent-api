@@ -24,13 +24,13 @@ import {
   LicenseWorkbenchDatabaseTests,
 } from './license-workbench-database-tests';
 import { LicenseWorkbenchReports } from './license-workbench-reports';
-import { selectedLicenseRerunOptions } from './license-workbench-rerun';
 import {
   licenseWorkbenchReviewDetail,
   licenseWorkbenchReviewList,
 } from './license-workbench-review-view';
 import { applyLicenseWorkbenchOptions } from './license-workbench-schema';
 import { visibleLicenseWorkbench } from './license-workbench-visible';
+import { LicenseOperationRegistry } from './license-workflow-operations';
 function legacyDatabaseRole(options: Pick<LicenseCommandOptions, 'source' | 'destination'>) {
   return options.source !== 'database' &&
     (options.destination === 'database' || options.destination === 'both')
@@ -88,6 +88,8 @@ export class LicenseWorkbenchConfiguration {
     return this.databaseTests.running || this.destinationTests.running;
   }
   protected closed = false;
+  private legacyRerun?: { fingerprint: string; operationId: string; revision?: number };
+  protected readonly rerunOperations = new LicenseOperationRegistry();
   protected readonly operations = new Map<string, RecordedOperation>();
   protected activeOperationId?: string;
   protected latestOperationId?: string;
@@ -96,16 +98,6 @@ export class LicenseWorkbenchConfiguration {
   protected readonly practiceMode: boolean;
   protected selectedPracticePath: string | null;
   readonly reports = new LicenseWorkbenchReports();
-  private resetAfterConfiguration(options: LicenseCommandOptions) {
-    this.configurationRevision++;
-    this.options = options;
-    this.inspected = undefined;
-    this.sourceHash = undefined;
-    this.policyBaseline = undefined;
-    this.latestOperationId = undefined;
-    this.latestSaveOperationId = undefined;
-    this.reports.clear();
-  }
   constructor(
     options: LicenseCommandOptions,
     practiceMode = false,
@@ -139,6 +131,7 @@ export class LicenseWorkbenchConfiguration {
     const legacy = this.databaseRole();
     return {
       sourceDraftPending: this.sourceDraftPending,
+      paidEstimate: this.sourceDraftPending ? null : (this.workflow?.paidEstimate ?? null),
       loadedSource: this.loadedOptions
         ? {
             source: this.loadedOptions.source,
@@ -215,37 +208,58 @@ export class LicenseWorkbenchConfiguration {
         'Load the selected source or restore the loaded source settings before starting analysis'
       );
   }
-  selectRerun(body: LicenseRerunSelection) {
-    return this.reserve(() => this.configureRerun(body));
+  async selectRerun(body: LicenseRerunSelection) {
+    const request = structuredClone(body);
+    const fields = [
+      request.configurationRevision,
+      request.contentRevision,
+      request.id,
+      request.kind,
+      request.confirmation,
+      request.cancel,
+      request.discardReviewedState,
+    ];
+    let operationId = request.operationId;
+    if (!operationId) {
+      // Older clients have no operation ID. Coalesce their latest identical request
+      // until another selection or working revision supersedes its acknowledgement.
+      const fingerprint = JSON.stringify(fields);
+      const revision = this.workflow?.status.contentRevision;
+      if (
+        this.legacyRerun?.fingerprint !== fingerprint ||
+        this.legacyRerun.revision !== revision ||
+        request.configurationRevision !== this.configurationRevision
+      )
+        this.legacyRerun = { fingerprint, revision, operationId: randomUUID() };
+      operationId = this.legacyRerun.operationId;
+    } else if (!this.rerunOperations.get(operationId)) this.legacyRerun = undefined;
+    if (this.operations.has(operationId))
+      throw new Error('Operation ID was reused with different arguments');
+    try {
+      const result = await this.rerunOperations.run(operationId, 'prepare-free', fields, () =>
+        this.reserve(() => this.configureRerun(request))
+      );
+      if (this.legacyRerun?.operationId === operationId)
+        this.legacyRerun.revision = result.contentRevision;
+      return structuredClone(result);
+    } catch (error) {
+      if (this.legacyRerun?.operationId === operationId) this.legacyRerun = undefined;
+      throw error;
+    }
   }
   private async configureRerun(body: LicenseRerunSelection) {
-    if (this.workflow?.reviewDrafts.size)
-      throw new Error('Revert pending session edits before legacy reassessment');
     if (this.practiceMode) throw new Error('Practice does not reassess saved evidence');
     this.requireSelectedSourceLoaded();
     if (this.activeOperationId || !this.workflow?.analyzed)
       throw new Error('Finish analysis before selecting a row reassessment');
-    if (!body.discardReviewedState)
-      throw new Error('Explicit discard acknowledgement is required before reassessment');
     if (
       body.configurationRevision !== this.configurationRevision ||
       body.contentRevision !== this.workflow.status.contentRevision
     )
       throw new Error('Stale review revision');
-    const options = selectedLicenseRerunOptions(
-      this.options,
-      this.reviewDetail(body.id).normalizedText,
-      body.kind
-    );
-    await this.workflow.configure(
-      options,
-      this.workflow.status.configurationRevision,
-      body.discardReviewedState
-    );
-    this.aiRevision++;
-    this.loadedOptions = undefined;
-    this.loadedConnection = undefined;
-    this.resetAfterConfiguration(options);
+    if (body.cancel) {
+      this.workflow.cancelFreeSelection(body.contentRevision, body);
+    } else await this.workflow.prepareFree(body.contentRevision, body);
     return this.visible;
   }
   configure(body: z.infer<typeof setupSchema>) {

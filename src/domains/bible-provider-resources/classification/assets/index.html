@@ -13,7 +13,7 @@
       <header>
         <p class="eyebrow">Local developer tool</p>
         <h1>License workbench</h1>
-        <p>Choose inputs, inspect them, then explicitly start analysis.</p>
+        <p>Inspect a source to prepare free evidence and review its classifications.</p>
       </header>
       <nav aria-label="Workflow steps">
         <ol>
@@ -35,11 +35,10 @@
           </li>
           <li id="guide-inspect">
             <strong>Click Inspect inputs.</strong>
-            <span> It reads the selected source and shows an inspection and request estimate.</span>
-            <span> It does not start analysis.</span>
+            <span> It loads the selected source and prepares eligible evidence.</span>
           </li>
           <li id="guide-analyze">
-            <strong>Click Start analysis.</strong>
+            <strong>Refresh free evidence if needed.</strong>
             <span id="guide-analyze-effect"> It builds the evidence you will review.</span>
           </li>
           <li id="guide-review">
@@ -195,7 +194,7 @@
         </details>
         <div id="analysis-actions" class="actions">
           <button id="inspect" type="button" disabled>Inspect inputs</button
-          ><button id="analyze" type="button" disabled>Start analysis</button
+          ><button id="analyze" type="button" disabled>Prepare free evidence</button
           ><button id="stop" type="button" hidden>Stop after current key</button>
         </div>
         <div id="analysis-progress" role="status">
@@ -203,7 +202,7 @@
           <span id="analysis-progress-text"></span>
         </div>
         <p id="inspect-help">Inspect reads selected files, database and request cache as needed.</p>
-        <p id="analysis-help">Analysis follows the inspected request plan.</p>
+        <p id="analysis-help">Free preparation sends zero model requests.</p>
         <div id="inspection" hidden></div>
         <section id="review" hidden aria-labelledby="review-heading">
           <h2 id="review-heading">Review classification evidence</h2>

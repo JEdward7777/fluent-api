@@ -25,6 +25,8 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       Boolean(body.discardReviewedState),
       body.expectedContentRevision,
     ]);
+    if (this.rerunOperations.get(body.operationId))
+      throw new Error('Operation ID was reused with different arguments');
     const prior = this.operations.get(body.operationId);
     if (prior) {
       if (prior.fingerprint !== fingerprint)
@@ -292,6 +294,8 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       body.contentRevision,
       body.agreeToReplace,
     ]);
+    if (this.rerunOperations.get(body.operationId))
+      throw new Error('Operation ID was reused with different arguments');
     const prior = this.operations.get(body.operationId);
     if (prior) {
       if (prior.fingerprint !== fingerprint)

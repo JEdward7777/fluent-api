@@ -39,6 +39,7 @@ function resolveLicenseKeyDigests(keys: Iterable<string>, digests: readonly stri
 }
 
 export function planLicenseEligibility(input: {
+  reviewedRuleSelection?: boolean;
   notices: Iterable<string | null>;
   stored: ReadonlyMap<string, LicenseClassification>;
   ruleDigests: readonly string[];
@@ -57,7 +58,12 @@ export function planLicenseEligibility(input: {
       const ruleMatches = exampleNotice !== null && Boolean(matchLicenseRule(exampleNotice));
       const explicitRule = ruleKeys.has(normalizedText);
       const explicitModel = modelKeys.has(normalizedText);
-      if (explicitRule && prior && prior.reviewState !== 'unreviewed')
+      if (
+        explicitRule &&
+        prior &&
+        prior.reviewState !== 'unreviewed' &&
+        !input.reviewedRuleSelection
+      )
         throw new Error(`Rule reevaluation requires an unreviewed row: ${normalizedText}`);
       let action: LicenseEligibilityAction = 'retain';
       let reason = 'saved decision';

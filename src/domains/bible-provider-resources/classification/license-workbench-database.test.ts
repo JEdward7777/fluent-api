@@ -419,46 +419,6 @@ describe('source and destination connection ownership', () => {
     }
   });
 
-  it('recovers from an analysis failure on the same source and settles failed pool cleanup on both replacement paths', async () => {
-    const fixture = await makeCommandFixture(false);
-    const session = new LicenseWorkbenchSession(
-      { ...fixture.options, source: 'database' },
-      false,
-      fixture.dependencies
-    );
-    try {
-      expect((await operate(session, 'inspect'))?.state).toBe('succeeded');
-      fixture.adapter.load.mockRejectedValueOnce(new Error('source unavailable'));
-      expect((await operate(session, 'analysis'))?.state).toBe('failed');
-      expect(session.visible.state).toBe('error');
-      fixture.adapter.close.mockRejectedValueOnce(new Error(secret));
-      expect(await operate(session, 'inspect')).toMatchObject({
-        state: 'succeeded',
-        cleanupWarning: expect.stringContaining('cleanup'),
-      });
-      expect(session.visible.activeOperationId).toBeNull();
-      const prior = session.visible;
-      await session.configure({ ...settings(session), sourceDatabaseConnection: connection });
-      fixture.adapter.load.mockRejectedValueOnce(new Error('could not load'));
-      fixture.adapter.close.mockRejectedValueOnce(new Error(secret));
-      expect(await operate(session, 'inspect')).toMatchObject({
-        state: 'failed',
-        cleanupWarning: expect.stringContaining('cleanup'),
-      });
-      expect(session.visible).toMatchObject({
-        activeOperationId: null,
-        loadRevision: prior.loadRevision,
-        analysis: prior.analysis,
-        inspected: prior.inspected,
-      });
-      expect(JSON.stringify(session.visible)).not.toContain(secret);
-      expect((await operate(session, 'inspect'))?.state).toBe('succeeded');
-    } finally {
-      await session.close();
-      await fixture.cleanup();
-    }
-  });
-
   it('keeps malformed JSON and database TLS failures distinct and leaves the loaded review intact', async () => {
     const fixture = await makeCommandFixture(false);
     const destinationDatabase = vi.fn(async () => {

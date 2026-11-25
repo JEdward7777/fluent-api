@@ -3,9 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createAnalysisProgress,
   evidenceActions,
+  inspectionSummary,
   workflowStatus,
 } from './assets/analysis-progress.js';
 import { licenseWorkbenchPreviewLines } from './assets/preview-text.js';
+import { reassessmentStatus } from './assets/review-rerun.js';
 import {
   populateConnection,
   roleConnectionDrafts,
@@ -271,3 +273,61 @@ it.each([false, true])(
     );
   }
 );
+
+it('renders only the current free preparation estimate and enables refreshing a loaded review', () => {
+  const view = {
+    state: 'reviewing',
+    contentRevision: 2,
+    inspected: {
+      inspectedAt: 'fixture time',
+      preflight: { distinctKeys: 3, expectedUncachedRequests: 99 },
+    },
+    paidEstimate: {
+      contentRevision: 2,
+      expectedUncachedRequests: 2,
+      maximumAttempts: 10,
+      provider: 'google',
+      model: 'fixture',
+      sampleCount: 3,
+      replacements: [],
+      cost: { reason: 'Pricing unavailable.' },
+    },
+  };
+  expect(inspectionSummary(view, false)).toContain(
+    'revision 2. 2 outstanding model requests, up to 10 attempts'
+  );
+  expect(inspectionSummary({ ...view, contentRevision: 3 }, false)).toContain(
+    'estimate needs refreshing'
+  );
+  expect(inspectionSummary(view, true)).toContain('Apply or restore');
+  expect(
+    inspectionSummary(
+      { ...view, paidEstimate: { ...view.paidEstimate, expectedUncachedRequests: 0 } },
+      false
+    )
+  ).toContain('0 outstanding model requests. No AI work needed.');
+  expect(evidenceActions(view, false, false, false).analyze).toBe(true);
+});
+
+it('reports the rule nonmatch in both the immediate acknowledgement and the current estimate', () => {
+  const selection = { id: 'selected', kind: 'rule' };
+  const estimate = {
+    contentRevision: 7,
+    selection,
+    unmatchedRuleIds: [selection.id],
+    expectedUncachedRequests: 0,
+    replacements: [],
+  };
+  const message = 'No rule matched the selected notice. Its decision was kept.';
+  expect(reassessmentStatus(selection, estimate)).toBe(message);
+  expect(
+    inspectionSummary(
+      {
+        contentRevision: 7,
+        paidEstimate: estimate,
+        inspected: { inspectedAt: 'fixture time', preflight: { distinctKeys: 4 } },
+      },
+      false
+    )
+  ).toContain(message);
+});

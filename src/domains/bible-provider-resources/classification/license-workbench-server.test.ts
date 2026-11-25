@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createLicenseArtifact, serializeLicenseArtifact } from '../license-artifact';
 import { parseLicenseCommandOptions } from './license-command-options';
 import { makeCommandFixture } from './license-command.test-fixtures';
+import { setupSchema } from './license-workbench-schema';
 import { startLicenseWorkbenchServer } from './license-workbench-server';
 
 const options = parseLicenseCommandOptions(['--source=json', '--destination=json'], true);
@@ -296,44 +297,11 @@ describe('local license workbench server', () => {
     try {
       const first = (await api('setup')).body;
       expect(JSON.stringify(first)).not.toContain(fixture.sourceBytes);
-      const changed = {
+      const changed = setupSchema.strip().parse({
         ...first,
-        configurationRevision: 1,
         discardReviewedState: false,
-        cacheDir: null,
-      };
-      for (const key of [
-        'sourceDraftPending',
-        'sourceConnectionRevision',
-        'destinationConnectionRevision',
-        'sourceRevision',
-        'destinationRevision',
-        'aiRevision',
-        'loadRevision',
-        'sourceDatabaseTest',
-        'destinationDatabaseTest',
-        'loadedSource',
-      ])
-        delete changed[key];
-      delete changed.step;
-      delete changed.launchId;
-      delete changed.state;
-      delete changed.contentRevision;
-      delete changed.readyForInspect;
-      delete changed.databaseTarget;
-      delete changed.databaseTest;
-      delete changed.testingDatabase;
-      delete changed.inspected;
-      delete changed.analysis;
-      delete changed.activeOperationId;
-      delete changed.latestOperation;
-      delete changed.practice;
-      delete changed.scratch;
-      delete changed.originalHash;
-      delete changed.selectedSource;
-      delete changed.practiceRows;
-      delete changed.preview;
-      delete changed.saveOutcome;
+        cacheDir: fixture.options.cacheDir,
+      });
       const applied = await api('setup', 'POST', changed);
       expect(applied.status).toBe(200);
       expect(applied.body.configurationRevision).toBe(2);
@@ -448,10 +416,18 @@ describe('local license workbench server', () => {
         id: row.id,
         kind: 'model',
       };
-      expect((await api('review/rerun', 'POST', rerun)).status).toBe(400);
-      expect(
-        (await api('review/rerun', 'POST', { ...rerun, discardReviewedState: false })).status
-      ).toBe(409);
+      const modelPlan = await api('review/rerun', 'POST', rerun);
+      expect(modelPlan.status).toBe(200);
+      expect(modelPlan.body.paidEstimate.expectedUncachedRequests).toBe(
+        fixture.options.sampleCount
+      );
+      const stagedRule = await api('review/rerun', 'POST', { ...rerun, kind: 'rule' });
+      expect(stagedRule.body.paidEstimate.replacements).toMatchObject([{ id: row.id }]);
+      const wrongOperation = await api('review/rerun', 'POST', {
+        ...rerun,
+        confirmation: stagedRule.body.paidEstimate.replacements[0].confirmation,
+      });
+      expect(wrongOperation.status).toBe(409);
       expect((await api('setup')).body.contentRevision).toBe(currentState.contentRevision);
       expect((await api(`review/${row.id}`)).body).toMatchObject({
         status: 'unknown',

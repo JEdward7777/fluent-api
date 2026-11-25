@@ -2,7 +2,7 @@ import { freezeReviewValue } from '../license-review-revision';
 
 interface LicenseOperationSnapshot {
   operationId: string;
-  kind: 'inspect' | 'analysis' | 'save' | 'export-report';
+  kind: 'inspect' | 'analysis' | 'prepare-free' | 'save' | 'export-report';
   state: 'running' | 'succeeded' | 'failed';
   result?: unknown;
   error?: string;

@@ -111,6 +111,7 @@ export async function inspectLicenseWorkflowInputs(input: {
       ? inputBytes
       : await fs.read(outputIdentity?.canonical ?? options.output);
   const preflight = await inspectLoadedLicensePreflight(options, {
+    sourceOnly: sourceOnly || undefined,
     inputBytes,
     outputBytes,
     database: snapshot,
@@ -137,10 +138,12 @@ export function inspectLoadedLicensePreflight(
     inputBytes,
     outputBytes,
     database: snapshot,
-  }: Pick<LicenseInspection, 'inputBytes' | 'outputBytes' | 'database'>
+    sourceOnly,
+  }: Pick<LicenseInspection, 'inputBytes' | 'outputBytes' | 'database' | 'sourceOnly'>
 ) {
   const jsonArtifact = options.source === 'json' ? validateJsonSource(inputBytes!) : undefined;
   return inspectLicensePreflight({
+    reviewedRuleSelection: sourceOnly,
     database: options.source === 'database' ? snapshot : undefined,
     priorNotices:
       options.source === 'database' && outputBytes !== null

@@ -47,15 +47,15 @@ const help = [
   ],
   [
     '#setup [name="model"]',
-    'Model used for new database keys or explicitly selected row reassessment. Inspect shows requests before Analyze.',
+    'Model used for new database keys or explicitly selected row reassessment. Free preparation estimates outstanding requests.',
   ],
   [
     '#setup [name="samples"]',
-    'Number of model votes for each selected model key. Inspect shows valid cache hits and uncached requests.',
+    'Number of model votes for each selected model key. Free preparation applies complete cached votes and estimates missing samples.',
   ],
   [
     '#setup [name="cacheDir"]',
-    'Directory for reusable model request results. It matters only when actual model inference is needed; practice does not use it.',
+    'Directory for reusable model request results. Free preparation reads this cache for complete assessments.',
   ],
   [
     '#setup [name="reportFormats"]',
@@ -67,7 +67,7 @@ const help = [
   ],
   [
     '#setup [name="noCache"]',
-    'Request fresh model results instead of using cached requests when new inference is needed. Practice makes no model requests.',
+    'Skip cached samples when preparing evidence and estimating outstanding requests.',
   ],
   [
     '#setup [name="preserve"]',
