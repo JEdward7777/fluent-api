@@ -200,12 +200,13 @@ export class LicenseWorkbenchConfiguration {
       query
     );
   }
-  reviewDetail(id: string) {
+  reviewDetail(id: string, query?: LicenseReviewQuery) {
     return licenseWorkbenchReviewDetail(
       this.workflow,
       this.configurationRevision,
       this.loadedOptions ?? this.options,
-      id
+      id,
+      query
     );
   }
   protected requireSelectedSourceLoaded() {

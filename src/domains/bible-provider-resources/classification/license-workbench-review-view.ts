@@ -33,7 +33,8 @@ export function licenseWorkbenchReviewDetail(
   workflow: LicenseWorkflow | undefined,
   configurationRevision: number,
   options: LicenseCommandOptions,
-  id: string
+  id: string,
+  query?: LicenseReviewQuery
 ) {
   const analysis = workflow?.analyzed;
   if (!analysis) throw new Error('Start analysis before reviewing evidence');
@@ -45,8 +46,19 @@ export function licenseWorkbenchReviewDetail(
     workflow?.reviewDrafts
   );
   if (!detail) throw new Error('Review row was not found');
+  const view =
+    query &&
+    listLicenseWorkbenchReview(
+      analysis.artifact,
+      query,
+      workflow?.reviewDatabaseContext,
+      options.preserveExistingNonUnknowns,
+      workflow?.reviewDrafts,
+      detail.normalizedText
+    );
   return {
     ...detail,
+    ...(view && { navigation: view.navigation, remaining: view.remaining, total: view.total }),
     epoch: workflow?.reviewDrafts.epoch,
     configurationRevision,
     contentRevision: analysis.contentRevision,

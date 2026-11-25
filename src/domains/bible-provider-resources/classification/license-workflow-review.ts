@@ -1,4 +1,5 @@
 import type { LicenseArtifact } from '../license-artifact.schemas';
+import type { LicenseDatabaseContext } from '../license-impact';
 import type { DraftCommand } from './license-review-drafts';
 import type {
   LicenseAnalysis,
@@ -15,7 +16,7 @@ import {
 } from '../license-artifact';
 import { freezeLicenseRevision } from '../license-review-revision';
 import { LicenseReviewDrafts } from './license-review-drafts';
-import { licenseReviewRowId } from './license-workbench-review';
+import { licenseReviewRowId, listLicenseWorkbenchReview } from './license-workbench-review';
 
 export function applyLicenseReviewEdit(
   before: LicenseArtifact,
@@ -51,6 +52,7 @@ export function applyLicenseReviewEdit(
 }
 
 export abstract class LicenseWorkflowReview {
+  abstract get reviewDatabaseContext(): LicenseDatabaseContext | undefined;
   private stateBeforeDrafts: LicenseWorkflowState = 'reviewing';
   private drafts = new LicenseReviewDrafts();
   get analyzed() {
@@ -96,7 +98,30 @@ export abstract class LicenseWorkflowReview {
       !this.closing &&
       ['inspected', 'reviewing', 'previewed', 'saved'].includes(this.state);
     const hadDrafts = this.drafts.size > 0;
-    const result = this.drafts.apply(command, row, this.contentRevision, writable);
+    const result = this.drafts.apply(
+      command,
+      row,
+      this.contentRevision,
+      writable,
+      (query, marked) => {
+        const view = listLicenseWorkbenchReview(
+          analysis.artifact,
+          query,
+          this.reviewDatabaseContext,
+          false,
+          {
+            values: (candidate) => (candidate === row ? marked : this.drafts.values(candidate)),
+          },
+          row.normalizedText
+        );
+        return {
+          nextEligibleId: view.navigation!.nextEligibleId,
+          remaining: view.remaining,
+          total: view.total,
+          page: view.page,
+        };
+      }
+    );
     if (!result.conflict && result.contentRevision > this.contentRevision) {
       this.contentRevision = result.contentRevision;
       this.analysis = Object.freeze({ ...analysis, contentRevision: this.contentRevision });

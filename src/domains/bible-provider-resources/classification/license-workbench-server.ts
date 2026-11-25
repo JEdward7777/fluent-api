@@ -19,6 +19,7 @@ import { draftCommandSchema } from './license-review-drafts';
 import { describeLicenseReportPath } from './license-reviewer-container';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
 import { DatabaseTestUnavailableError } from './license-workbench-database-tests';
+import { reviewQuerySchema } from './license-workbench-review';
 import { databaseConnectionSchema, operationSchema, setupSchema } from './license-workbench-schema';
 import { LicenseWorkbenchSession } from './license-workbench-session';
 
@@ -90,19 +91,8 @@ function createLicenseWorkbenchApp(
     await next();
   });
   app.get('/api/setup', (c) => c.json(session.visible));
-  const reviewQuerySchema = z.object({
-    search: z.string().max(500).default(''),
-    status: z.enum(['all', 'allowed', 'forbidden', 'unknown']).default('all'),
-    source: z.enum(['all', 'table', 'rule', 'gemini', 'manual']).default('all'),
-    page: z.coerce.number().int().positive().default(1),
-  });
   app.get('/api/review', (c) => {
-    const parsed = reviewQuerySchema.safeParse({
-      search: c.req.query('search'),
-      status: c.req.query('status'),
-      source: c.req.query('source'),
-      page: c.req.query('page'),
-    });
+    const parsed = reviewQuerySchema.safeParse(c.req.query());
     if (!parsed.success) return c.text('Invalid review query', 400);
     try {
       return c.json(session.listReview(parsed.data));
@@ -111,8 +101,10 @@ function createLicenseWorkbenchApp(
     }
   });
   app.get('/api/review/:id', (c) => {
+    const parsed = reviewQuerySchema.safeParse(c.req.query());
+    if (!parsed.success) return c.text('Invalid review query', 400);
     try {
-      return c.json(session.reviewDetail(c.req.param('id')));
+      return c.json(session.reviewDetail(c.req.param('id'), parsed.data));
     } catch (error) {
       return c.text(error instanceof Error ? error.message : 'Review unavailable', 404);
     }

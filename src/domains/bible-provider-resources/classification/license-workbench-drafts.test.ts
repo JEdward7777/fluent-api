@@ -76,6 +76,7 @@ it.each([
       const { id, status } = list.rows.find(
         (candidate: { normalizedText: string }) => candidate.normalizedText === row.normalizedText
       );
+      expect(list.remaining).toBe(list.total - Number(priorHuman));
       const before = await (await call(`review/${id}`)).json();
       expect(before.reviewState).toBe(priorHuman ? 'human_reviewed' : 'unreviewed');
       if (priorHuman)
@@ -159,6 +160,7 @@ it.each([
         reviewComment: before.reviewComment,
       });
       expect(await (await draft(command)).json()).toEqual(ack);
+      expect((await (await call('review')).json()).remaining).toBe(list.remaining);
       const mark = await (
         await draft({
           ...envelope,

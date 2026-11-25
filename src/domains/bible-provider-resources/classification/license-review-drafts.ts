@@ -3,6 +3,8 @@ import { z } from 'zod';
 
 import type { LicenseClassification } from '../license-artifact.schemas';
 
+import { reviewQuerySchema } from './license-workbench-review';
+
 const envelope = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/),
   epoch: z.string().uuid(),
@@ -20,6 +22,7 @@ export const draftCommandSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   envelope.extend({ kind: z.literal('mark') }).strict(),
+  envelope.extend({ kind: z.literal('mark-next'), query: reviewQuerySchema.strict() }).strict(),
   envelope.extend({ kind: z.literal('revert') }).strict(),
 ]);
 export type DraftCommand = z.infer<typeof draftCommandSchema>;
@@ -53,13 +56,23 @@ export class LicenseReviewDrafts {
     };
   }
 
-  apply(command: DraftCommand, row: LicenseClassification, revision: number, writable: boolean) {
+  apply(
+    command: DraftCommand,
+    row: LicenseClassification,
+    revision: number,
+    writable: boolean,
+    navigate: (
+      query: z.output<typeof reviewQuerySchema>,
+      values: ReturnType<LicenseReviewDrafts['values']>
+    ) => NonNullable<DraftAck['navigation']>
+  ) {
     const current = this.values(row);
     const fingerprint = JSON.stringify([
       command.epoch,
       command.contentRevision,
       command.id,
       command.kind,
+      command.kind === 'mark-next' && command.query,
       command.kind === 'patch' && [
         command.status,
         command.reviewComment === undefined ? [] : command.reviewComment,
@@ -77,6 +90,17 @@ export class LicenseReviewDrafts {
     )
       return { ...header, conflict: true as const, contentRevision: revision, values: current };
 
+    const navigation =
+      command.kind === 'mark-next'
+        ? navigate(command.query, {
+            ...current,
+            pending: true,
+            reviewState: 'human_reviewed',
+            reviewedBy: null,
+            decisionAt: null,
+            humanReviewedAt: null,
+          })
+        : undefined;
     let changed = false;
     if (command.kind === 'revert') {
       changed = this.rows.delete(row.normalizedText);
@@ -89,13 +113,14 @@ export class LicenseReviewDrafts {
       changed =
         status !== current.status ||
         reviewComment !== current.reviewComment ||
-        (!current.pending && (command.kind === 'mark' || command.touched));
+        (!current.pending && (command.kind !== 'patch' || command.touched));
       if (changed)
         this.rows.set(row.normalizedText, { status, reviewComment, sequence: revision + 1 });
     }
     const ack: DraftAck = {
       ...header,
       conflict: false,
+      ...(navigation && { navigation }),
       contentRevision: revision + Number(changed),
       values: this.values(row),
     };
@@ -105,6 +130,7 @@ export class LicenseReviewDrafts {
 }
 
 interface DraftAck {
+  navigation?: { nextEligibleId: string | null; remaining: number; page: number; total: number };
   id: string;
   mutationId: string;
   epoch: string;
