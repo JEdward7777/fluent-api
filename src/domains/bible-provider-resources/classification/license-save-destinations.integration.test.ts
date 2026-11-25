@@ -116,15 +116,13 @@ describe('pGlite license persistence', () => {
     await database
       .insert(schema.languages)
       .values({ id: 1, langName: 'English', langCodeIso6393: 'eng' });
-    await database
-      .insert(schema.bibles)
-      .values({
-        languageId: 1,
-        provider: 'dbl',
-        externalId,
-        name: 'Test Bible',
-        abbreviation: 'TB',
-      });
+    await database.insert(schema.bibles).values({
+      languageId: 1,
+      provider: 'dbl',
+      externalId,
+      name: 'Test Bible',
+      abbreviation: 'TB',
+    });
     await database
       .insert(schema.bible_provider_resources)
       .values({ provider: 'dbl', externalId, textLicenseNotice: original.exampleNotice });
