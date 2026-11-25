@@ -10,16 +10,29 @@ const help = [
   ],
   [
     '#setup [name="databaseMode"]',
-    'Use the server environment connection or enter a connection held only for this workbench session. Switching connections requires Apply and a new Inspect.',
+    {
+      source:
+        'Choose the environment or a session connection. Apply source settings, then Load to read the selected database.',
+      destination:
+        'Choose the environment or a session connection. Apply destination settings to use this database for preview and Save. The loaded source stays in place.',
+    },
   ],
   [
     '#setup [name="databaseHost"]',
-    'Hostname or IP address of the PostgreSQL server. Connection is attempted only at Test or Inspect.',
+    {
+      source:
+        'Hostname or IP address of the source PostgreSQL server. Test checks connectivity. Load reads the source and freshness checks can read it again.',
+      destination:
+        'Hostname or IP address of the destination PostgreSQL server. Test checks connectivity, preview reads the target, and Save writes the confirmed changes.',
+    },
   ],
   ['#setup [name="databasePort"]', 'TCP port for PostgreSQL, usually 5432.'],
   [
     '#setup [name="databaseName"]',
-    'PostgreSQL database name. The selected identity is shown before Inspect or Save.',
+    {
+      source: 'Name of the PostgreSQL database to load as the review source.',
+      destination: 'Name of the PostgreSQL database to preview and save as the destination.',
+    },
   ],
   [
     '#setup [name="databaseUsername"]',
@@ -75,7 +88,7 @@ const help = [
   ],
   [
     '#setup [name="discardReviewedState"]',
-    'Confirm that applying changed settings will discard this session’s unsaved review and require inspection again.',
+    'Authorize replacing the current working review when you load the newly selected source.',
   ],
   [
     '#review-filter [name="search"]',
@@ -140,8 +153,15 @@ const help = [
 function describe(control, description, index) {
   const action = control.closest('.action-help');
   const label = action ?? control.closest('label');
-  if (!label || label.classList.contains('field-help-label')) return;
+  if (!label) return;
   const id = `field-help-${index}`;
+  if (label.classList.contains('field-help-label')) {
+    if (label.getAttribute('aria-describedby') === id && label.dataset.help !== description) {
+      label.dataset.help = description;
+      document.getElementById(id).textContent = description;
+    }
+    return;
+  }
   if (!document.getElementById(id)) {
     const accessible = document.createElement('span');
     accessible.id = id;
@@ -221,13 +241,18 @@ function describe(control, description, index) {
 }
 
 function initFieldHelp() {
+  const roleSelector = document.getElementById('setup').elements.databaseRole;
   const update = () => {
+    const role = roleSelector.value;
     for (const [index, [selector, description]] of help.entries()) {
       const control = document.querySelector(selector);
-      if (control) describe(control, description, index);
+      if (control) {
+        describe(control, typeof description === 'string' ? description : description[role], index);
+      }
     }
   };
   update();
+  roleSelector.addEventListener('change', update);
   new MutationObserver(update).observe(document.getElementById('review-detail'), {
     childList: true,
     subtree: true,

@@ -1,16 +1,16 @@
 const settingFields = [
-  ['source', 'source', 'source'],
-  ['destination', 'destination', 'destination'],
-  ['input', 'input', 'input path'],
-  ['output', 'output', 'output path'],
-  ['model', 'model', 'model'],
-  ['samples', 'sampleCount', 'samples'],
-  ['cacheDir', 'cacheDir', 'cache directory'],
-  ['reportFormats', 'reportFormats', 'report formats'],
-  ['reportDir', 'reportDir', 'report directory'],
-  ['force', 'force', 'replacement option'],
-  ['noCache', 'noCache', 'cache option'],
-  ['preserve', 'preserveExistingNonUnknowns', 'preserve status'],
+  ['source', 'source', 'source', 'load'],
+  ['destination', 'destination', 'destination', 'save'],
+  ['input', 'input', 'input path', 'load'],
+  ['output', 'output', 'output path', 'save'],
+  ['model', 'model', 'model', 'ai'],
+  ['samples', 'sampleCount', 'samples', 'ai'],
+  ['cacheDir', 'cacheDir', 'cache directory', 'ai'],
+  ['reportFormats', 'reportFormats', 'report formats', 'save'],
+  ['reportDir', 'reportDir', 'report directory', 'save'],
+  ['force', 'force', 'replacement option', 'save'],
+  ['noCache', 'noCache', 'cache option', 'ai'],
+  ['preserve', 'preserveExistingNonUnknowns', 'preserve status', 'save'],
 ];
 const optionalFields = ['source', 'destination', 'cacheDir', 'reportDir'];
 const paths = ['input', 'output', 'cacheDir', 'reportDir'];
@@ -99,13 +99,23 @@ export function readSettings(form, databaseConnection) {
   return { ...Object.fromEntries(pairs), ...databaseConnection };
 }
 
-export function pendingSettings(applied, draft) {
+export function pendingSettings(applied, draft, stages) {
   const changed = settingFields
-    .filter(([, key]) => settingChanged(applied, draft, key))
+    .filter(([, key, , stage]) => {
+      if (stages && !stages.includes(stage)) return false;
+      if (key === 'input' && draft.source !== 'json') return false;
+      if (key === 'output' && !['json', 'both'].includes(draft.destination)) return false;
+      return settingChanged(applied, draft, key);
+    })
     .map(([, , label]) => label);
   for (const role of ['source', 'destination']) {
+    if (stages && !stages.includes(role === 'source' ? 'load' : 'save')) continue;
     const entered = draft[`${role}DatabaseConnection`];
-    if (entered && changedConnection(applied[`${role}DatabaseConnection`], entered))
+    if (
+      ['database', 'both'].includes(draft[role]) &&
+      entered &&
+      changedConnection(applied[`${role}DatabaseConnection`], entered)
+    )
       changed.push(`${role} database connection`);
   }
   return changed.join(', ');
@@ -144,12 +154,46 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
     roleDrafts[databaseRole] = draftDatabase.read();
     databaseRole = form.elements.databaseRole.value;
     populateConnection(form, roleDrafts[databaseRole] ?? appliedConnection());
-    draftDatabase.invalidate();
     draftDatabase.syncFields(appliedConnection());
     onChange();
   });
   return {
     readDraft,
+    pending(...stages) {
+      const setup = getSetup();
+      if (!setup) return '';
+      const draft = readDraft();
+      const affected = [...conflicts].filter(
+        (role) =>
+          ['database', 'both'].includes(draft[role]) &&
+          (!stages.length || stages.includes(role === 'source' ? 'load' : 'save'))
+      );
+      const changes = pendingSettings(setup, draft, stages.length ? stages : undefined);
+      return [changes, ...affected.map((role) => `${role} database connection conflict`)]
+        .filter(Boolean)
+        .join(', ');
+    },
+    stageSubmission(stage) {
+      const applied = getSetup();
+      const draft = readDraft();
+      const fields = settingFields.filter(([name]) => {
+        const label = form.elements[name].closest('label');
+        return label?.dataset.stage === stage && !label.hidden;
+      });
+      const body = Object.fromEntries(settingFields.map(([, key]) => [key, applied[key]]));
+      for (const [, key] of fields) body[key] = draft[key];
+      const role = stage === 'load' ? 'source' : stage === 'save' ? 'destination' : null;
+      const connection =
+        role && ['database', 'both'].includes(body[role]) && draft[`${role}DatabaseConnection`];
+      if (connection) body[`${role}DatabaseConnection`] = connection;
+      const confirmation =
+        stage === 'load' ? this.discardConfirmation() : { discardReviewedState: false };
+      return {
+        body: { ...body, configurationRevision: applied.configurationRevision, ...confirmation },
+        fields,
+        role: connection ? role : null,
+      };
+    },
     appliedConnection,
     discardConfirmation() {
       const setup = getSetup();
@@ -157,18 +201,26 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
         ? { discardReviewedState: true, expectedContentRevision: setup.contentRevision }
         : { discardReviewedState: false };
     },
+    conflicted(role) {
+      return conflicts.has(role);
+    },
     get conflict() {
       if (!conflicts.size) return '';
-      return `The ${[...conflicts].join(' and ')} database connection changed in another tab. Restore applied settings to discard local settings changes and review the current connection before re-entering credentials.`;
+      return `The ${[...conflicts].join(' and ')} database connection changed in another tab. Restore settings on the affected stage to review the current connection before re-entering credentials.`;
     },
     get role() {
       return databaseRole;
     },
-    rebase(prior, next) {
+    rebase(prior, next, acceptedRole) {
       for (const role of ['source', 'destination']) {
         const key = `${role}DatabaseConnection`;
-        if (prior[`${role}Revision`] === next[`${role}Revision`]) continue;
         const active = role === databaseRole;
+        if (role === acceptedRole) {
+          delete roleDrafts[role];
+          if (active) populateConnection(form, next[key]);
+          continue;
+        }
+        if (prior[`${role}Revision`] === next[`${role}Revision`]) continue;
         const draft = active ? draftDatabase.read() : roleDrafts[role];
         if (draft && changedConnection(prior[key], draft)) {
           if (prior[`${role}ConnectionRevision`] !== next[`${role}ConnectionRevision`])
@@ -179,9 +231,11 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
         }
       }
     },
-    refresh(prior, next, populate) {
-      const revision = `${databaseRole}Revision`;
-      if (prior && prior[revision] !== next[revision]) draftDatabase.invalidate();
+    refresh(prior, next, populate, accepted) {
+      for (const role of ['source', 'destination']) {
+        const revision = `${role}Revision`;
+        if (prior && prior[revision] !== next[revision]) draftDatabase.invalidate(role);
+      }
       if (populate) {
         const priorDraft = draftDatabase.read();
         conflicts.clear();
@@ -191,12 +245,22 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
           draftDatabase.invalidate();
       } else if (prior) {
         rebaseSettings(form, prior, next);
-        this.rebase(prior, next);
+        this.rebase(prior, next, accepted?.role);
+        for (const [name, key] of accepted?.fields ?? []) displaySetting(form, next, name, key);
       }
     },
-    reset() {
-      conflicts.clear();
-      roleDrafts = {};
+    restore(stage) {
+      const applied = getSetup();
+      for (const [name, key, , owner] of settingFields)
+        if (stage === owner) displaySetting(form, applied, name, key);
+      if (stage === 'load') form.elements.discardReviewedState.checked = false;
+      const role = stage === 'load' ? 'source' : stage === 'save' ? 'destination' : null;
+      if (role) {
+        conflicts.delete(role);
+        delete roleDrafts[role];
+        draftDatabase.invalidate(role);
+        if (databaseRole === role) populateConnection(form, applied[`${role}DatabaseConnection`]);
+      }
     },
   };
 }

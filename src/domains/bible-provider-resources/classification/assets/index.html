@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>License workbench · Choose inputs</title>
+    <title>License workbench · Load</title>
     <link rel="stylesheet" href="./app.css" />
     <script type="module" src="./help.js"></script>
     <script type="module" src="./app.js"></script>
@@ -15,62 +15,32 @@
         <h1>License workbench</h1>
         <p>Inspect a source to prepare free evidence and review its classifications.</p>
       </header>
-      <nav aria-label="Workflow steps">
+      <nav aria-label="Workflow stages">
         <ol>
-          <li aria-current="step">Choose inputs</li>
-          <li>Analyze</li>
-          <li>Review</li>
-          <li>Preview changes</li>
-          <li>Save</li>
+          <li><a href="?stage=load" data-route="load" aria-current="page">Load</a></li>
+          <li>
+            <a data-route="ai" aria-disabled="true" aria-describedby="ai-state">AI classification</a
+            ><small id="ai-state">No AI work needed</small>
+          </li>
+          <li><a href="?stage=review" data-route="review">Review</a></li>
+          <li><a href="?stage=save" data-route="save">Save</a></li>
         </ol>
       </nav>
-      <section class="workflow-guide" aria-labelledby="guide-heading">
-        <h2 id="guide-heading">Follow the buttons in order</h2>
-        <p>The strip above shows your section; it does not run a step. Use the buttons below.</p>
-        <p id="guide-next" class="guide-next" role="status">Loading your next step…</p>
-        <ol class="guide-list">
-          <li id="guide-settings">
-            <strong>Check settings.</strong>
-            <span id="guide-settings-effect"> Check choices; apply changed settings.</span>
-          </li>
-          <li id="guide-inspect">
-            <strong>Click Inspect inputs.</strong>
-            <span> It loads the selected source and prepares eligible evidence.</span>
-          </li>
-          <li id="guide-analyze">
-            <strong>Refresh free evidence if needed.</strong>
-            <span id="guide-analyze-effect"> It builds the evidence you will review.</span>
-          </li>
-          <li id="guide-review">
-            <strong>Review classification evidence.</strong>
-            <span> Read the results below and open notices for details.</span>
-            <span> Apply or discard any row edit before previewing.</span>
-          </li>
-          <li id="guide-preview">
-            <strong id="guide-preview-action">Click Preview current revision.</strong>
-            <span id="guide-preview-effect"> It shows the exact changes without saving them.</span>
-          </li>
-          <li id="guide-save">
-            <strong id="guide-save-action">Click Save reviewed changes.</strong>
-            <span id="guide-save-effect"> It writes the previewed result.</span>
-          </li>
-        </ol>
-      </section>
       <section id="practice-banner" class="notice" hidden aria-label="Practice mode">
         <strong>Offline practice · JSON → JSON only</strong>
-        <p>Inspect copies the source into private scratch. The source stays unchanged.</p>
+        <p>Load copies the source into private scratch. The source stays unchanged.</p>
         <p>Scratch saves remain incomplete. No model, database or attestation is available.</p>
         <p id="practice-location">
-          Inspect allocates scratch. Restart for a fresh session. Discard scratch when finished.
+          Load allocates scratch. Restart for a fresh session. Discard scratch when finished.
         </p>
       </section>
-      <section aria-labelledby="setup-heading">
-        <h2 id="setup-heading">Choose inputs</h2>
-        <p>Editing reads no input. Apply settings before Inspect only if you change the form.</p>
-        <p id="status" role="status">Connecting to the local session…</p>
-        <form id="setup" hidden>
+      <section id="workflow" aria-labelledby="setup-heading">
+        <h2 id="setup-heading" tabindex="-1">Load</h2>
+        <p id="stage-instructions">Choose a source and load its free evidence.</p>
+
+        <form id="setup" novalidate hidden>
           <div class="fields">
-            <label
+            <label data-stage="load"
               >Source
               <select name="source" required>
                 <option value="">Choose source</option>
@@ -78,29 +48,33 @@
                 <option value="database">Configured database</option>
               </select></label
             >
-            <label
+            <label data-stage="save"
               >Destination
-              <select name="destination" required>
+              <select name="destination">
                 <option value="">Choose destination</option>
                 <option value="json">JSON file</option>
                 <option value="database">Configured database</option>
                 <option value="both">JSON and database</option>
               </select></label
             >
-            <label>Input JSON path <input name="input" required /></label>
-            <label>Output JSON path <input name="output" required /></label>
-            <label>Model <input name="model" required pattern="google:[^ :]+" /></label>
-            <label>Samples <input name="samples" type="number" min="2" step="1" required /></label>
+            <label data-stage="load">Input JSON path <input name="input" required /></label>
+            <label data-stage="save">Output JSON path <input name="output" required /></label>
+            <label data-stage="ai"
+              >Model <input name="model" required pattern="google:[^ :]+"
+            /></label>
+            <label data-stage="ai"
+              >Samples <input name="samples" type="number" min="2" step="1" required
+            /></label>
           </div>
           <p id="database-target" class="notice"></p>
           <!-- prettier-ignore -->
           <fieldset id="database-settings">
-            <legend>Database connection for this session</legend>
+            <legend id="connection-heading">Source database connection</legend>
             <p>
-              Select the connection to edit or test. The source supplies the loaded review. The destination receives saved decisions.
+              Test the entered connection before applying these settings.
             </p>
             <div class="fields">
-              <label
+              <label hidden
                 >Database role
                 <select name="databaseRole">
                   <option value="source">Source</option>
@@ -144,11 +118,13 @@
               password.
             </p>
           </fieldset>
-          <details>
+          <details data-stage="ai save" open>
             <summary>Advanced settings</summary>
             <div class="fields">
-              <label>Cache directory <input name="cacheDir" placeholder="Default cache" /></label>
-              <label
+              <label data-stage="ai"
+                >Cache directory <input name="cacheDir" placeholder="Default cache"
+              /></label>
+              <label data-stage="save"
                 >Report formats
                 <select name="reportFormats">
                   <option value="none">None</option>
@@ -157,19 +133,27 @@
                   <option value="markdown,html">Markdown and HTML</option>
                 </select></label
               >
-              <label>Report directory <input name="reportDir" placeholder="Default" /></label>
-              <label><input type="checkbox" name="noCache" /> Ignore cached requests</label>
+              <label data-stage="save"
+                >Report directory <input name="reportDir" placeholder="Default"
+              /></label>
+              <label data-stage="ai"
+                ><input type="checkbox" name="noCache" /> Ignore cached requests</label
+              >
               <input type="checkbox" name="force" hidden />
-              <label><input type="checkbox" name="preserve" /> Preserve status</label>
+              <label data-stage="save"
+                ><input type="checkbox" name="preserve" /> Preserve status</label
+              >
             </div>
           </details>
-          <p>Paths are local to the server process. A JSON source is read at Inspect.</p>
-          <p>Existing output is checked before Save.</p>
-          <label id="discard-label" hidden
+          <p data-stage="load">
+            Paths are local to the server process. Load reads the selected source.
+          </p>
+          <p data-stage="save">Existing output is checked before Save.</p>
+          <label data-stage="load" id="discard-label" hidden
             ><input type="checkbox" name="discardReviewedState" /> Discard unsaved review</label
           >
           <!-- prettier-ignore -->
-          <p id="settings-actions-help">Test checks the entered connection. Apply updates all review settings.</p>
+          <p id="settings-actions-help">Apply updates settings on this stage.</p>
           <div
             class="actions"
             role="group"
@@ -178,12 +162,12 @@
           >
             <button id="database-test" type="button" disabled>Test connection</button>
             <button id="apply-settings" type="submit">Apply settings</button>
-            <button id="restore-settings" type="button">Restore applied settings</button>
+            <button id="restore-settings" type="button">Restore settings on this stage</button>
           </div>
           <p id="settings-change-status" role="status"></p>
-          <p id="database-test-result" role="status"></p>
+          <p id="database-test-result" role="status" tabindex="-1"></p>
         </form>
-        <details id="cli-details">
+        <details data-stage="load" id="cli-details">
           <summary>Equivalent CLI command</summary>
           <p id="cli-connection-note">
             Use these settings in terminal review. The CLI uses its environment database connection.
@@ -192,21 +176,41 @@
           <p>It may write JSON too, while leaving policy untouched.</p>
           <pre id="cli-command"></pre>
         </details>
+        <p
+          id="status"
+          tabindex="-1"
+          class="stage-status"
+          aria-label="Workflow status"
+          role="status"
+        >
+          Connecting to the local session…
+        </p>
+        <p class="stage-links" aria-label="Session activity">
+          <a id="source-test-status" href="?stage=load" hidden></a>
+          <a id="destination-test-status" href="?stage=save" hidden></a>
+          <a id="review-ready" href="?stage=review" hidden></a>
+          <a id="save-ready" href="?stage=save" hidden></a>
+        </p>
+        <div data-stage="load ai" id="inspection" hidden></div>
+        <label data-stage="ai" id="paid-human" hidden
+          ><input type="checkbox" /> <span></span
+        ></label>
         <div id="analysis-actions" class="actions">
-          <button id="inspect" type="button" disabled>Inspect inputs</button
-          ><button id="analyze" type="button" disabled>Prepare free evidence</button
-          ><button id="paid" type="button" hidden>Run paid classification</button
-          ><button id="stop" type="button" hidden>Stop after current key</button>
+          <button data-stage="load" id="inspect" type="button" disabled>Load source</button
+          ><button data-stage="load ai" id="analyze" type="button" disabled>
+            Prepare free evidence</button
+          ><button data-stage="ai" id="paid" type="button" hidden>Run paid classification</button
+          ><button data-stage="ai" id="stop" type="button" hidden>Stop after current key</button>
         </div>
-        <label id="paid-human" hidden><input type="checkbox" /> <span></span></label>
-        <div id="analysis-progress" role="status">
+        <div data-stage="load ai" id="analysis-progress" role="status">
           <span class="analysis-spinner" aria-hidden="true" hidden></span>
           <span id="analysis-progress-text"></span>
         </div>
-        <p id="inspect-help">Inspect reads selected files, database and request cache as needed.</p>
-        <p id="analysis-help">Free preparation sends zero model requests.</p>
-        <div id="inspection" hidden></div>
-        <section id="review" hidden aria-labelledby="review-heading">
+        <p data-stage="load" id="inspect-help">
+          Inspect reads selected files, database and request cache as needed.
+        </p>
+        <p data-stage="ai" id="analysis-help">Free preparation sends zero model requests.</p>
+        <section data-stage="review" id="review" hidden aria-labelledby="review-heading">
           <h2 id="review-heading">Review classification evidence</h2>
           <p>Search saved evidence and open a notice to see its details.</p>
           <p>Reading evidence makes no model request or decision change.</p>
@@ -278,11 +282,12 @@
           </div>
           <div id="review-detail" hidden></div>
         </section>
-        <label id="save-reviewer-label" hidden
+        <a id="stage-next" hidden>Next</a>
+        <label data-stage="save" id="save-reviewer-label" hidden
           >Reviewer for pending decisions
           <input id="save-reviewer" maxlength="500" />
         </label>
-        <div id="practice-review" hidden>
+        <div data-stage="save" id="practice-review" hidden>
           <h2>Practice output</h2>
           <p>Edit a classification above, then preview the scratch output.</p>
           <div class="actions">
@@ -291,7 +296,7 @@
           </div>
           <p id="practice-preview-result"></p>
         </div>
-        <section id="normal-preview" hidden aria-labelledby="preview-heading">
+        <section data-stage="save" id="normal-preview" hidden aria-labelledby="preview-heading">
           <h2 id="preview-heading">Preview exact changes</h2>
           <p>Preview checks the inspected sources and target. No policy or artifact is written.</p>
           <button id="normal-preview-button" type="button">Preview current revision</button>
@@ -335,27 +340,37 @@
             <button id="normal-save-button" type="button" disabled>Save previewed decisions</button>
           </div>
         </section>
-        <section id="source-drift" hidden>
+        <section data-stage="save" id="source-drift" hidden>
           <h3>The loaded source changed</h3>
           <button type="button" id="source-inspect">Compare source and session</button>
           <form id="source-resolution" hidden></form>
           <p id="source-resolution-status" role="status"></p>
         </section>
-        <p id="session-save-status" role="status" hidden></p>
-        <button id="reconcile-save" type="button" hidden>Check actual Save targets</button>
-        <p id="save-result" role="status" hidden></p>
+        <p data-stage="save" id="session-save-status" role="status" hidden></p>
+        <button data-stage="save" id="reconcile-save" type="button" hidden>
+          Check actual Save targets
+        </button>
+        <p data-stage="save" id="save-result" role="status" hidden></p>
       </section>
-      <section aria-labelledby="operations-heading">
-        <h2 id="operations-heading">What the selections mean</h2>
-        <ul>
-          <li><strong>JSON → JSON:</strong> overwrite JSON from the current draft.</li>
-          <li><strong>Database → JSON:</strong> sync JSON; database stays unchanged.</li>
-          <li><strong>JSON → database:</strong> sync by rank; retain omissions.</li>
-          <li><strong>Database → database:</strong> overwrite selected rows; retain omissions.</li>
-          <li><strong>JSON → both:</strong> overwrite JSON and independently sync the database.</li>
-          <li><strong>Database → both:</strong> sync JSON and overwrite selected database rows.</li>
-        </ul>
-        <p id="alternatives-note">Both writes file and database targets.</p>
+      <section data-stage="save" aria-labelledby="operations-heading">
+        <details>
+          <summary id="operations-heading">What the selections mean</summary>
+          <ul>
+            <li><strong>JSON → JSON:</strong> overwrite JSON from the current draft.</li>
+            <li><strong>Database → JSON:</strong> sync JSON; database stays unchanged.</li>
+            <li><strong>JSON → database:</strong> sync by rank; retain omissions.</li>
+            <li>
+              <strong>Database → database:</strong> overwrite selected rows; retain omissions.
+            </li>
+            <li>
+              <strong>JSON → both:</strong> overwrite JSON and independently sync the database.
+            </li>
+            <li>
+              <strong>Database → both:</strong> sync JSON and overwrite selected database rows.
+            </li>
+          </ul>
+          <p id="alternatives-note">Both writes file and database targets.</p>
+        </details>
       </section>
     </main>
     <!-- prettier-ignore -->

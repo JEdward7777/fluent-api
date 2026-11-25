@@ -147,6 +147,8 @@ export class LicenseWorkbenchConfiguration {
       destinationRevision: this.destinationRevision,
       aiRevision: this.aiRevision,
       loadRevision: this.loadRevision,
+      sourceDatabaseTarget: workbenchDatabaseIdentity(this.databaseConnection),
+      destinationDatabaseTarget: workbenchDatabaseIdentity(this.destinationConnection),
       sourceDatabaseConnection: visibleWorkbenchDatabase(this.databaseConnection),
       destinationDatabaseConnection: visibleWorkbenchDatabase(this.destinationConnection),
       sourceDatabaseTest: this.databaseTests.appliedStatus,

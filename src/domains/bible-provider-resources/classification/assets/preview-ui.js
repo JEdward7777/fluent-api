@@ -38,7 +38,7 @@ export function renderExactPreview(
       : saveStatusUnconfirmed()
         ? 'Save acknowledgment is unresolved. Inspect actual targets before another mutation.'
         : dirty
-          ? `Pending settings changes: ${dirty}. Restore applied settings to keep the current review, or apply the changes and inspect again.`
+          ? `Pending settings changes: ${dirty}. Apply the source or destination changes on their stage, or restore settings on the affected stage.`
           : 'Apply this row edit or discard it before preview or attestation.';
     return;
   }

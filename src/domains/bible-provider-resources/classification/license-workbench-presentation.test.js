@@ -36,6 +36,7 @@ describe('database role presentation', () => {
     (active) => {
       const environment = { mode: 'environment' };
       let setup = {
+        reportFormats: 'none',
         destinationConnectionRevision: 1,
         sourceRevision: 1,
         destinationRevision: 1,
@@ -105,7 +106,17 @@ describe('database role presentation', () => {
       if (!active) select('destination');
       expect(elements.databaseName.value).toBe('typed-db');
       expect(drafts.conflict).toContain('destination database connection changed in another tab');
-      drafts.reset();
+      for (const name of [
+        'destination',
+        'output',
+        'reportFormats',
+        'reportDir',
+        'force',
+        'preserve',
+      ])
+        elements[name] = {};
+      drafts.restore('save');
+      expect(elements.databaseName.value).toBe('server-db');
       expect(drafts.conflict).toBe('');
     }
   );
@@ -134,6 +145,18 @@ it.each(['reviewing', 'saved'])(
     );
   }
 );
+
+it.each([
+  ['analysis', 'Preparing free evidence…'],
+  ['paid', 'Running paid classification…'],
+])('announces active and failed %s over available review rows', (kind, message) => {
+  const view = { state: 'reviewing', analysis: { rows: 4 } };
+  expect(workflowStatus({ ...view, latestOperation: { kind, state: 'running' } }, {})).toBe(
+    message
+  );
+  const failure = { kind, state: 'failed', error: 'Fixture operation failed.' };
+  expect(workflowStatus({ ...view, latestOperation: failure }, {})).toBe(failure.error);
+});
 
 it('merges another tab’s pristine settings without clearing the active source test or local edits', () => {
   const form = { elements: {} };
@@ -190,10 +213,10 @@ it('merges another tab’s pristine settings without clearing the active source 
   form.elements.samples.value = '4';
   const next = { ...prior, configurationRevision: 2, destinationRevision: 2, output: 'two.json' };
   drafts.refresh(prior, next, false);
-  expect(database.invalidate).not.toHaveBeenCalled();
+  expect(database.invalidate.mock.calls).toEqual([['destination']]);
   expect(drafts.readDraft()).toMatchObject({ output: 'two.json', sampleCount: 4 });
   drafts.refresh(next, { ...next, sourceRevision: 2 }, false);
-  expect(database.invalidate).toHaveBeenCalledOnce();
+  expect(database.invalidate.mock.calls).toEqual([['destination'], ['source']]);
 });
 
 it.each([
@@ -208,8 +231,56 @@ it.each([
 ])(
   'blocks both starts while a row edit is local and restores the eligible action after resolution',
   (setup, eligible) => {
-    expect(evidenceActions(setup, false, false, true)).toEqual({ inspect: false, analyze: false });
-    expect(evidenceActions(setup, false, false, false)).toEqual(eligible);
+    expect(evidenceActions(setup, false, {}, true)).toEqual({ inspect: false, analyze: false });
+    expect(evidenceActions(setup, false, {}, false)).toEqual(eligible);
+  }
+);
+
+it('permits a pending source replacement with unapplied AI settings and blocks free refresh', () => {
+  const changes = { load: '', analysis: 'samples' };
+  expect(
+    evidenceActions(
+      { state: 'reviewing', readyForInspect: true, sourceDraftPending: true },
+      false,
+      changes,
+      false
+    )
+  ).toEqual({ inspect: true, analyze: false });
+  expect(
+    evidenceActions(
+      { state: 'reviewing', readyForInspect: true, sourceDraftPending: false },
+      false,
+      changes,
+      false
+    )
+  ).toEqual({ inspect: false, analyze: false });
+});
+
+it.each(['configuring', 'reviewing'])(
+  'shows the active candidate load over the published %s state',
+  (state) => {
+    const actions = { setAttribute: vi.fn() };
+    const spinner = {};
+    const label = {};
+    vi.stubGlobal('document', {
+      getElementById: (id) => (id === 'analysis-actions' ? actions : label),
+      querySelector: () => spinner,
+    });
+    try {
+      const progress = createAnalysisProgress(vi.fn(), vi.fn(), () => false);
+      const operation = { kind: 'inspect', state: 'running', operationId: 'loading' };
+      const setup = { state, activeOperationId: 'loading', latestOperation: operation };
+      progress.update(setup);
+      expect(actions.setAttribute).toHaveBeenLastCalledWith('aria-busy', 'true');
+      expect(spinner.hidden).toBe(false);
+      expect(label.textContent).toMatch(/Loading source/);
+      progress.update({ ...setup, activeOperationId: 'different' });
+      expect(actions.setAttribute).toHaveBeenLastCalledWith('aria-busy', 'false');
+      expect(spinner.hidden).toBe(true);
+      expect(label.textContent).toBe('');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   }
 );
 
@@ -306,7 +377,7 @@ it('renders only the current free preparation estimate and enables refreshing a 
       false
     )
   ).toContain('0 outstanding model requests. No AI work needed.');
-  expect(evidenceActions(view, false, false, false).analyze).toBe(true);
+  expect(evidenceActions(view, false, {}, false).analyze).toBe(true);
 });
 
 it('reports the rule nonmatch in both the immediate acknowledgement and the current estimate', () => {

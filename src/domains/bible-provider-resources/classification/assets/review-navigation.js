@@ -23,7 +23,11 @@ function readEntry(state) {
   )
     return null;
   const { launchId, chain, index, configuration, search, status, source, page, row } = entry;
-  return { launchId, chain, index, configuration, search, status, source, page, row };
+  const listIndex =
+    Number.isSafeInteger(entry.listIndex) && entry.listIndex >= 0 && entry.listIndex < index
+      ? entry.listIndex
+      : index - 1;
+  return { launchId, chain, index, configuration, search, status, source, page, row, listIndex };
 }
 
 const chainId = () =>
@@ -89,6 +93,14 @@ export function initReviewNavigation(form, onNavigate, mayTraverse) {
     pending = null;
     if (target.index === entry.index) return;
     if (
+      ['row', 'page', 'search', 'status', 'source', 'configuration'].every(
+        (key) => target[key] === entry[key]
+      )
+    ) {
+      Object.assign(entry, target);
+      return;
+    }
+    if (
       !mayTraverse() ||
       (!discardConfirmed &&
         dirty &&
@@ -124,7 +136,7 @@ export function initReviewNavigation(form, onNavigate, mayTraverse) {
       const sameLaunch = entry?.launchId === setup.launchId;
       if (
         !sameLaunch ||
-        entry.configuration !== setup.configurationRevision ||
+        entry.configuration !== setup.loadRevision ||
         (!setup.analysis && entry.row)
       ) {
         entry = {
@@ -132,23 +144,30 @@ export function initReviewNavigation(form, onNavigate, mayTraverse) {
           launchId: setup.launchId,
           chain: sameLaunch ? entry.chain : chainId(),
           index: sameLaunch ? entry.index : 0,
-          configuration: setup.configurationRevision,
+          configuration: setup.loadRevision,
         };
         write('replaceState');
       }
       return entry;
     },
+    pushStage(url) {
+      if (!entry || pending || !mayTraverse()) return false;
+      entry.index++;
+      window.history.pushState({ [stateKey]: entry }, '', url);
+      return true;
+    },
     goTo(page) {
       push({ page });
     },
     openRow(row) {
-      push({ row });
+      push({ row, listIndex: entry.index });
     },
     backToResults(discardConfirmed = false) {
       if (!entry?.row || pending || !mayTraverse()) return;
       if (entry.index > 0) {
-        pending = { index: entry.index - 1, discardConfirmed };
-        window.history.back();
+        const index = entry.listIndex ?? entry.index - 1;
+        pending = { index, discardConfirmed };
+        window.history.go(index - entry.index);
       } else replaceRow();
     },
     forgetRow: replaceRow,

@@ -32,6 +32,8 @@ const navigation = initReviewNavigation(
   () => !editBusy
 );
 
+export const { pushStage } = navigation;
+
 const pagination = initReviewPagination(section, (page) => navigation.goTo(page));
 
 function setDraftDirty(value) {
@@ -41,9 +43,7 @@ function setDraftDirty(value) {
   onDraftChange(value);
 }
 
-export function hasUnsavedReviewDraft() {
-  return editDirty;
-}
+export const hasUnsavedReviewDraft = () => editDirty;
 
 function node(tag, value, className) {
   const element = document.createElement(tag);
@@ -299,7 +299,7 @@ function reviewEditor(item) {
   update();
   return editor;
 }
-async function openDetail(id) {
+async function openDetail(id, focus = true) {
   const sequence = ++detailRequest;
   try {
     const item = await request(`review/${encodeURIComponent(id)}`);
@@ -422,7 +422,7 @@ async function openDetail(id) {
     }
     viewStatus.hidden = true;
     detail.hidden = false;
-    back.focus();
+    if (focus) back.focus();
   } catch (error) {
     if (sequence === detailRequest) {
       navigation.forgetRow();
@@ -453,7 +453,7 @@ export function setReviewBusy(busy, settingsChanged = dirtySettings) {
   syncRerunButtons(detail, rerunUnavailable());
 }
 
-export function updateReview(setup) {
+export function updateReview(setup, focus = true) {
   currentSetup = setup;
   const view = navigation.sync(setup);
   const previous = renderedView;
@@ -498,9 +498,9 @@ export function updateReview(setup) {
     viewStatus.hidden = !view.row;
     viewStatus.textContent = view.row ? 'Loading classification evidence…' : '';
     updateEditorControls = () => {};
-    if (view.row) void openDetail(view.row);
-    void loadRows(view, focusRow);
-    if (!view.row && !focusRow && previous === view) {
+    if (view.row) void openDetail(view.row, focus);
+    void loadRows(view, focus && focusRow);
+    if (focus && !view.row && !focusRow && previous === view) {
       heading.tabIndex = -1;
       heading.focus();
     }

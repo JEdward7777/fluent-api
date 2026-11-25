@@ -1,11 +1,29 @@
-export function createDraftDatabaseTest(form, request, confirm, updateControls) {
+import { changedConnection } from './settings-draft.js';
+
+export function createDraftDatabaseTest(form, request, confirm, updateControls, appliedStatus) {
   const databaseFields = document.getElementById('session-database-fields');
   const databasePasswordState = document.getElementById('database-password-state');
   const result = document.getElementById('database-test-result');
-  let generation = 0;
+  const generations = { source: 0, destination: 0 };
+  const messages = { source: '', destination: '' };
+  const draftResults = { source: '', destination: '' };
+  const activeRole = () => form.elements.databaseRole.value;
+  const showResult = () => {
+    const role = activeRole();
+    const applied = appliedStatus(role);
+    result.textContent =
+      messages[role] ||
+      (applied === 'passed'
+        ? 'Applied connection passed.'
+        : applied === 'failed'
+          ? 'Applied connection failed. Test again for connection details.'
+          : '');
+    result.dataset.state = result.textContent.includes('connection failed') ? 'error' : '';
+  };
   let running = false;
 
   function syncFields(current) {
+    showResult();
     const fields = form.elements;
     const selected = fields.databaseMode.value === 'session';
     databaseFields.hidden = !selected;
@@ -46,12 +64,14 @@ export function createDraftDatabaseTest(form, request, confirm, updateControls) 
     };
   }
 
-  function invalidate() {
-    generation++;
-    result.textContent = '';
+  function invalidate(role = activeRole()) {
+    generations[role]++;
+    messages[role] = '';
+    draftResults[role] = '';
+    showResult();
   }
 
-  async function run(configurationRevision, role) {
+  async function run(configurationRevision, role, applied) {
     if (running) return;
     const databaseConnection = read();
     if (databaseConnection.mode === 'session') {
@@ -63,21 +83,35 @@ export function createDraftDatabaseTest(form, request, confirm, updateControls) 
         return;
       }
     }
-    const startedGeneration = generation;
+    const draft = changedConnection(applied, databaseConnection);
+    const label = draft ? 'Draft connection' : 'Applied connection';
+    const startedGeneration = generations[role];
     running = true;
     updateControls();
-    result.textContent = 'Testing the entered connection…';
-    let outcome = 'Entered connection passed. Apply settings to use it for review.';
+    messages[role] = `Testing ${label.toLowerCase()}…`;
+    showResult();
+    let test = 'passed';
+    let outcome = draft
+      ? 'Draft connection passed. Apply settings to use it.'
+      : 'Applied connection passed.';
     try {
-      await request('database/test', 'POST', { configurationRevision, databaseConnection, role });
+      await request('database/test', 'POST', {
+        configurationRevision,
+        ...(draft ? { databaseConnection } : {}),
+        role,
+      });
     } catch (error) {
-      outcome = `Entered connection: ${error.message}`;
+      test = 'failed';
+      outcome = `${label} failed: ${error.message}`;
     }
     try {
       const confirmed = await confirm(configurationRevision, role);
-      if (startedGeneration === generation) {
-        const unchanged = JSON.stringify(databaseConnection) === JSON.stringify(read());
-        result.textContent = confirmed && unchanged ? outcome : '';
+      if (startedGeneration === generations[role]) {
+        messages[role] = confirmed ? outcome : '';
+        draftResults[role] = confirmed && draft ? test : '';
+        showResult();
+        if (!confirmed) return document.getElementById('status');
+        if (test === 'failed' && activeRole() === role) return result;
       }
     } finally {
       running = false;
@@ -88,6 +122,7 @@ export function createDraftDatabaseTest(form, request, confirm, updateControls) 
   return {
     syncFields,
     read,
+    draftStatus: (role) => draftResults[role],
     invalidate,
     run,
     get running() {

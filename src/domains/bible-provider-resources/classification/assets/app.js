@@ -1,11 +1,14 @@
 import {
   createAnalysisProgress,
+  createEvidencePolling,
   evidenceActions,
   inspectionSummary,
+  trackOperationFocus,
+  watchSession,
   workflowStatus,
 } from './analysis-progress.js';
 import { createDraftDatabaseTest } from './database-test.js';
-import { renderGuide as updateGuide } from './guide.js';
+import { createStageNavigation, renderSetupContext, trackActionFocus } from './guide.js';
 import { createPaidControls } from './paid-controls.js';
 import {
   renderExactPreview as updateExactPreview,
@@ -13,15 +16,15 @@ import {
 } from './preview-ui.js';
 import { initReportControls, invalidateReportSelection } from './report-controls.js';
 import { reassessmentStatus } from './review-rerun.js';
-import { hasUnsavedReviewDraft, initReview, setReviewBusy, updateReview } from './review.js';
-import { initSave, renderSave, saveStatusUnconfirmed, withTabSaveOutcome } from './save.js';
 import {
-  equivalentCliCommand,
-  pendingSettings,
-  populateSettings,
-  roleConnectionDrafts,
-  syncSettingsFields,
-} from './settings-draft.js';
+  hasUnsavedReviewDraft,
+  initReview,
+  pushStage,
+  setReviewBusy,
+  updateReview,
+} from './review.js';
+import { initSave, renderSave, saveStatusUnconfirmed, withTabSaveOutcome } from './save.js';
+import { pendingSettings, roleConnectionDrafts, syncSettingsFields } from './settings-draft.js';
 
 const launchedToken = window.location.hash.slice(1);
 if (launchedToken) window.sessionStorage.setItem('license-workbench-token', launchedToken);
@@ -46,32 +49,42 @@ let applyingSettings = false;
 let practiceBusy = false;
 let sessionUnconfirmed = false;
 
+const getSetup = () => setup;
+const fetchApi = (path, options) => fetch(`./api/${path}`, options);
+const observer = watchSession(
+  fetchApi,
+  token,
+  (next) => render(next, false, undefined, true),
+  mayObserve
+);
+const { request } = observer;
 const previewButton = document.getElementById('normal-preview-button');
 const attestation = document.getElementById('attestation');
 const draftDatabase = createDraftDatabaseTest(
   form,
   request,
   confirmTestRevision,
-  updateDraftControls
+  updateDraftControls,
+  (role) => setup?.[`${role}DatabaseTest`]
 );
 
-const analysisProgress = createAnalysisProgress(
-  () => setup,
-  render,
-  () => sessionUnconfirmed
-);
-const drafts = roleConnectionDrafts(form, draftDatabase, () => setup, checkPendingSettings);
-const { readDraft, appliedConnection } = drafts;
-const pending = () => drafts.conflict || (setup ? pendingSettings(setup, readDraft()) : '');
-
-function showPending(changes) {
-  dirty = changes;
-  settingsChangeStatus.textContent =
-    drafts.conflict ||
-    (dirty
-      ? `Pending settings changes: ${dirty}. Restore applied settings to keep the current review.`
-      : '');
+const analysisProgress = createAnalysisProgress(getSetup, render, () => sessionUnconfirmed);
+function mayObserve() {
+  return (
+    setup &&
+    !applyingSettings &&
+    !practiceBusy &&
+    !sessionUnconfirmed &&
+    !saveStatusUnconfirmed() &&
+    !analysisProgress.starting &&
+    !draftDatabase.running
+  );
 }
+const drafts = roleConnectionDrafts(form, draftDatabase, getSetup, checkPendingSettings);
+const { appliedConnection, pending } = drafts;
+const loadChanges = () => pending('load');
+const evidenceChanges = () => pending('load', 'ai');
+const saveChanges = () => pending('load', 'save');
 
 function settingsRequestActive(next = setup) {
   return applyingSettings || draftDatabase.running || next?.testingDatabase;
@@ -89,33 +102,59 @@ function workbenchBusy(next) {
   );
 }
 
-const paidControls = createPaidControls(() => setup, syncSettingsActions, start);
+const stages = createStageNavigation(form, {
+  getSetup,
+  pushStage,
+  draftStatus: draftDatabase.draftStatus,
+  onVisit: observer.refresh,
+  syncRoleActions,
+  hasAiDraft: () => Boolean(pending('ai')),
+});
+const paidControls = createPaidControls(getSetup, syncSettingsActions, start);
 function syncSettingsActions(next) {
   const busy = workbenchBusy(next);
-  syncSettingsFields(form, busy || applyingSettings, next.practice);
+  syncSettingsFields(
+    form,
+    (busy && !observer.observingOperation) || applyingSettings,
+    next.practice
+  );
   const blocked = busy || settingsRequestActive(next);
-  databaseTest.disabled =
-    blocked || Boolean(drafts.conflict) || next.practice || next.state === 'uncertain';
-  applySettings.disabled = blocked || Boolean(drafts.conflict);
+  syncRoleActions(next, stages.current);
   restoreSettings.disabled = blocked;
-  const actions = evidenceActions(next, blocked, dirty, hasUnsavedReviewDraft());
+  const actions = evidenceActions(
+    next,
+    blocked,
+    { load: loadChanges(), analysis: evidenceChanges() },
+    hasUnsavedReviewDraft()
+  );
   paidControls.update(next, actions.analyze);
   inspect.disabled = !actions.inspect;
   analyze.disabled = !actions.analyze;
   inspection.hidden = !next.inspected;
-  inspection.textContent = inspectionSummary(next, dirty);
+  inspection.textContent = inspectionSummary(next, evidenceChanges());
 }
 
-const renderGuide = (next) =>
-  updateGuide(next, {
-    dirty,
-    practiceBusy,
-    sessionUnconfirmed,
-    startingAnalysis: analysisProgress.starting === 'analysis',
-  });
+function syncRoleActions(next, stage) {
+  const blocked = workbenchBusy(next) || settingsRequestActive(next);
+  databaseTest.disabled =
+    blocked || drafts.conflicted(drafts.role) || next.practice || next.state === 'uncertain';
+  const role = stage === 'load' ? 'source' : stage === 'save' ? 'destination' : null;
+  const conflicted =
+    role && ['database', 'both'].includes(form.elements[role].value) && drafts.conflicted(role);
+  applySettings.disabled = blocked || conflicted;
+  const changes = pending(stage);
+  settingsChangeStatus.textContent = conflicted
+    ? drafts.conflict
+    : changes
+      ? `Pending settings changes: ${changes}. Apply or restore this stage’s settings.`
+      : '';
+}
+const renderGuide = (next) => stages.update(next);
+const captureFocus = trackActionFocus();
+const operationFocus = trackOperationFocus(captureFocus, status);
 
 const previewFlags = () => ({
-  dirty,
+  dirty: saveChanges(),
   practiceBusy,
   sessionUnconfirmed,
   settingsBusy: settingsRequestActive(),
@@ -127,13 +166,16 @@ function syncReviewAvailability(next) {
   renderExactPreview(next);
   renderSave(next);
   syncPracticeDraftControls();
-  setReviewBusy(workbenchBusy(next) || practiceBusy || settingsRequestActive(next), Boolean(dirty));
+  setReviewBusy(
+    workbenchBusy(next) || practiceBusy || settingsRequestActive(next),
+    Boolean(evidenceChanges())
+  );
 }
 
 function checkPendingSettings() {
   const changes = pending();
   if (changes !== dirty) {
-    showPending(changes);
+    dirty = changes;
     syncSettingsActions(setup);
     syncReviewAvailability(setup);
     renderGuide(setup);
@@ -141,23 +183,6 @@ function checkPendingSettings() {
   return Boolean(changes);
 }
 
-async function request(path, method = 'GET', body, responseType = 'json') {
-  const response = await fetch(`./api/${path}`, {
-    method,
-    headers: {
-      'x-workbench-token': token,
-      ...(body ? { 'content-type': 'application/json' } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  if (!response.ok) {
-    const error = new Error(await response.text());
-    error.status = response.status;
-    error.requestRejected = [400, 403, 409].includes(response.status);
-    throw error;
-  }
-  return responseType === 'blob' ? response.blob() : response.json();
-}
 initReview(
   request,
   async (body) => {
@@ -175,7 +200,8 @@ initReview(
     }
   },
   async (body) => {
-    if (checkPendingSettings()) throw new Error('Apply or restore settings before reassessment.');
+    if (evidenceChanges())
+      throw new Error('Apply or restore source and AI settings before reassessment.');
     const next = await request('review/rerun', 'POST', body);
     if (
       next.configurationRevision < setup.configurationRevision ||
@@ -186,105 +212,67 @@ initReview(
         requestRejected: true,
       });
     render(next);
-    if (!dirty) status.textContent = reassessmentStatus(body, next.paidEstimate);
+    if (!evidenceChanges()) status.textContent = reassessmentStatus(body, next.paidEstimate);
     return next;
   }
 );
-function render(raw, populate = false) {
+function render(raw, populate = false, accepted, passive = false) {
+  observer.remember(raw);
   const next = withTabSaveOutcome(raw, setup);
   sessionUnconfirmed = false;
   if (setup?.loadRevision !== next.loadRevision || setup?.contentRevision !== next.contentRevision)
     form.elements.discardReviewedState.checked = false;
-  drafts.refresh(setup, next, populate);
+  drafts.refresh(setup, next, populate, accepted);
   setup = next;
-  updateReview(next);
+  if (!passive || !hasUnsavedReviewDraft()) updateReview(next, !passive);
   draftDatabase.syncFields(appliedConnection());
   form.hidden = false;
-  document.getElementById('practice-banner').hidden = !next.practice;
-  document.getElementById('cli-details').hidden = next.practice;
-  document.getElementById('operations-heading').textContent = next.practice
-    ? 'Workflow modes'
-    : 'What the selections mean';
-  document.getElementById('alternatives-note').textContent = next.practice
-    ? 'Practice uses saved JSON → scratch JSON. Database targets require a separate normal workbench launch.'
-    : 'Both previews JSON and database destinations independently. Cross-storage sync preserves stronger destination decisions and omitted rows.';
-  document.getElementById('inspect-help').textContent = next.practice
-    ? 'Inspect reads the selected saved JSON or bundled example and copies it into a new private scratch directory. No model or database is used.'
-    : 'Inspect reads selected files, database and request cache as needed.';
-  document.getElementById('analysis-help').textContent = next.practice
-    ? 'Practice analysis uses saved JSON evidence without model requests.'
-    : 'Prepare free evidence applies rule matches and complete cached assessments. Missing samples stay unchanged and are counted below. This action sends zero model requests.';
-  if (next.practice) {
-    for (const key of ['output', 'cacheDir', 'reportDir', 'reportFormats'])
-      form.elements[key].value = next[key] ?? '';
-    document.getElementById('practice-location').textContent = next.scratch
-      ? `Scratch: ${next.scratch}. Original SHA-256: ${next.originalHash}. Restart with --practice for a fresh session; discard this directory when finished. Practice output is never imported into a real session automatically.`
-      : 'Scratch is allocated after Inspect. Restart with --practice for a fresh session; discard the scratch directory when finished. Practice output is never imported into a real session automatically.';
-  }
-  showPending(pending());
+  renderSetupContext(form, next);
+  dirty = pending();
   document.getElementById('discard-label').hidden = !next.analysis;
-  document.getElementById('database-target').textContent = next.databaseTarget;
-  document.getElementById('cli-connection-note').textContent =
-    next.databaseConnection.mode === 'session'
-      ? 'The CLI command below does not transfer this session database or its password. The CLI uses its own environment database connection.'
-      : 'The CLI uses its environment database connection.';
-  const step = ['inspected', 'analyzing'].includes(next.state)
-    ? 'Analyze'
-    : ['reviewing', 'previewing'].includes(next.state)
-      ? 'Review'
-      : ['previewed', 'saving'].includes(next.state)
-        ? 'Preview changes'
-        : next.state === 'saved'
-          ? 'Save'
-          : 'Choose inputs';
-  for (const item of document.querySelectorAll('nav li')) {
-    if (item.textContent === step) item.setAttribute('aria-current', 'step');
-    else item.removeAttribute('aria-current');
-  }
-  document.getElementById('cli-command').textContent = equivalentCliCommand(next);
   const busy = workbenchBusy(next);
   syncSettingsActions(next);
   databaseTest.hidden = next.practice;
   settingsActionsHelp.hidden = next.practice;
   if (next.practice) {
     document.getElementById('database-settings').hidden = true;
+    form.elements.input.required = false;
     form.elements.input.placeholder = 'Bundled example or an absolute saved JSON path';
   }
   stop.hidden = next.state !== 'analyzing';
   stop.disabled =
     next.state !== 'analyzing' || Boolean(next.latestOperation?.progress?.stopRequested);
   analysisProgress.update(next);
+  status.dataset.state = busy
+    ? 'busy'
+    : next.latestOperation?.state === 'failed' || next.state === 'uncertain'
+      ? 'error'
+      : 'ready';
   status.textContent = workflowStatus(next, { busy, dirty, starting: analysisProgress.starting });
   const practiceReview = document.getElementById('practice-review');
   practiceReview.hidden = !next.practice || !next.analysis;
   syncReviewAvailability(next);
   renderGuide(next);
+  if (!analysisProgress.starting) operationFocus.observe(next.latestOperation);
 }
-async function refresh() {
-  render(await request('setup'));
-  if (setup.activeOperationId) {
-    const operation = await request(`operations/${encodeURIComponent(setup.activeOperationId)}`);
-    if (operation.state === 'running') window.setTimeout(pollEvidence, 800);
-    else render(await request('setup'));
-  } else if (setup.testingDatabase && !draftDatabase.running) window.setTimeout(refresh, 800);
-}
-async function pollEvidence() {
-  try {
-    await refresh();
-  } catch {
-    sessionUnconfirmed = true;
-    stop.disabled = true;
-    const message = 'Operation status is unavailable. Reload to check the result.';
-    analysisProgress.update(setup, message);
-    status.textContent = message;
-    syncSettingsActions(setup);
-    syncReviewAvailability(setup);
-    renderGuide(setup);
-  }
-}
+const { refresh, pollEvidence } = createEvidencePolling(getSetup, request, render, () => {
+  sessionUnconfirmed = true;
+  stop.disabled = true;
+  const message = 'Operation status is unavailable. Reload to check the result.';
+  analysisProgress.update(setup, message);
+  status.dataset.state = 'error';
+  status.textContent = message;
+  operationFocus.fail();
+  syncSettingsActions(setup);
+  syncReviewAvailability(setup);
+  renderGuide(setup);
+});
 form.addEventListener('input', (event) => {
   draftDatabase.syncFields(appliedConnection());
-  if (databaseSettings.contains(event.target)) draftDatabase.invalidate();
+  if (databaseSettings.contains(event.target)) {
+    draftDatabase.invalidate();
+    renderGuide(setup);
+  }
   checkPendingSettings();
 });
 form.addEventListener('change', checkPendingSettings);
@@ -292,37 +280,36 @@ document.addEventListener('focusin', checkPendingSettings);
 document.addEventListener('pointerdown', checkPendingSettings, true);
 restoreSettings.addEventListener('click', () => {
   if (!setup || restoreSettings.disabled) return;
-  drafts.reset();
-  populateSettings(form, setup);
+  drafts.restore(stages.current);
   draftDatabase.syncFields(appliedConnection());
-  draftDatabase.invalidate();
   checkPendingSettings();
-  status.textContent = 'Applied settings restored.';
+  renderGuide(setup);
+  status.textContent = 'Applied settings restored for this stage.';
 });
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!setup || applySettings.disabled || !checkPendingSettings()) return;
+  if (!setup || applySettings.disabled || !checkPendingSettings() || !stages.validate()) return;
+  const focusError = captureFocus();
   try {
     if (hasUnsavedReviewDraft()) {
       status.textContent = 'Apply or discard the open row edit before changing settings.';
-      status.tabIndex = -1;
       status.focus();
+      return;
+    }
+    const submission = drafts.stageSubmission(stages.current);
+    if (!pendingSettings(setup, submission.body)) {
+      status.textContent = 'This stage already uses the applied settings.';
       return;
     }
     applyingSettings = true;
     syncSettingsActions(setup);
     syncReviewAvailability(setup);
     status.textContent = 'Applying settings…';
-    render(
-      await request('setup', 'POST', {
-        configurationRevision: setup.configurationRevision,
-        ...drafts.discardConfirmation(),
-        ...readDraft(),
-      }),
-      true
-    );
+    render(await request('setup', 'POST', submission.body), false, submission);
   } catch (error) {
+    status.dataset.state = 'error';
     status.textContent = error.message;
+    focusError(status);
   } finally {
     applyingSettings = false;
     syncSettingsActions(setup);
@@ -346,36 +333,46 @@ async function confirmTestRevision(revision, role) {
 }
 
 function updateDraftControls() {
+  renderGuide(setup);
   syncSettingsActions(setup);
   syncReviewAvailability(setup);
   if (setup.testingDatabase && !draftDatabase.running && !sessionUnconfirmed)
     window.setTimeout(refresh, 800);
 }
 
-databaseTest.addEventListener('click', () => {
+databaseTest.addEventListener('click', async () => {
   if (!setup || databaseTest.disabled || settingsRequestActive()) return;
-  void draftDatabase.run(setup[`${drafts.role}Revision`], drafts.role);
+  const focusError = captureFocus();
+  focusError(
+    await draftDatabase.run(setup[`${drafts.role}Revision`], drafts.role, appliedConnection())
+  );
 });
 async function start(kind, paidBody) {
   if (hasUnsavedReviewDraft() || (kind === 'inspect' ? inspect.disabled : analyze.disabled)) return;
-  if (!setup || workbenchBusy(setup) || settingsRequestActive() || checkPendingSettings()) return;
+  if (
+    !setup ||
+    workbenchBusy(setup) ||
+    settingsRequestActive() ||
+    (kind === 'inspect' ? loadChanges() : evidenceChanges())
+  )
+    return;
+  const body = paidBody ?? {
+    operationId: crypto.randomUUID(),
+    configurationRevision: setup.configurationRevision,
+    ...drafts.discardConfirmation(),
+  };
+  operationFocus.start(body.operationId);
   const begin = async () => {
-    await request(
-      kind,
-      'POST',
-      paidBody ?? {
-        operationId: crypto.randomUUID(),
-        configurationRevision: setup.configurationRevision,
-        ...drafts.discardConfirmation(),
-      }
-    );
+    await request(kind, 'POST', body);
     await refresh();
   };
   try {
     await analysisProgress.start(kind, begin, pollEvidence);
   } catch (error) {
     if (sessionUnconfirmed) return;
+    status.dataset.state = 'error';
     status.textContent = error.message;
+    operationFocus.fail();
     if (kind !== 'inspect') analysisProgress.update(setup, error.message);
     if (kind === 'paid' && error.requestRejected) paidControls.resetReceipt();
   }
@@ -384,12 +381,15 @@ inspect.addEventListener('click', () => start('inspect'));
 analyze.addEventListener('click', () => start('analysis'));
 stop.addEventListener('click', async () => {
   if (stop.disabled || sessionUnconfirmed) return;
+  const focusError = captureFocus();
   try {
     await request('stop', 'POST');
     stop.disabled = true;
     status.textContent = 'Stop requested after the current key.';
   } catch (error) {
+    status.dataset.state = 'error';
     status.textContent = error.message;
+    focusError(status);
   }
 });
 async function practiceAction(path, body) {
@@ -397,7 +397,7 @@ async function practiceAction(path, body) {
     practiceBusy ||
     sessionUnconfirmed ||
     saveStatusUnconfirmed() ||
-    checkPendingSettings() ||
+    saveChanges() ||
     settingsRequestActive()
   )
     return;
@@ -440,17 +440,16 @@ async function recoverActionFailure(message) {
     }
     status.textContent = `${message} Session status unavailable; inspect actual targets and reload before retrying.`;
   }
-  status.tabIndex = -1;
   status.focus();
 }
 initSave({
   request,
-  getSetup: () => setup,
+  getSetup,
   refresh,
   recover: recoverActionFailure,
   hasDraft: hasUnsavedReviewDraft,
   isBlocked: () =>
-    sessionUnconfirmed || practiceBusy || Boolean(pending()) || settingsRequestActive(),
+    sessionUnconfirmed || practiceBusy || Boolean(saveChanges()) || settingsRequestActive(),
   setPracticeBusy: (value) => {
     practiceBusy = value;
     if (value) invalidateReportSelection();
@@ -478,7 +477,7 @@ previewButton.addEventListener('click', () => void preview('preview'));
 attestation.addEventListener('submit', (event) => {
   event.preventDefault();
   if (
-    checkPendingSettings() ||
+    saveChanges() ||
     sessionUnconfirmed ||
     saveStatusUnconfirmed() ||
     !setup.preview ||
@@ -494,20 +493,18 @@ attestation.addEventListener('submit', (event) => {
     responsibility: true,
   });
 });
-initReportControls(request, () => setup, recoverActionFailure, token, checkPendingSettings);
+initReportControls(request, getSetup, recoverActionFailure, token, saveChanges);
 document
   .getElementById('practice-preview')
   .addEventListener('click', () => void preview('practice/preview'));
 if (!token) {
   status.textContent = 'Open the printed local URL, including its session token after #.';
-  document.getElementById('guide-next').textContent = 'Open the printed session URL to begin.';
 } else {
   try {
     render(await request('setup'), true);
     if (setup.activeOperationId || setup.testingDatabase) await pollEvidence();
   } catch (error) {
+    status.dataset.state = 'error';
     status.textContent = error.message;
-    document.getElementById('guide-next').textContent =
-      'Session unavailable. Reload before continuing.';
   }
 }
