@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 
 import { createEstimateRefresh } from './assets/estimate-refresh.js';
+import { readReview, reviewAddress } from './assets/review-address.js';
 import { createDraftSync, reviewShortcuts } from './assets/review-edit-feedback.js';
 import { initReviewNavigation } from './assets/review-navigation.js';
 import { createSaveSettings } from './assets/save-settings.js';
@@ -255,6 +256,28 @@ it('transfers only review navigation through a shared address and a delayed sour
     expect(location.search).toBe('?stage=review');
   } finally {
     vi.unstubAllGlobals();
+  }
+});
+
+it('warns only with recognized invalid field names when cleaning a shared review address', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const params = new URLSearchParams({
+      stage: 'review',
+      search: 'good filter',
+      status: 'private comment',
+      page: 'secret',
+      row: 'invalid-credential',
+      password: 'sensitive',
+    });
+    expect(reviewAddress(readReview(params))).toBe('?stage=review&search=good+filter');
+    expect(warn.mock.calls).toEqual([
+      ['Ignoring invalid review address field: status'],
+      ['Ignoring invalid review address field: page'],
+      ['Ignoring invalid review address field: row'],
+    ]);
+  } finally {
+    warn.mockRestore();
   }
 });
 

@@ -30,6 +30,7 @@ export function readReview(params) {
     const raw = params.get(key);
     const value = typeof view[key] === 'number' ? Number(raw) : raw;
     if (check(value)) view[key] = value;
+    else console.warn(`Ignoring invalid review address field: ${key}`);
   }
   return view;
 }
