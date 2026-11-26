@@ -6,6 +6,7 @@
     <title>License workbench · Load</title>
     <link rel="stylesheet" href="./app.css" />
     <link rel="stylesheet" href="./review.css" />
+    <link rel="stylesheet" href="./save.css" />
     <script type="module" src="./help.js"></script>
     <script type="module" src="./app.js"></script>
   </head>
@@ -165,25 +166,19 @@
             </div>
           </details>
           <p data-stage="load">Use paths on the workbench server.</p>
-          <p data-stage="save">Existing output is checked before Save.</p>
           <label data-stage="load" id="discard-label" hidden
             ><input type="checkbox" name="discardReviewedState" /> Discard unsaved review</label
           >
-          <!-- prettier-ignore -->
-          <p data-stage="save" id="settings-actions-help">Apply updates settings on this stage.</p>
-          <div
-            class="actions"
-            role="group"
-            aria-label="Review settings actions"
-            aria-describedby="settings-actions-help"
-          >
+          <div class="actions" role="group" aria-label="Review settings actions">
             <button id="database-test" type="button" disabled>Test connection</button>
             <button data-stage="load" id="reload-source-connection" type="button" hidden>
               Use current source connection
             </button>
-            <button data-stage="save" id="apply-settings" type="submit">Apply settings</button>
-            <button data-stage="save" id="restore-settings" type="button">
-              <span>Restore settings on this stage</span>
+            <button data-stage="save" id="retry-save-settings" type="button" hidden>
+              <span>Retry destination settings</span>
+            </button>
+            <button data-stage="save" id="current-save-settings" type="button" hidden>
+              Use current destination settings
             </button>
           </div>
           <p id="settings-change-status" role="status"></p>
@@ -338,9 +333,36 @@
         <a data-stage="review" id="back-results-bottom" hidden>Back to results</a>
         <a id="stage-next" hidden>Next</a>
         <label data-stage="save" id="save-reviewer-label" hidden
-          >Reviewer for pending decisions
+          >Reviewer name for pending decisions
           <input id="save-reviewer" maxlength="500" />
         </label>
+        <section data-stage="save" id="normal-save" aria-label="Save decisions">
+          <!-- prettier-ignore -->
+          <label id="save-replacement" hidden
+            ><input id="save-replacement-agreement" type="checkbox" />
+            <span>I agree to replace policy.</span></label
+          >
+          <div class="actions save-actions">
+            <!-- prettier-ignore -->
+            <button
+              id="normal-save-button"
+              type="button"
+              aria-describedby="save-readiness"
+              disabled
+            >
+              Save previewed decisions
+            </button>
+            <span id="save-readiness" role="status"></span>
+            <button id="retry-preview" type="button" hidden>Prepare preview again</button>
+            <button id="view-changes" type="button" disabled>View changes</button>
+          </div>
+        </section>
+        <p data-stage="save" id="save-result" role="status" hidden></p>
+        <details data-stage="save" id="receipt-technical" hidden>
+          <summary>Save receipt fingerprints</summary>
+          <p>These fingerprints identify the data and bytes written by this Save.</p>
+          <pre id="receipt-hashes"></pre>
+        </details>
         <div data-stage="save" id="practice-review" hidden>
           <h2>Practice output</h2>
           <p id="practice-preview-result" role="status"></p>
@@ -354,22 +376,22 @@
             >
               Save incomplete scratch JSON
             </button>
+            <button id="retry-practice-preview" type="button" hidden>Prepare preview again</button>
           </div>
         </div>
+        <details data-stage="save" id="preview-technical" hidden>
+          <summary>Technical details</summary>
+          <!-- prettier-ignore -->
+          <p>
+              SHA-256 fingerprints identify the reviewed content and exact file bytes. Save checks
+              the destination against the preview before writing.
+            </p>
+          <pre id="preview-hashes"></pre>
+        </details>
         <section data-stage="save" id="normal-preview" hidden aria-labelledby="preview-heading">
           <h2 id="preview-heading">Preview exact changes</h2>
-          <p>Preview checks the inspected sources and target. No policy or artifact is written.</p>
 
           <div id="preview-result" role="status"></div>
-          <div id="normal-save" hidden>
-            <h3>Save this preview</h3>
-            <p>Save writes the independent JSON and policy results shown above.</p>
-            <label id="save-replacement" hidden>
-              <input id="save-replacement-agreement" type="checkbox" />
-              <span>I agree to replace policy.</span>
-            </label>
-            <button id="normal-save-button" type="button" disabled>Save previewed decisions</button>
-          </div>
           <details id="current-report">
             <summary>View report, results and impact</summary>
             <p id="current-report-status" role="status"></p>
@@ -431,7 +453,6 @@
         <button data-stage="save" id="reconcile-save" aria-describedby="session-save-status" hidden>
           Check actual Save targets
         </button>
-        <p data-stage="save" id="save-result" role="status" hidden></p>
       </section>
       <section data-stage="save" aria-labelledby="operations-heading">
         <details>
@@ -463,6 +484,15 @@
         <button id="report-cancel" type="button" autofocus>Cancel</button>
         <button id="report-confirm-write" type="button">Overwrite report</button>
       </div>
+    </dialog>
+    <dialog id="changes-drawer" aria-labelledby="changes-heading">
+      <header>
+        <h2 id="changes-heading">Destination changes</h2>
+        <button id="changes-close" type="button" autofocus>Close</button>
+      </header>
+      <p id="changes-status" role="status"></p>
+      <button id="changes-download" type="button" disabled>Download changes as JSON</button>
+      <div id="changes-records"></div>
     </dialog>
     <dialog id="report-dialog" aria-label="Exported report">
       <button id="report-close" type="button" autofocus>Close report</button>

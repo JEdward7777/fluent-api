@@ -1,0 +1,54 @@
+#save-reviewer-label {
+  width: min(100%, 25rem);
+}
+#save-reviewer {
+  width: min(100%, 28ch);
+}
+.save-actions {
+  align-items: center;
+}
+#save-readiness[data-busy='true']::before,
+#practice-preview-result[data-busy='true']::before {
+  content: '';
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-inline-end: 0.45rem;
+  border: 2px solid #acc2ce;
+  border-top-color: #164f6e;
+  border-radius: 50%;
+  animation: save-spin 0.8s linear infinite;
+}
+@keyframes save-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #save-readiness[data-busy='true']::before,
+  #practice-preview-result[data-busy='true']::before {
+    animation: none;
+  }
+}
+#changes-drawer {
+  margin: 0 0 0 auto;
+  height: 100dvh;
+  max-height: 100dvh;
+  width: min(44rem, 100%);
+  max-width: 100%;
+  padding: 1.25rem;
+  border: 0;
+  border-inline-start: 1px solid #9db8c7;
+  overflow-wrap: anywhere;
+}
+#changes-drawer header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+#changes-drawer pre,
+#preview-hashes,
+#receipt-hashes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

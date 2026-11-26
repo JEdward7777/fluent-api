@@ -2,8 +2,16 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 
+import { olderSetup } from './assets/estimate-refresh.js';
 import { makeCommandFixture } from './license-command.test-fixtures';
 import { LicenseWorkbenchSession } from './license-workbench-session';
+
+it('ignores a late preview or pre-Save read at the same configuration and content revision', () => {
+  const saved = { loadRevision: 2, configurationRevision: 3, contentRevision: 4, stateRevision: 9 };
+  expect(olderSetup(saved, { ...saved, stateRevision: 8 })).toBe(true);
+  expect(olderSetup(saved, { ...saved, stateRevision: 10 })).toBe(false);
+  expect(olderSetup(saved, { ...saved, loadRevision: 3, stateRevision: 1 })).toBe(false);
+});
 
 function browserControls() {
   const storage = new Map();
@@ -364,6 +372,27 @@ it('reconciles the session-wide uncertain Save while retaining the originating t
     expect(controls.get('session-save-status').textContent).toContain('confirmed unwritten');
     expect(controls.get('save-result').textContent).toContain('Operation A');
     expect(JSON.parse(storage.get('license-workbench-save-receipt'))).toEqual(receipt);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('allows source comparison while a failed preview blocks Save', async () => {
+  const { controls } = browserControls();
+  vi.resetModules();
+  try {
+    const { initSave } = await import('./assets/save.js');
+    const request = vi.fn().mockRejectedValue(new Error('Source currently unavailable'));
+    let busy = true;
+    initSave({ request, isBlocked: () => true, canReconcileSource: () => !busy });
+    await controls.get('source-inspect').click();
+    expect(request).not.toHaveBeenCalled();
+    busy = false;
+    await controls.get('source-inspect').click();
+    expect(request).toHaveBeenCalledExactlyOnceWith('source/reconcile', 'POST', {});
+    expect(controls.get('source-resolution-status').textContent).toBe(
+      'Source currently unavailable'
+    );
   } finally {
     vi.unstubAllGlobals();
   }

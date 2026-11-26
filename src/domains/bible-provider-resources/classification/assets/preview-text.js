@@ -11,8 +11,7 @@ export function licenseWorkbenchPreviewLines(next) {
   return [
     `Configuration ${preview.configurationRevision}; content revision ${preview.contentRevision}.`,
     preview.reviewer ? `Pending decisions: ${preview.reviewer}, ${preview.reviewedAt}.` : '',
-    `Working review SHA-256: ${preview.reviewContentHash}.`,
-    `Source: ${preview.sourceLabel}.${next.inspected?.sourceHash ? ` Inspected source SHA-256: ${next.inspected.sourceHash}.` : ''}`,
+    `Source: ${preview.sourceLabel}.`,
     next.sourceDraftPending
       ? 'This preview uses the loaded source. The newly selected source has not been loaded.'
       : '',
@@ -21,10 +20,10 @@ export function licenseWorkbenchPreviewLines(next) {
       : []),
     ...preview.targets.map(
       (target) =>
-        `${target.role}: ${target.path} (${target.existed ? `will replace SHA-256 ${target.previousHash}` : 'new file'}).`
+        `${target.role}: ${target.path} (${target.existed ? 'will replace existing file' : 'new file'}).`
     ),
     preview.json
-      ? `JSON ${preview.json.operation}: ${jsonDecisionCounts(preview.json)} JSON review SHA-256: ${preview.json.reviewContentHash}. Whole JSON SHA-256: ${preview.json.wholeFileHash}.`
+      ? `JSON ${preview.json.operation}: ${jsonDecisionCounts(preview.json)}`
       : 'No JSON write selected.',
     preview.json
       ? preview.json.assertion
@@ -42,20 +41,13 @@ export function licenseWorkbenchPreviewLines(next) {
         ]
       : []),
     preview.database
-      ? `Database ${preview.database.operation}: ${preview.database.inserted.length} inserts, ${preview.database.updated.length} updates (${preview.database.permissionChanges.length} permission, ${preview.database.metadataChanges.length} metadata only), ${preview.database.preserved.length} preserved, ${preview.database.unchanged.length} unchanged; no deletes or resource-cache writes. Forecast review SHA-256: ${preview.database.reviewContentHash}.`
+      ? `Database ${preview.database.operation}: ${preview.database.inserted.length} inserts, ${preview.database.updated.length} updates (${preview.database.permissionChanges.length} permission, ${preview.database.metadataChanges.length} metadata only), ${preview.database.preserved.length} preserved, ${preview.database.unchanged.length} unchanged; no deletes or resource-cache writes.`
       : 'Database remains unchanged.',
     ...(preview.database?.identityExplanation ? [preview.database.identityExplanation] : []),
     ...(preview.conflicts ?? []).map((conflict) => `Save conflict: ${conflict}`),
     preview.policy
       ? `Policy diff: ${preview.policy.inserts.length} inserts, ${preview.policy.updates.length} updates, ${preview.policy.deletes.length} deletes.`
       : 'No immediate policy diff in this JSON-only Save.',
-    ...(preview.policy
-      ? [
-          `Insert keys: ${keys(preview.policy.inserts)}.`,
-          `Update keys: ${keys(preview.policy.updates)}.`,
-          `Delete keys: ${keys(preview.policy.deletes)}.`,
-        ]
-      : []),
     preview.forecast
       ? `${preview.forecast.context.disclaimer} Later ordinary sync forecast: status changes ${preview.forecast.changedStatuses ?? 'unavailable'}, gains ${preview.forecast.gains ?? 'unavailable'}, losses ${preview.forecast.losses ?? 'unavailable'}; ${preview.forecast.missingClassifications} missing classifications.`
       : '',
@@ -66,4 +58,20 @@ export function licenseWorkbenchPreviewLines(next) {
         ? `Working whole-file assertion by ${preview.assertion.reviewedBy} on ${preview.assertion.reviewedAt}. Reason: ${preview.assertion.reviewReason}.`
         : 'A separate whole-file assertion remains bound to this content.',
   ];
+}
+
+export function previewFingerprints(next) {
+  const { preview, inspected } = next;
+  return [
+    ['Original practice source', next.originalHash],
+    ['Inspected source file', inspected?.sourceHash],
+    ['Working review content', preview.reviewContentHash],
+    ...preview.targets.map((target) => [`Prior file ${target.path}`, target.previousHash]),
+    ['Planned JSON content', preview.json?.reviewContentHash],
+    ['Planned JSON file bytes', preview.json?.wholeFileHash],
+    ['Forecast database decisions', preview.database?.reviewContentHash],
+  ]
+    .filter(([, hash]) => hash)
+    .map(([label, hash]) => `${label}: ${hash}`)
+    .join('\n');
 }

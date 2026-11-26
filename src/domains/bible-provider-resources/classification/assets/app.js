@@ -12,7 +12,7 @@ import { createEstimateRefresh, olderSetup } from './estimate-refresh.js';
 import { createStageNavigation, renderSetupContext, trackActionFocus } from './guide.js';
 import { createPaidControls } from './paid-controls.js';
 import {
-  createAutomaticPreview,
+  createSavePreview,
   initAttestation,
   renderExactPreview as updateExactPreview,
   syncPracticeDraftControls as updatePracticeDraftControls,
@@ -27,9 +27,16 @@ import {
   setReviewBusy,
   updateReview,
 } from './review.js';
-import { initSave, renderSave, saveStatusUnconfirmed, withTabSaveOutcome } from './save.js';
+import { initSaveChanges } from './save-changes.js';
+import { createSaveSettings } from './save-settings.js';
 import {
-  pendingSettings,
+  initSave,
+  renderSave,
+  saveStatusUnconfirmed,
+  saveSubmitting,
+  withTabSaveOutcome,
+} from './save.js';
+import {
   roleConnectionDrafts,
   stageSettingsActions,
   syncSettingsFields,
@@ -43,12 +50,11 @@ const paid = document.getElementById('paid');
 const stop = document.getElementById('stop');
 const inspection = document.getElementById('inspection');
 const databaseTest = document.getElementById('database-test');
-const applySettings = document.getElementById('apply-settings');
 const databaseSettings = document.getElementById('database-settings');
-const settingsActionsHelp = document.getElementById('settings-actions-help');
 let setup;
 let dirty = '';
-let applyingSettings = false;
+let saveSettings;
+let savePreview;
 let practiceBusy = false;
 let estimateRefresh;
 let sessionUnconfirmed = false;
@@ -76,7 +82,8 @@ function mayObserve() {
   return (
     setup &&
     !estimateRefresh.running &&
-    !applyingSettings &&
+    !saveSettings.running &&
+    !savePreview.busy &&
     !practiceBusy &&
     !sessionUnconfirmed &&
     !saveStatusUnconfirmed() &&
@@ -92,12 +99,17 @@ const saveChanges = () => pending('save');
 
 function settingsRequestActive(next = setup) {
   return (
-    estimateRefresh.running || applyingSettings || draftDatabase.running || next?.testingDatabase
+    estimateRefresh.running ||
+    saveSettings.running ||
+    draftDatabase.running ||
+    next?.testingDatabase
   );
 }
 
 function workbenchBusy(next) {
   return (
+    savePreview.busy ||
+    saveSubmitting() ||
     practiceBusy ||
     Boolean(analysisProgress.starting) ||
     sessionUnconfirmed ||
@@ -139,11 +151,28 @@ estimateRefresh = createEstimateRefresh({
   available: () => !workbenchBusy(setup) && !settingsRequestActive() && !hasUnsavedReviewDraft(),
   sync: syncSessionControls,
 });
+saveSettings = createSaveSettings({
+  getSetup,
+  drafts,
+  form,
+  request,
+  render: (next, accepted) => render(next, false, accepted, true),
+  sync: syncSessionControls,
+  available: () =>
+    stages.current === 'save' &&
+    !setup.practice &&
+    !workbenchBusy(setup) &&
+    !settingsRequestActive() &&
+    !hasUnsavedReviewDraft() &&
+    setup.state !== 'uncertain',
+});
 function syncSettingsActions(next) {
   const busy = workbenchBusy(next);
   syncSettingsFields(
     form,
-    (busy && (!observer.observingOperation || drafts.loading)) || applyingSettings,
+    saveSubmitting() ||
+      next.state === 'saving' ||
+      (busy && !savePreview.pending && (!observer.observingOperation || drafts.loading)),
     next.practice
   );
   const blocked = busy || settingsRequestActive(next);
@@ -172,24 +201,33 @@ const operationFocus = trackOperationFocus(captureFocus, status);
 
 const previewFlags = () => ({
   dirty: saveChanges(),
-  practiceBusy,
+  practiceBusy: practiceBusy || savePreview.busy,
   sessionUnconfirmed,
+  readiness: savePreview.reason(setup),
   settingsBusy: settingsRequestActive(),
 });
-const schedulePreview = createAutomaticPreview(
+savePreview = createSavePreview({
   getSetup,
-  saveReviewer,
-  () =>
-    stages.current === 'save' &&
-    !saveChanges() &&
-    !workbenchBusy(setup) &&
-    !settingsRequestActive() &&
-    !practiceBusy &&
-    !hasUnsavedReviewDraft(),
-  practiceAction
-);
+  form,
+  field: saveReviewer,
+  saveSettings,
+  saveChanges,
+  request,
+  render: (next) => render(next, false, undefined, true),
+  sync: syncSessionControls,
+  available: () => stages.current === 'save' && !workbenchBusy(setup) && !settingsRequestActive(),
+  unconfirmed: () => sessionUnconfirmed,
+  testing: () => draftDatabase.running,
+  estimating: () => estimateRefresh.running,
+  recover: recoverActionFailure,
+});
+initSaveChanges(request, (message) => {
+  savePreview.invalidate(message);
+  void observer.refresh();
+});
 function visitStage(stage) {
-  schedulePreview(true);
+  saveSettings.schedule();
+  savePreview.schedule(true);
   if (stage === 'save' && setup?.analysis?.pendingReviews && !saveReviewer.value.trim())
     saveReviewer.focus();
 }
@@ -197,7 +235,8 @@ const renderExactPreview = (next) => updateExactPreview(next, previewFlags());
 const syncPracticeDraftControls = () => updatePracticeDraftControls(setup, previewFlags());
 
 function syncReviewAvailability(next) {
-  schedulePreview();
+  saveSettings.schedule();
+  savePreview.schedule();
   renderExactPreview(next);
   renderSave(next);
   syncPracticeDraftControls();
@@ -237,6 +276,7 @@ function render(raw, populate = false, accepted, passive = false) {
   if (olderSetup(setup, raw)) return;
   observer.remember(raw);
   const next = withTabSaveOutcome(raw, setup);
+  savePreview.rebase(setup, next);
   sessionUnconfirmed = false;
   if (setup?.loadRevision !== next.loadRevision || setup?.contentRevision !== next.contentRevision)
     form.elements.discardReviewedState.checked = false;
@@ -250,7 +290,6 @@ function render(raw, populate = false, accepted, passive = false) {
   const busy = workbenchBusy(next);
   syncSettingsActions(next);
   databaseTest.hidden = next.practice;
-  settingsActionsHelp.hidden = next.practice;
   if (next.practice) {
     document.getElementById('database-settings').hidden = true;
     form.elements.input.required = false;
@@ -270,7 +309,7 @@ function render(raw, populate = false, accepted, passive = false) {
   practiceReview.hidden = !next.practice || !next.analysis;
   syncReviewAvailability(next);
   renderGuide(next);
-  schedulePreview();
+  savePreview.schedule();
   estimateRefresh.schedule();
   if (!analysisProgress.starting) operationFocus.observe(next.latestOperation);
 }
@@ -285,6 +324,14 @@ const { refresh, pollEvidence } = createEvidencePolling(getSetup, request, rende
   syncSessionControls();
 });
 form.addEventListener('input', (event) => {
+  if (
+    stages.current === 'save' &&
+    (event.target.closest('label')?.dataset.stage === 'save' ||
+      databaseSettings.contains(event.target))
+  ) {
+    savePreview.change();
+    saveSettings.change(event.target.name);
+  }
   if (event.target.closest('label')?.dataset.stage === 'ai') {
     paidControls.resetConsent();
     estimateRefresh.change(event.target.name);
@@ -299,6 +346,7 @@ form.addEventListener('input', (event) => {
     form.elements.discardReviewedState.checked = false;
   }
   checkPendingSettings();
+  if (stages.current === 'save') syncSessionControls();
   renderSetupContext(form, setup, drafts.readDraft());
 });
 form.addEventListener('change', (event) => {
@@ -310,34 +358,6 @@ document.addEventListener('pointerdown', checkPendingSettings, true);
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (stages.current === 'load') return start('inspect');
-  if (stages.current !== 'save') return;
-  if (!setup || applySettings.disabled || !checkPendingSettings() || !stages.validate()) return;
-  const focusError = captureFocus();
-  try {
-    if (hasUnsavedReviewDraft()) {
-      status.textContent = 'Apply or discard the open row edit before changing settings.';
-      status.focus();
-      return;
-    }
-    const submission = drafts.stageSubmission(stages.current);
-    if (!pendingSettings(setup, submission.body)) {
-      status.textContent = 'This stage already uses the applied settings.';
-      return;
-    }
-    applyingSettings = true;
-    syncSettingsActions(setup);
-    syncReviewAvailability(setup);
-    status.textContent = 'Applying settings…';
-    render(await request('setup', 'POST', submission.body), false, submission);
-  } catch (error) {
-    status.dataset.state = 'error';
-    status.textContent = error.message;
-    focusError(status);
-  } finally {
-    applyingSettings = false;
-    syncSettingsActions(setup);
-    syncReviewAvailability(setup);
-  }
 });
 async function confirmTestRevision(revision, role) {
   try {
@@ -349,7 +369,7 @@ async function confirmTestRevision(revision, role) {
       'Connection settings changed while testing. Review the current settings and test again.';
     return false;
   } catch {
-    status.textContent = 'Session status is unavailable. Reload before applying settings.';
+    status.textContent = 'Session status is unavailable. Reload to check the current connection.';
   }
   sessionUnconfirmed = true;
   return false;
@@ -416,40 +436,6 @@ stop.addEventListener('click', async () => {
     focusError(status);
   }
 });
-async function practiceAction(path, body) {
-  if (
-    practiceBusy ||
-    sessionUnconfirmed ||
-    saveStatusUnconfirmed() ||
-    saveChanges() ||
-    settingsRequestActive()
-  )
-    return;
-  if (hasUnsavedReviewDraft()) {
-    status.textContent = 'Wait for the row edit to be kept in this session.';
-    return;
-  }
-  practiceBusy = true;
-  syncSettingsActions(setup);
-  invalidateReportSelection();
-  renderExactPreview(setup);
-  setReviewBusy(true);
-  renderGuide(setup);
-  let failure;
-  renderSave(setup);
-  syncPracticeDraftControls();
-  try {
-    render(await request(path, 'POST', body));
-  } catch (error) {
-    failure = error instanceof Error ? error.message : String(error);
-  } finally {
-    practiceBusy = false;
-    setReviewBusy(false);
-    renderGuide(setup);
-    if (failure) await recoverActionFailure(failure, path.endsWith('preview'));
-    else render(setup);
-  }
-}
 async function recoverActionFailure(message, previewFailure = false) {
   try {
     render(await request('setup'));
@@ -470,7 +456,8 @@ async function recoverActionFailure(message, previewFailure = false) {
       setup.practice ? 'practice-preview-result' : 'preview-result'
     ).textContent = `Preview failed: ${message} Check the settings, then return to Save to retry.`;
   }
-  if (!previewFailure) status.focus();
+  if (previewFailure) syncSessionControls();
+  else status.focus();
 }
 initSave({
   request,
@@ -478,8 +465,21 @@ initSave({
   refresh,
   recover: recoverActionFailure,
   hasDraft: hasUnsavedReviewDraft,
+  readiness: savePreview.reason,
+  canReconcileSource: () =>
+    setup.sourceChanged &&
+    setup.state === 'reviewing' &&
+    !workbenchBusy(setup) &&
+    !settingsRequestActive() &&
+    !hasUnsavedReviewDraft(),
+  sync: syncSessionControls,
   isBlocked: () =>
-    sessionUnconfirmed || practiceBusy || Boolean(saveChanges()) || settingsRequestActive(),
+    savePreview.blocked ||
+    savePreview.busy ||
+    sessionUnconfirmed ||
+    practiceBusy ||
+    Boolean(saveChanges()) ||
+    settingsRequestActive(),
   setPracticeBusy: (value) => {
     practiceBusy = value;
     if (value) invalidateReportSelection();
@@ -489,10 +489,9 @@ initSave({
     }
   },
 });
-saveReviewer.addEventListener('input', () => syncReviewAvailability(setup));
 initAttestation(
   getSetup,
-  practiceAction,
+  savePreview.action,
   () => saveChanges() || sessionUnconfirmed || saveStatusUnconfirmed()
 );
 initReportControls(request, getSetup, recoverActionFailure, token, saveChanges);

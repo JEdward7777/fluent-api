@@ -10,7 +10,10 @@ import { recordHumanLicenseDecision } from '../license-artifact';
 import { LICENSE_CLASSIFICATIONS_PATH } from '../license-artifact.schemas';
 import { makeLicenseArtifact } from '../license-artifact.test-fixtures';
 import { createLicenseDatabaseAdapter } from './license-classifications.service';
+import { makeCommandFixture } from './license-command.test-fixtures';
+import { licenseSaveChanges } from './license-save-changes';
 import { planLicenseSaveDestinations } from './license-save-destinations';
+import { LicenseWorkflow } from './license-workflow';
 import { parseLicenseArtifactBytes } from './license-workflow-freshness';
 
 const { client, database } = await vi.hoisted(async () => {
@@ -42,6 +45,63 @@ beforeEach(async () => {
 afterAll(() => client.close());
 
 describe('pGlite license persistence', () => {
+  it('previews the exact database policy columns, including retained import data and legacy timestamps', async () => {
+    const f = await makeCommandFixture(false);
+    const adapter = createLicenseDatabaseAdapter();
+    const workflow = new LicenseWorkflow(
+      { ...f.options, destination: 'both' },
+      {
+        ...f.dependencies,
+        destinationDatabase: async () => adapter,
+      }
+    );
+    try {
+      const row = f.artifact.classifications[1];
+      const reviewedAt = new Date('2005-01-01T00:00:00Z');
+      await database.insert(schema.license_classifications).values([
+        {
+          normalizedText: row.normalizedText,
+          status: 'unknown',
+          rationale: 'Prior policy',
+          reviewedAt,
+        },
+        {
+          normalizedText: 'destination only',
+          status: 'unknown',
+          rationale: null,
+          classifiedBy: 'Legacy',
+          reviewedAt,
+        },
+      ]);
+      await workflow.inspect(1);
+      const preview = await workflow.preview(1, workflow.status.contentRevision);
+      const policy = licenseSaveChanges(preview, 'Test database').destinations.find(
+        (d) => d.kind === 'Database'
+      )!;
+      const existing = policy.records.find((record) => record.key === 'destination only');
+      expect(existing).toMatchObject({
+        operation: 'Preserve',
+        before: { rationale: null, reviewedAt: reviewedAt.toISOString() },
+      });
+      expect(existing?.before).toEqual(existing?.after);
+      await workflow.save({
+        operationId: 'column-parity',
+        configurationRevision: 1,
+        contentRevision: preview.contentRevision,
+        previewToken: preview.token,
+        agreeToReplace: false,
+      });
+      const physical = JSON.parse(
+        JSON.stringify(await database.select().from(schema.license_classifications))
+      );
+      expect(physical).toHaveLength(policy.records.length);
+      for (const record of policy.records)
+        expect(physical).toContainEqual(expect.objectContaining(record.after!));
+    } finally {
+      await workflow.close();
+      await f.cleanup();
+    }
+  });
   it('bootstraps mixed states, then exact repeat import is a no-op', async () => {
     const adapter = createLicenseDatabaseAdapter();
     const source = makeLicenseArtifact();

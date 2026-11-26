@@ -5,7 +5,10 @@ export function olderSetup(setup, next) {
       next.configurationRevision < setup.configurationRevision ||
       next.estimateRevision < setup.estimateRevision ||
       next.reassessmentScopeRevision < setup.reassessmentScopeRevision ||
-      (next.loadRevision === setup.loadRevision && next.contentRevision < setup.contentRevision))
+      (next.loadRevision === setup.loadRevision &&
+        (next.contentRevision < setup.contentRevision ||
+          (next.configurationRevision === setup.configurationRevision &&
+            next.stateRevision < setup.stateRevision))))
   );
 }
 

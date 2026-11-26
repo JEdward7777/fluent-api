@@ -8,7 +8,10 @@ let getSetup;
 let refresh;
 let recover;
 let hasDraft;
+let readiness;
+let sync;
 let isBlocked;
+let canReconcileSource;
 let pending = null;
 let previewIdentity = '';
 let submitting = false;
@@ -125,12 +128,27 @@ export function withTabSaveOutcome(setup, previous) {
   return { ...setup, saveOutcome: null };
 }
 
+export function saveSubmitting() {
+  return submitting || practiceSaving;
+}
+
 export function saveStatusUnconfirmed() {
   return unresolved;
 }
 
 export function initSave(dependencies) {
-  ({ request, getSetup, refresh, recover, hasDraft, isBlocked, setPracticeBusy } = dependencies);
+  ({
+    request,
+    getSetup,
+    refresh,
+    recover,
+    hasDraft,
+    isBlocked,
+    canReconcileSource,
+    setPracticeBusy,
+    readiness,
+    sync,
+  } = dependencies);
   document.getElementById('practice-save').addEventListener('click', () => void practiceSave());
   document.getElementById('source-inspect')?.addEventListener('click', inspectSourceChanges);
   agreement.addEventListener('change', () => renderSave(getSetup()));
@@ -167,7 +185,7 @@ function describeRecovery(recovery) {
 }
 
 async function inspectSourceChanges() {
-  if (hasDraft() || isBlocked() || unresolved) return;
+  if (!canReconcileSource()) return;
   const form = document.getElementById('source-resolution');
   const status = document.getElementById('source-resolution-status');
   try {
@@ -214,7 +232,7 @@ async function inspectSourceChanges() {
     status.textContent = '';
     form.onsubmit = async (event) => {
       event.preventDefault();
-      if (hasDraft() || isBlocked() || unresolved) return;
+      if (!canReconcileSource()) return;
       try {
         const choices = Object.fromEntries([...new FormData(form)].filter(([, value]) => value));
         await request('source/reconcile', 'POST', { token: proposal.token, choices });
@@ -231,9 +249,19 @@ async function inspectSourceChanges() {
 
 export function renderSave(setup) {
   const drift = document.getElementById('source-drift');
-  if (drift) drift.hidden = !setup.sourceChanged || setup.state !== 'reviewing';
+  if (drift) {
+    drift.hidden = !setup.sourceChanged || setup.state !== 'reviewing';
+    if (!drift.hidden) {
+      const blocked = !canReconcileSource();
+      document.getElementById('source-inspect').disabled = blocked;
+      const accept = document.querySelector('#source-resolution button');
+      if (accept) accept.disabled = blocked;
+    }
+  }
   if (!setup) return;
-  panel.hidden = setup.practice || (!setup.preview && !setup.saveOutcome);
+  panel.hidden = setup.practice;
+  document.getElementById('save-reviewer').disabled =
+    saveSubmitting() || Boolean(setup.activeOperationId);
   const reconcile = document.getElementById('reconcile-save');
   const shared = setup.sessionSave;
   if (reconcile) reconcile.hidden = setup.state !== 'uncertain' || !shared;
@@ -256,8 +284,7 @@ export function renderSave(setup) {
     }
   }
   const result = document.getElementById('save-result');
-  result.hidden = !setup.saveOutcome && !unresolved && (setup.practice || !setup.preview);
-  if (result.hidden) return;
+  result.hidden = !setup.saveOutcome && !unresolved;
   const preview = setup.preview;
   const identity = preview ? preview.token : '';
   if (previewIdentity !== identity) {
@@ -267,7 +294,9 @@ export function renderSave(setup) {
   agreementLabel.hidden = !preview?.requiresForceAgreement;
   agreement.disabled = Boolean(setup.activeOperationId) || isBlocked();
   const hasConflict = Boolean(preview?.conflicts?.length);
+  const reason = readiness?.(setup) ?? '';
   button.disabled =
+    Boolean(reason) ||
     submitting ||
     Boolean(setup.activeOperationId) ||
     isBlocked() ||
@@ -278,12 +307,35 @@ export function renderSave(setup) {
     !preview ||
     hasConflict ||
     (preview?.requiresForceAgreement && !agreement.checked);
+  const progress = document.getElementById('save-readiness');
+  const writing = submitting || setup.state === 'saving';
+  progress.textContent = writing
+    ? 'Saving…'
+    : reason ||
+      (hasConflict
+        ? `Resolve destination conflicts: ${preview.conflicts.join('; ')}`
+        : preview?.requiresForceAgreement && !agreement.checked
+          ? 'Confirm replacement before saving.'
+          : button.disabled
+            ? 'Wait for the current session operation.'
+            : 'Ready to save these changes.');
+  progress.setAttribute?.('data-busy', String(writing || reason === 'Preparing preview…'));
   const outcome = setup.saveOutcome;
+  document.getElementById('receipt-technical').hidden = outcome?.state !== 'succeeded';
   if (outcome?.state === 'succeeded') {
     const saved = outcome.result;
     const json = saved.json;
+    document.getElementById('receipt-hashes').textContent = [
+      ['Working review content', saved.reviewContentHash],
+      ['JSON review content', json?.reviewContentHash],
+      ...saved.targets.map((target) => [target.path, target.hash]),
+      ['Database decisions', saved.policy?.reviewContentHash],
+    ]
+      .filter(([, hash]) => hash)
+      .map(([label, hash]) => `${label}: ${hash}`)
+      .join('\n');
     const jsonSummary = json
-      ? `JSON decisions: ${json.inserted} inserts, ${json.updated} updates (${json.permissionChanges} permission, ${json.metadataChanges} metadata only), ${json.preserved} preserved, ${json.unchanged} unchanged, ${json.deleted.length} deletions. File contains ${json.artifactRows} rows (${json.artifactBytes} bytes). JSON review SHA-256: ${json.reviewContentHash}.`
+      ? `JSON decisions: ${json.inserted} inserts, ${json.updated} updates (${json.permissionChanges} permission, ${json.metadataChanges} metadata only), ${json.preserved} preserved, ${json.unchanged} unchanged, ${json.deleted.length} deletions. File contains ${json.artifactRows} rows (${json.artifactBytes} bytes).`
       : '';
     const deletions = [
       ...(json?.deleted ?? []).map((key) => key || '(empty notice)'),
@@ -292,7 +344,7 @@ export function renderSave(setup) {
       ),
     ];
     const deleted = deletions.length ? ` Deleted from JSON: ${deletions.join(' | ')}.` : '';
-    result.textContent = `Save completed. Operation ${outcome.operationId}. Working review SHA-256: ${saved.reviewContentHash}.${saved.reviewer ? ` Newly reviewed by ${saved.reviewer} at ${saved.reviewedAt}.` : ''} ${saved.targets.map((target) => `${target.role} written: ${target.path} (SHA-256 ${target.hash}).`).join(' ')} ${jsonSummary}${deleted} ${saved.policy ? `Policy at ${saved.policy.target ?? 'the selected database'}: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates (${saved.policy.permissionChanges} permission, ${saved.policy.metadataChanges} metadata only), ${saved.policy.unchanged} unchanged, ${saved.policy.deletes} deletes.${saved.policy.preserved !== undefined ? ` ${saved.policy.preserved} destination records preserved.` : ''}${saved.policy.reviewContentHash ? ` Database review SHA-256 ${saved.policy.reviewContentHash}.` : ''} No resource-cache rows were written by Save.` : 'No policy rows were written.'}`;
+    result.textContent = `Save completed. Operation ${outcome.operationId}.${saved.reviewer ? ` Newly reviewed by ${saved.reviewer} at ${saved.reviewedAt}.` : ''} ${saved.targets.map((target) => `${target.role} written: ${target.path}.`).join(' ')} ${jsonSummary}${deleted} ${saved.policy ? `Policy at ${saved.policy.target ?? 'the selected database'}: ${saved.policy.inserts} inserts, ${saved.policy.updates} updates (${saved.policy.permissionChanges} permission, ${saved.policy.metadataChanges} metadata only), ${saved.policy.unchanged} unchanged, ${saved.policy.deletes} deletes.${saved.policy.preserved !== undefined ? ` ${saved.policy.preserved} destination records preserved.` : ''} No resource-cache rows were written by Save.` : 'No policy rows were written.'}`;
   } else if (outcome?.state === 'failed') {
     const recoveryText = describeRecovery(outcome.recovery);
     const checked = outcome.reconciliation;
@@ -312,17 +364,8 @@ export function renderSave(setup) {
   } else if (unresolved) {
     result.textContent =
       'Save acknowledgment is unresolved. Reload to check the same operation ID. If the server no longer knows it, inspect actual targets before starting a new process.';
-  } else if (
-    button.disabled &&
-    (!preview || !reviewerMatchesPreview(setup) || isBlocked() || setup.state !== 'previewed')
-  ) {
-    result.textContent = 'Waiting for a current Save preview.';
-  } else if (hasConflict) {
-    result.textContent = `Resolve destination conflicts before Save: ${preview.conflicts.join('; ')}`;
-  } else if (preview?.requiresForceAgreement) {
-    result.textContent = 'Check the separate replacement agreement to enable Save.';
   } else {
-    result.textContent = 'Ready to Save the exact previewed revision.';
+    result.textContent = '';
   }
 }
 
@@ -362,6 +405,8 @@ async function startSave() {
   remember(setup, 'normal', body);
   submitting = true;
   button.disabled = true;
+  renderSave(setup);
+  sync?.();
   try {
     await submitSave('save', body);
   } catch (error) {
@@ -369,6 +414,7 @@ async function startSave() {
   } finally {
     submitting = false;
     renderSave(getSetup());
+    sync?.();
   }
 }
 

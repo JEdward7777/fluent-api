@@ -60,8 +60,8 @@ export function syncSettingsFields(form, locked, practice) {
 export function rebaseSettings(form, prior, next, editedAi) {
   if (prior.configurationRevision === next.configurationRevision) return;
   const draft = readSettings(form, {});
-  for (const [name, key, , stage] of settingFields) {
-    if (stage === 'ai' && editedAi?.has(key)) continue;
+  for (const [name, key] of settingFields) {
+    if (editedAi?.has(key)) continue;
     if (prior[key] !== next[key] && !settingChanged(prior, draft, key))
       displaySetting(form, next, name, key);
   }
@@ -224,15 +224,16 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
     },
     get conflict() {
       if (!conflicts.size) return '';
-      return `The ${[...conflicts].join(' and ')} database connection changed in another tab. Restore settings on the affected stage to review the current connection before re-entering credentials.`;
+      return `The ${[...conflicts].join(' and ')} database connection changed in another tab. Use the current connection before re-entering credentials.`;
     },
     get role() {
       return databaseRole;
     },
-    rebase(prior, next, acceptedRole) {
+    rebase(prior, next, acceptedRole, keepConnection) {
       for (const role of ['source', 'destination']) {
         const key = `${role}DatabaseConnection`;
         const active = role === databaseRole;
+        if (role === keepConnection) continue;
         if (role === acceptedRole) {
           delete roleDrafts[role];
           if (active) populateConnection(form, next[key]);
@@ -275,8 +276,13 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
         if (JSON.stringify(priorDraft) !== JSON.stringify(draftDatabase.read()))
           draftDatabase.invalidate();
       } else if (prior) {
-        rebaseSettings(form, prior, next, editedAi);
-        this.rebase(prior, next, accepted?.role);
+        rebaseSettings(
+          form,
+          prior,
+          next,
+          new Set([...(editedAi?.keys() ?? []), ...(accepted?.keepFields ?? [])])
+        );
+        this.rebase(prior, next, accepted?.role, accepted?.keepConnection);
         for (const [name, key] of accepted?.fields ?? []) displaySetting(form, next, name, key);
       }
     },
@@ -297,25 +303,15 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
 }
 
 export function stageSettingsActions(form, drafts, isBlocked, onRestore) {
-  const restoreSettings = document.getElementById('restore-settings');
-  const applySettings = document.getElementById('apply-settings');
   const databaseTest = document.getElementById('database-test');
   const settingsChangeStatus = document.getElementById('settings-change-status');
   const reload = document.getElementById('reload-source-connection');
-  let currentStage = 'load';
   reload.addEventListener('click', () => {
     drafts.restoreConnection('source');
     onRestore();
   });
-  restoreSettings.addEventListener('click', () => {
-    drafts.restore(currentStage);
-    onRestore();
-    document.getElementById('status').textContent = 'Applied settings restored for this stage.';
-  });
   return (next, stage) => {
-    currentStage = stage;
     const blocked = isBlocked(next);
-    restoreSettings.disabled = blocked;
     reload.disabled = blocked;
     document.getElementById('discard-label').hidden =
       !next.analysis ||
@@ -327,7 +323,6 @@ export function stageSettingsActions(form, drafts, isBlocked, onRestore) {
     const role = stage === 'load' ? 'source' : stage === 'save' ? 'destination' : null;
     const conflicted =
       role && ['database', 'both'].includes(form.elements[role].value) && drafts.conflicted(role);
-    applySettings.disabled = blocked || conflicted;
     reload.hidden = !(stage === 'load' && conflicted);
     const changes = drafts.pending(stage);
     settingsChangeStatus.textContent = conflicted
@@ -339,7 +334,7 @@ export function stageSettingsActions(form, drafts, isBlocked, onRestore) {
         : stage === 'ai' && changes
           ? 'AI settings update the current estimate automatically.'
           : changes
-            ? `Pending settings changes: ${changes}. Apply or restore this stage’s settings.`
+            ? `Updating destination settings: ${changes}.`
             : '';
   };
 }

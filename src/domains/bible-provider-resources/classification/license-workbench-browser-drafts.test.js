@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { createEstimateRefresh } from './assets/estimate-refresh.js';
 import { createDraftSync, reviewShortcuts } from './assets/review-edit-feedback.js';
 import { initReviewNavigation } from './assets/review-navigation.js';
+import { createSaveSettings } from './assets/save-settings.js';
 
 function gate() {
   let release;
@@ -292,6 +293,48 @@ it('reserves Shift+Enter in the comment and permission fields while preserving n
     modal = false;
     expect(press(field(), 'Enter', { shiftKey: true })).toBe(0);
     expect(next.click).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('uses the latest destination revision after the previous local edit was undone', () => {
+  const controls = new Map();
+  vi.stubGlobal('document', {
+    getElementById(id) {
+      if (!controls.has(id)) controls.set(id, { addEventListener: vi.fn() });
+      return controls.get(id);
+    },
+  });
+  try {
+    const setup = { destinationRevision: 1, output: 'original.json' };
+    const form = { elements: { destination: { value: 'json' }, output: { value: setup.output } } };
+    const settings = createSaveSettings({
+      getSetup: () => setup,
+      form,
+      available: () => false,
+      drafts: {
+        pending: () => form.elements.output.value !== setup.output,
+        conflicted: () => false,
+      },
+    });
+    const edit = (value) => {
+      form.elements.output.value = value;
+      settings.change('output');
+    };
+    edit('abandoned.json');
+    edit('original.json');
+    setup.output = form.elements.output.value = 'other-tab.json';
+    setup.destinationRevision++;
+    settings.schedule();
+    edit('new-local.json');
+    expect(settings.message()).toBe('');
+    expect(controls.get('current-save-settings').hidden).toBe(true);
+    setup.output = 'concurrent-change.json';
+    setup.destinationRevision++;
+    settings.schedule();
+    expect(settings.message()).toContain('changed in another tab');
+    expect(controls.get('current-save-settings').hidden).toBe(false);
   } finally {
     vi.unstubAllGlobals();
   }

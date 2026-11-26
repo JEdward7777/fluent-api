@@ -94,7 +94,7 @@ export function createDraftDatabaseTest(form, request, confirm, updateControls, 
     let outcome = draft
       ? role === 'source'
         ? 'Draft connection passed. Load source to use it.'
-        : 'Draft connection passed. Apply destination settings to use it.'
+        : 'Destination connection passed. The preview updates with these settings.'
       : 'Applied connection passed.';
     try {
       await request('database/test', 'POST', {

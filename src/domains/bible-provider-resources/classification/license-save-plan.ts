@@ -21,6 +21,7 @@ export interface LicenseSaveTarget {
 }
 
 export interface LicenseSavePlan extends DestinationDecisionPlan {
+  databaseBefore?: LicenseDatabaseSnapshot['classifications'];
   sourceIdentity?: import('./license-file-identity').LicenseFileIdentity;
   targetIdentity?: import('./license-file-identity').LicenseFileIdentity;
   targetMarker?: string;
@@ -116,6 +117,7 @@ export function buildLicenseSavePlan(input: {
   ];
   return {
     ...destinations,
+    databaseBefore: destinations.databaseArtifact ? database?.classifications : undefined,
     overwriteJson,
     targets,
     expectedFiles,

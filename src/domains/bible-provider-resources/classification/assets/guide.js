@@ -262,7 +262,7 @@ export function renderSetupContext(form, next, draft) {
     for (const key of ['output', 'cacheDir', 'reportDir', 'reportFormats'])
       form.elements[key].value = next[key] ?? '';
     document.getElementById('practice-location').textContent = next.scratch
-      ? `Scratch: ${next.scratch}. Original SHA-256: ${next.originalHash}. Restart with --practice for a fresh session; discard this directory when finished. Practice output is never imported into a real session automatically.`
+      ? `Scratch: ${next.scratch}. Restart with --practice for a fresh session; discard this directory when finished. Practice output is never imported into a real session automatically.`
       : 'Load allocates scratch. Restart with --practice for a fresh session; discard the scratch directory when finished. Practice output is never imported into a real session automatically.';
   }
   const loaded = next.loadedSource;

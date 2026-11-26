@@ -131,7 +131,18 @@ export abstract class LicenseWorkflowReview {
   protected analysis?: LicenseAnalysis;
   protected previewResult?: LicensePreview;
   protected contentRevision = 0;
-  protected state: LicenseWorkflowState = 'configuring';
+  private currentState: LicenseWorkflowState = 'configuring';
+  private stateChanges = 0;
+  get stateRevision() {
+    return this.stateChanges;
+  }
+  protected get state() {
+    return this.currentState;
+  }
+  protected set state(next: LicenseWorkflowState) {
+    if (next !== this.currentState) this.stateChanges++;
+    this.currentState = next;
+  }
   protected closing = false;
   protected busyDone?: Promise<void>;
 

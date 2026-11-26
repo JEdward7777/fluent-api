@@ -14,7 +14,7 @@ const help = [
       source:
         'Choose the environment or a session connection. Load source reads the selected database.',
       destination:
-        'Choose the environment or a session connection. Apply destination settings to use this database for preview and Save. The loaded source stays in place.',
+        'Choose the environment or a session connection. The preview updates when the destination connection is complete. The loaded source stays in place.',
     },
   ],
   [

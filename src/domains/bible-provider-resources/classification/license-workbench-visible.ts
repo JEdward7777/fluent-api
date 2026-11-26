@@ -45,6 +45,7 @@ export function visibleLicenseWorkbench(input: {
     selectedSource: input.selectedPracticePath,
     state: status?.state ?? 'configuring',
     configurationRevision: input.configurationRevision,
+    stateRevision: workflow?.stateRevision ?? 0,
     contentRevision: status?.contentRevision ?? 0,
     hasPaidCredential: workflow?.hasPaidCredential ?? false,
     readyForInspect: Boolean(options.source),

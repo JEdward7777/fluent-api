@@ -50,6 +50,13 @@ describe('workbench Save operation', () => {
       };
       expect((await api('preview', 'POST', revision)).status).toBe(200);
       const preview = (await (await api('setup')).json()).preview;
+      expect(
+        (await api('preview', 'POST', { ...revision, expectedPreviewToken: null })).status
+      ).toBe(409);
+      expect((await api(`changes/${crypto.randomUUID()}`)).status).toBe(409);
+      const changes = await (await api(`changes/${preview.token}`)).json();
+      expect(changes.previewToken).toBe(preview.token);
+      expect(changes.destinations).toHaveLength(1);
       expect(preview.incomplete).toBe(true);
       const save = {
         previewToken: preview.token,
@@ -79,6 +86,14 @@ describe('workbench Save operation', () => {
       });
       expect((await (await api('setup')).json()).saveOutcome).toEqual(operation);
       const bytes = await readFile(fixture.output, 'utf8');
+      const planned = changes.destinations[0];
+      expect(planned.kind).toBe('JSON');
+      expect(planned.wholeFileHash).toBe(operation.result.wholeFileHash);
+      expect(
+        planned.records
+          .filter((row: { group: string }) => row.group === 'Classification')
+          .map((row: { after: unknown }) => row.after)
+      ).toEqual(JSON.parse(bytes).classifications);
       expect(bytes).toContain('classifications');
       expect(operation.result.json.artifactBytes).toBe(Buffer.byteLength(bytes));
       const current = await api(`current-report/${preview.token}/markdown`);

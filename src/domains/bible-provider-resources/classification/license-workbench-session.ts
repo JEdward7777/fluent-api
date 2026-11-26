@@ -9,8 +9,6 @@ import type { VisibleOperation } from './license-workbench-operation.types';
 import type { inspectOperationSchema } from './license-workbench-schema';
 import type { LicenseReviewEdit } from './license-workflow.types';
 
-import { renderLicenseHtml } from '../license-report-html';
-import { renderLicenseMarkdown } from '../license-report-markdown';
 import { licenseApiKey } from './license-api-key';
 import { createLicensePractice } from './license-practice';
 import { LicenseWorkbenchConfiguration } from './license-workbench-configuration';
@@ -22,18 +20,16 @@ import { LicenseWriteUncertainError } from './license-write';
 export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
   private uncertainReceipt?: VisibleOperation['result'];
 
+  currentChanges(token: string) {
+    if (this.practiceMode) return undefined;
+    return this.reports.currentChanges(
+      this.workflow,
+      token,
+      this.visible.destinationDatabaseTarget
+    );
+  }
   currentReport(token: string, format: 'html' | 'markdown') {
-    const preview = this.workflow?.previewed;
-    if (
-      this.practiceMode ||
-      !preview ||
-      preview.token !== token ||
-      !['saved', 'previewed'].includes(this.workflow?.status.state ?? '')
-    )
-      return undefined;
-    return format === 'html'
-      ? renderLicenseHtml(preview.reports.model)
-      : renderLicenseMarkdown(preview.reports.model);
+    return this.reports.currentReport(this.workflow, this.practiceMode, token, format);
   }
 
   reconcileSource(resolution?: {
@@ -307,7 +303,8 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     configurationRevision: number,
     contentRevision: number,
     practice = false,
-    reviewedBy = ''
+    reviewedBy = '',
+    expectedPreviewToken?: string | null
   ) {
     if (this.practiceMode !== practice || !this.workflow)
       throw new Error('Preview is unavailable in this mode');
@@ -315,6 +312,13 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     if (configurationRevision !== this.configurationRevision)
       throw new Error('Stale configuration revision');
     const workflow = this.workflow;
+    if (
+      expectedPreviewToken !== undefined &&
+      expectedPreviewToken !== (workflow.previewed?.token ?? null)
+    )
+      throw new Error(
+        'The preview changed in another tab. Check the current destination and reviewer.'
+      );
     if (workflow.status.state === 'previewing')
       return workflow.preview(workflow.status.configurationRevision, contentRevision, reviewedBy);
     return this.reserve(() =>

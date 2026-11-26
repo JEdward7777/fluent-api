@@ -10,9 +10,11 @@ import type { LicenseWorkbenchSession } from './license-workbench-session';
 import type { LicenseWorkflow } from './license-workflow';
 import type { LicenseReportExportResult } from './license-workflow.types';
 
-import { LICENSE_REPORT_HTML_CSP } from '../license-report-html';
+import { LICENSE_REPORT_HTML_CSP, renderLicenseHtml } from '../license-report-html';
+import { renderLicenseMarkdown } from '../license-report-markdown';
 import { inspectLicenseFile } from './license-file-identity';
 import { inspectReportDirectory, requireReportDirectory } from './license-report-directory';
+import { licenseSaveChanges } from './license-save-changes';
 import { reportTargetChanged, reportTargetIdentity } from './license-workflow-report-export';
 import { licenseFileIo } from './license-write';
 
@@ -48,6 +50,37 @@ export class LicenseWorkbenchReports {
       result: Promise<LicenseReportExportResult & { parent: string }>;
     }
   >();
+
+  currentChanges(workflow: LicenseWorkflow | undefined, token: string, databaseLabel: string) {
+    const preview = workflow?.previewed;
+    if (
+      !preview ||
+      preview.token !== token ||
+      preview.plan.conflicts.length ||
+      !['saved', 'previewed'].includes(workflow!.status.state)
+    )
+      return undefined;
+    return licenseSaveChanges(preview, databaseLabel);
+  }
+
+  currentReport(
+    workflow: LicenseWorkflow | undefined,
+    practice: boolean,
+    token: string,
+    format: 'html' | 'markdown'
+  ) {
+    const preview = workflow?.previewed;
+    if (
+      practice ||
+      !preview ||
+      preview.token !== token ||
+      !['saved', 'previewed'].includes(workflow?.status.state ?? '')
+    )
+      return undefined;
+    return format === 'html'
+      ? renderLicenseHtml(preview.reports.model)
+      : renderLicenseMarkdown(preview.reports.model);
+  }
 
   async exported(operationId: string) {
     return this.operations.get(operationId)?.result.catch(() => undefined);
@@ -166,6 +199,12 @@ export function registerReportViews(
   session: LicenseWorkbenchSession,
   authorized: (value: string) => boolean
 ) {
+  app.get('/api/changes/:token', (c) => {
+    const changes = session.currentChanges(c.req.param('token'));
+    return changes
+      ? c.json(changes)
+      : c.text('The Save preview changed. Prepare a current preview.', 409);
+  });
   const reportId = z.string().uuid();
   app.get('/api/current-report/:id/:format', (c) => {
     const format = z.enum(['html', 'markdown']).safeParse(c.req.param('format'));
