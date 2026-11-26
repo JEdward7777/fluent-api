@@ -437,9 +437,9 @@ it('renders only the current free preparation estimate and enables refreshing a 
     'revision 2. 2 outstanding model requests, up to 10 attempts'
   );
   expect(inspectionSummary({ ...view, contentRevision: 3 }, false)).toContain(
-    'estimate needs refreshing'
+    'refreshed automatically'
   );
-  expect(inspectionSummary(view, true)).toContain('Apply or restore');
+  expect(inspectionSummary(view, true)).toContain('current AI settings');
   expect(
     inspectionSummary(
       { ...view, paidEstimate: { ...view.paidEstimate, expectedUncachedRequests: 0 } },

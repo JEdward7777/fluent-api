@@ -33,7 +33,9 @@ export async function stagePaidBatch(input: {
     !estimate.expectedUncachedRequests ||
     estimate.expectedUncachedRequests !== authorization.maximumRequests
   )
-    throw new PaidBatchError('Estimate changed. Prepare free evidence before authorizing a batch.');
+    throw new PaidBatchError(
+      'Estimate changed. Check the current estimate before authorizing a batch.'
+    );
   const confirmations = estimate.outstanding
     .flatMap((row) => row.replacementConfirmation ?? [])
     .sort();

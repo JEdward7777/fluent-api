@@ -57,10 +57,11 @@ export function syncSettingsFields(form, locked, practice) {
   }
 }
 
-export function rebaseSettings(form, prior, next) {
+export function rebaseSettings(form, prior, next, editedAi) {
   if (prior.configurationRevision === next.configurationRevision) return;
   const draft = readSettings(form, {});
-  for (const [name, key] of settingFields) {
+  for (const [name, key, , stage] of settingFields) {
+    if (stage === 'ai' && editedAi?.has(key)) continue;
     if (prior[key] !== next[key] && !settingChanged(prior, draft, key))
       displaySetting(form, next, name, key);
   }
@@ -248,7 +249,7 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
         }
       }
     },
-    refresh(prior, next, populate, accepted) {
+    refresh(prior, next, populate, accepted, editedAi) {
       if (submittedLoad) {
         const receipt = next.lastSourceLoad;
         if (receipt?.operationId === submittedLoad.id) {
@@ -274,7 +275,7 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
         if (JSON.stringify(priorDraft) !== JSON.stringify(draftDatabase.read()))
           draftDatabase.invalidate();
       } else if (prior) {
-        rebaseSettings(form, prior, next);
+        rebaseSettings(form, prior, next, editedAi);
         this.rebase(prior, next, accepted?.role);
         for (const [name, key] of accepted?.fields ?? []) displaySetting(form, next, name, key);
       }
@@ -285,8 +286,7 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
       draftDatabase.invalidate(role);
       if (databaseRole === role) populateConnection(form, getSetup()[`${role}DatabaseConnection`]);
     },
-    restore(stage) {
-      const applied = getSetup();
+    restore(stage, applied = getSetup()) {
       for (const [name, key, , owner] of settingFields)
         if (stage === owner) displaySetting(form, applied, name, key);
       if (stage === 'load') form.elements.discardReviewedState.checked = false;
@@ -336,9 +336,11 @@ export function stageSettingsActions(form, drafts, isBlocked, onRestore) {
         : drafts.conflict
       : stage === 'load' && changes
         ? 'Load source to use these settings. Your current review stays available until the new source loads.'
-        : changes
-          ? `Pending settings changes: ${changes}. Apply or restore this stage’s settings.`
-          : '';
+        : stage === 'ai' && changes
+          ? 'AI settings update the current estimate automatically.'
+          : changes
+            ? `Pending settings changes: ${changes}. Apply or restore this stage’s settings.`
+            : '';
   };
 }
 

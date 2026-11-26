@@ -134,8 +134,7 @@ export abstract class LicenseSourceReconciliation extends LicenseWorkflowPrepara
       });
       this.acceptPreparedRows(merged.discard);
       this.inspection = freezeReviewValue({ ...proposal.fresh, preflight });
-      this.invalidatePaidEstimate();
-      this.reconcileCompletedSelections(artifact, preflight);
+      this.reconcileSelections(artifact, preflight);
       this.previewResult = undefined;
       this.sourceDrift = false;
       this.proposal = undefined;

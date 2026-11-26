@@ -44,7 +44,16 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     const workflow = this.workflow;
     if (!workflow || this.activeOperationId)
       throw new Error('Source reconciliation is unavailable');
-    return this.reserve(() => workflow.reconcileSource(resolution));
+    return this.reserve(async () => {
+      const prior = resolution ? workflow.selectedModelNotice : null;
+      const result = await workflow.reconcileSource(resolution);
+      if (result.accepted)
+        this.reassessment.acceptSourceChange(
+          workflow.selectedModelNotice ?? prior,
+          workflow.selectedModelId ? 'retained' : 'closed'
+        );
+      return result;
+    });
   }
 
   async reconcileSave(operationId: string) {
@@ -170,14 +179,8 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
         operationId: body.operationId,
         configurationRevision: workflow.status.configurationRevision,
       };
-      if (kind === 'paid' && body.paid) {
-        operation.progress = {
-          attempts: 0,
-          completedRows: 0,
-          totalRows: workflow.paidEstimate?.outstanding.length ?? 0,
-        };
-        return workflow.runPaid(body.paid, operation.progress);
-      }
+      if (kind === 'paid' && body.paid)
+        return this.reassessment.runPaid(workflow, body.paid, operation);
       if (kind === 'inspect') {
         if (reuseLoaded) return workflow.analyzed ?? workflow.startAnalysis(coreRequest);
         await workflow.inspect(coreRequest);
@@ -202,7 +205,13 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
         async () => {
           if (kind === 'inspect') {
             const sourceChanged = this.acceptSource(source, body.operationId);
-            if (!reuseLoaded) this.loadRevision++;
+            if (!reuseLoaded) {
+              this.reassessment.acceptSourceChange(
+                this.workflow?.selectedModelNotice ?? null,
+                'replaced'
+              );
+              this.loadRevision++;
+            }
             if ((candidate && this.workflow) || sourceChanged) this.configurationRevision++;
             if (candidate || sourceChanged) this.reports.clear();
             this.discardRevision = undefined;
@@ -237,6 +246,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
         }
       )
       .finally(() => {
+        if (kind === 'paid' || kind === 'analysis') this.reassessment.revision++;
         this.activeOperationId = undefined;
       });
     return { ...operation };

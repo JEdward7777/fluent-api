@@ -57,6 +57,20 @@ export const setupSchema = z
     databaseConnection: databaseConnectionSchema.optional(),
   })
   .strict();
+export const estimateSettingsSchema = setupSchema
+  .pick({
+    configurationRevision: true,
+    model: true,
+    sampleCount: true,
+    noCache: true,
+    cacheDir: true,
+  })
+  .extend({
+    contentRevision: z.number().int().nonnegative(),
+    estimateRevision: z.number().int().nonnegative(),
+    reassessmentScopeRevision: z.number().int().nonnegative().optional(),
+    loadRevision: z.number().int().nonnegative(),
+  });
 export const operationSchema = z
   .object({
     operationId: z.string().uuid(),
@@ -89,6 +103,18 @@ export const paidOperationSchema = operationSchema
       .strict(),
   })
   .strict();
+
+export function changedAiSettings(
+  current: LicenseCommandOptions,
+  next: Pick<LicenseCommandOptions, 'model' | 'sampleCount' | 'noCache' | 'cacheDir'>
+) {
+  return (
+    current.model !== next.model ||
+    current.sampleCount !== next.sampleCount ||
+    current.noCache !== next.noCache ||
+    current.cacheDir !== next.cacheDir
+  );
+}
 
 export function applyLicenseWorkbenchOptions(
   current: LicenseCommandOptions,

@@ -160,12 +160,11 @@ export function inspectionSummary(next, dirtySettings) {
   if (!loaded) return '';
   const inventory = `Inspected ${loaded.inspectedAt}. ${loaded.preflight.distinctKeys} distinct keys.`;
   if (next.practice) return `${inventory} Offline practice uses saved evidence.`;
-  if (dirtySettings)
-    return `${inventory} Apply or restore your settings to see the current estimate.`;
+  if (dirtySettings) return `${inventory} Preparing the estimate for the current AI settings.`;
   if (next.sourceDraftPending) return `${inventory} Load the selected source for its estimate.`;
   const estimate = next.paidEstimate;
   if (!estimate || estimate.contentRevision !== next.contentRevision)
-    return `${inventory} The estimate needs refreshing. Open AI classification to refresh it.`;
+    return `${inventory} The estimate is being refreshed automatically.`;
   const nonmatch = ruleNonmatchMessage(estimate);
   const requests = estimate.expectedUncachedRequests;
   const scope = estimate.selection ? 'Selected row' : 'Loaded source';

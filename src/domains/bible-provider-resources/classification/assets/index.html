@@ -158,7 +158,7 @@
             ><input type="checkbox" name="discardReviewedState" /> Discard unsaved review</label
           >
           <!-- prettier-ignore -->
-          <p data-stage="ai save" id="settings-actions-help">Apply updates settings on this stage.</p>
+          <p data-stage="save" id="settings-actions-help">Apply updates settings on this stage.</p>
           <div
             class="actions"
             role="group"
@@ -169,8 +169,8 @@
             <button data-stage="load" id="reload-source-connection" type="button" hidden>
               Use current source connection
             </button>
-            <button data-stage="ai save" id="apply-settings" type="submit">Apply settings</button>
-            <button data-stage="ai save" id="restore-settings" type="button">
+            <button data-stage="save" id="apply-settings" type="submit">Apply settings</button>
+            <button data-stage="save" id="restore-settings" type="button">
               <span>Restore settings on this stage</span>
             </button>
           </div>
@@ -188,6 +188,8 @@
           <pre id="cli-command"></pre>
         </details>
         <p id="status" tabindex="-1" aria-label="Workflow status" role="status">Connecting…</p>
+        <p id="ai-scope-change" class="notice" role="status" hidden></p>
+        <p id="reassessment-source-change" class="notice" role="status" hidden></p>
         <p class="stage-links" aria-label="Session activity">
           <a id="source-test-status" href="?stage=load" hidden></a>
           <a id="destination-test-status" href="?stage=save" hidden></a>
@@ -195,16 +197,21 @@
           <a id="save-ready" href="?stage=save" hidden></a>
         </p>
         <div data-stage="load ai" id="inspection" hidden></div>
+        <p data-stage="ai" id="paid-notice" class="notice" hidden></p>
         <label data-stage="ai" id="paid-human" hidden>
-          <input type="checkbox" />
-          <span></span>
+          <input type="checkbox" aria-describedby="paid-notice" />
+          <span>Revert confirmed</span>
         </label>
         <div id="analysis-actions" class="actions">
           <button data-stage="load" id="inspect" type="button" disabled>Load source</button>
-          <button data-stage="ai" id="analyze" aria-describedby="analysis-help" disabled>
-            <span>Refresh estimate</span>
+          <button data-stage="ai" id="retry-estimate" type="button" hidden>Retry estimate</button>
+          <button data-stage="ai" id="paid" type="button" aria-describedby="paid-reason" disabled>
+            <span>Run paid classification</span>
           </button>
-          <button data-stage="ai" id="paid" type="button" hidden>Run paid classification</button>
+          <span data-stage="ai" id="paid-reason" role="status"></span>
+          <button data-stage="ai" id="cancel-selected" type="button" hidden>
+            <span>Cancel selected reassessment</span>
+          </button>
           <button data-stage="ai" id="stop" type="button" hidden>Stop after current key</button>
         </div>
         <div data-stage="load ai" id="analysis-progress" role="status">

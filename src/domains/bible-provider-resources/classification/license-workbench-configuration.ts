@@ -9,7 +9,11 @@ import type { WorkbenchDatabase } from './license-workbench-database';
 import type { RecordedOperation } from './license-workbench-operation.types';
 import type { LicenseRerunSelection } from './license-workbench-rerun';
 import type { LicenseReviewQuery } from './license-workbench-review';
-import type { inspectOperationSchema, setupSchema } from './license-workbench-schema';
+import type {
+  estimateSettingsSchema,
+  inspectOperationSchema,
+  setupSchema,
+} from './license-workbench-schema';
 import type { LicenseWorkflow } from './license-workflow';
 import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
@@ -23,11 +27,12 @@ import {
   LicenseWorkbenchDatabaseTests,
 } from './license-workbench-database-tests';
 import { LicenseWorkbenchReports } from './license-workbench-reports';
+import { WorkbenchReassessment } from './license-workbench-rerun';
 import {
   licenseWorkbenchReviewDetail,
   licenseWorkbenchReviewList,
 } from './license-workbench-review-view';
-import { applyLicenseWorkbenchOptions } from './license-workbench-schema';
+import { applyLicenseWorkbenchOptions, changedAiSettings } from './license-workbench-schema';
 import { visibleLicenseWorkbench } from './license-workbench-visible';
 import { LicenseOperationRegistry } from './license-workflow-operations';
 function legacyDatabaseRole(options: Pick<LicenseCommandOptions, 'source' | 'destination'>) {
@@ -55,6 +60,7 @@ export class LicenseWorkbenchConfiguration {
   protected destinationRevision = 1;
   private aiRevision = 1;
   protected loadRevision = 0;
+  protected readonly reassessment = new WorkbenchReassessment();
   private lastSourceLoad?: { operationId: string; sourceRevision: number };
   protected loadedOptions?: LicenseCommandOptions;
   protected loadedConnection?: WorkbenchDatabase;
@@ -172,6 +178,8 @@ export class LicenseWorkbenchConfiguration {
     const legacy = this.databaseRole();
     return {
       sourceDraftPending: this.sourceDraftPending,
+      ...this.reassessment.visible,
+      selectedModelId: this.workflow?.selectedModelId ?? null,
       paidEstimate: this.sourceDraftPending ? null : (this.workflow?.paidEstimate ?? null),
       loadedSource: this.loadedOptions
         ? {
@@ -254,6 +262,7 @@ export class LicenseWorkbenchConfiguration {
     const fields = [
       request.configurationRevision,
       request.contentRevision,
+      request.estimateRevision,
       request.id,
       request.kind,
       request.confirmation,
@@ -298,10 +307,50 @@ export class LicenseWorkbenchConfiguration {
       body.contentRevision !== this.workflow.status.contentRevision
     )
       throw new Error('Stale review revision');
+    if (body.estimateRevision !== undefined && body.estimateRevision !== this.reassessment.revision)
+      throw new Error(
+        'The selected row or estimate changed. Review the current selection before retrying.'
+      );
     if (body.cancel) {
       this.workflow.cancelFreeSelection(body.contentRevision, body);
-    } else await this.workflow.prepareFree(body.contentRevision, body);
+    } else
+      await this.workflow.prepareFree(body.contentRevision, {
+        ...body,
+        modelRun: body.kind === 'model' && !body.confirmation ? 'fresh' : undefined,
+      });
+    this.reassessment.acceptSelection(body);
     return this.visible;
+  }
+  refreshEstimate(body: z.infer<typeof estimateSettingsSchema>) {
+    return this.reserve(async () => {
+      const workflow = this.workflow;
+      this.requireSelectedSourceLoaded();
+      if (this.practiceMode || !workflow?.analyzed || this.activeOperationId)
+        throw new Error('An estimate is unavailable while the session is busy or offline');
+      if (
+        (body.reassessmentScopeRevision !== undefined &&
+          body.reassessmentScopeRevision !== this.reassessment.scopeRevision) ||
+        body.estimateRevision !== this.reassessment.revision ||
+        body.loadRevision !== this.loadRevision ||
+        body.configurationRevision !== this.configurationRevision ||
+        body.contentRevision !== workflow.status.contentRevision
+      )
+        throw new Error('The estimate or selected row changed. Check the current session.');
+      const { model, sampleCount, noCache, cacheDir } = body;
+      const settings = { model, sampleCount, noCache, cacheDir: cacheDir ?? undefined };
+      if (changedAiSettings(this.options, settings)) {
+        const loadedOptions = { ...this.loadedOptions!, ...settings };
+        await workflow.configureLoadedSettings(loadedOptions, false, true);
+        this.options = { ...this.options, ...settings };
+        this.loadedOptions = loadedOptions;
+        this.configurationRevision++;
+        this.aiRevision++;
+        this.reports.clear();
+      }
+      await workflow.prepareFree(workflow.status.contentRevision, undefined, true);
+      this.reassessment.revision++;
+      return this.visible;
+    });
   }
   configure(body: z.infer<typeof setupSchema>) {
     return this.reserve(() => this.configureSettings(body));
@@ -380,11 +429,7 @@ export class LicenseWorkbenchConfiguration {
       options.source !== this.options.source ||
       (options.source === 'json' && options.input !== this.options.input) ||
       sourceConnectionChanged;
-    const aiChanged =
-      options.model !== this.options.model ||
-      options.sampleCount !== this.options.sampleCount ||
-      options.cacheDir !== this.options.cacheDir ||
-      options.noCache !== this.options.noCache;
+    const aiChanged = changedAiSettings(this.options, options);
     const destinationChanged =
       destinationConnectionChanged ||
       (

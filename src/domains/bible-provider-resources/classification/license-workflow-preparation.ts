@@ -7,6 +7,7 @@ import type { FreeSelection } from './license-free-preparation';
 import type { PaidAuthorization } from './license-paid-batch';
 import type { LicenseInspection } from './license-workflow.types';
 
+import { displayLicenseNotice, isLicenseNoticeUnavailable } from '../license-normalizer';
 import {
   freezeLicenseRevision,
   freezeReviewValue,
@@ -38,12 +39,24 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
     }
   }
 
-  protected reconcileCompletedSelections(
+  protected reconcileSelections(
     artifact: LicenseArtifact,
     preflight: LicenseInspection['preflight']
   ) {
     const rows = new Map(artifact.classifications.map((row) => [row.normalizedText, row]));
     const notices = new Map(preflight.rows.map((row) => [row.normalizedText, row.exampleNotice]));
+    const selected =
+      this.modelScope &&
+      artifact.classifications.find(
+        (row) => licenseKeyDigest(row.normalizedText) === this.modelScope?.id
+      );
+    if (
+      this.modelScope?.modelRun !== 'fresh' ||
+      !selected ||
+      isLicenseNoticeUnavailable(notices.get(selected.normalizedText) ?? selected.exampleNotice)
+    )
+      this.modelScope = undefined;
+    this.invalidatePaidEstimate();
     for (const [key, basis] of this.completedLaunchSelections) {
       const row = rows.get(basis.row.normalizedText);
       if (
@@ -54,7 +67,26 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
         this.completedLaunchSelections.delete(key);
     }
   }
+  private modelScope?: FreeSelection;
+  get selectedModelId() {
+    return this.modelScope?.id ?? null;
+  }
+  get selectedModelNotice() {
+    const id = this.selectedModelId;
+    if (!id) return null;
+    const row = this.analysis?.artifact.classifications.find(
+      (item) => licenseKeyDigest(item.normalizedText) === id
+    );
+    const plan = this.inspection?.preflight.rows.find(
+      (item) => item.normalizedText === row?.normalizedText
+    );
+    return { id, notice: displayLicenseNotice(plan?.exampleNotice ?? row?.exampleNotice ?? null) };
+  }
   private estimateGeneration = randomUUID();
+  protected resetModelSelection() {
+    this.modelScope = undefined;
+    this.invalidatePaidEstimate();
+  }
   protected invalidatePaidEstimate() {
     this.estimate = undefined;
     this.estimateGeneration = randomUUID();
@@ -72,21 +104,23 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
 
   cancelFreeSelection(contentRevision: number, selection: FreeSelection) {
     this.requireContentRevision(this.configurationRevision, contentRevision);
-    if (
-      this.busyDone ||
-      !selection.confirmation ||
-      !this.paidEstimate?.replacements.some(
-        (row) =>
-          row.id === selection.id &&
-          row.kind === selection.kind &&
-          row.confirmation === selection.confirmation
-      )
-    )
+    const estimate = this.paidEstimate;
+    const currentModel =
+      this.modelScope?.id === selection.id &&
+      selection.kind === 'model' &&
+      selection.confirmation === estimate?.fingerprint;
+    const currentReplacement = estimate?.replacements.some(
+      (row) =>
+        row.id === selection.id &&
+        row.kind === selection.kind &&
+        row.confirmation === selection.confirmation
+    );
+    if (this.busyDone || !selection.confirmation || !(currentModel || currentReplacement))
       throw new Error('Stale reassessment confirmation');
-    this.invalidatePaidEstimate();
+    this.resetModelSelection();
   }
 
-  async prepareFree(contentRevision: number, selection?: FreeSelection) {
+  async prepareFree(contentRevision: number, selection?: FreeSelection, renewEstimate = false) {
     this.requireContentRevision(this.configurationRevision, contentRevision);
     if (this.busyDone || !['inspected', 'reviewing', 'saved', 'previewed'].includes(this.state))
       throw new Error('Cannot prepare assessment while an operation runs');
@@ -95,7 +129,15 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
     this.stopAnalysisRequested = false;
     this.beginBusy();
     try {
-      await this.prepareLoadedFree(selection);
+      await this.prepareLoadedFree(
+        selection ?? this.modelScope,
+        renewEstimate || Boolean(selection?.modelRun)
+      );
+      if (selection)
+        this.modelScope =
+          selection.modelRun === 'fresh'
+            ? { id: selection.id, kind: 'model', modelRun: 'fresh' }
+            : undefined;
       return this.paidEstimate!;
     } finally {
       if (this.state === 'analyzing') this.state = prior;
@@ -103,7 +145,7 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
     }
   }
 
-  protected async prepareLoadedFree(selection?: FreeSelection) {
+  protected async prepareLoadedFree(selection?: FreeSelection, renewEstimate = false) {
     if (!this.analysis || !this.inspection?.sourceOnly)
       throw new Error('Load a review source first');
     if (
@@ -117,7 +159,8 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
     const sameSelection =
       this.estimate?.selection?.id === selection?.id &&
       this.estimate?.selection?.kind === selection?.kind;
-    const estimateGeneration = sameSelection ? this.estimateGeneration : randomUUID();
+    const estimateGeneration =
+      sameSelection && !renewEstimate ? this.estimateGeneration : randomUUID();
     const staged = await stageFreePreparation({
       estimateGeneration,
       confirmationNonce,
@@ -194,7 +237,7 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
       !['inspected', 'reviewing', 'saved', 'previewed'].includes(this.state)
     )
       throw new PaidBatchError(
-        'Estimate changed. Prepare free evidence before authorizing a batch.'
+        'Estimate changed. Check the current estimate before authorizing a batch.'
       );
     const prior = this.state;
     this.beginBusy();
@@ -211,7 +254,7 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
         eligibility: this.inspection.preflight.rows,
         drafts: this.reviewDrafts,
         contentRevision: this.contentRevision,
-        selection: estimate.selection ?? undefined,
+        selection: this.modelScope ?? estimate.selection ?? undefined,
         now: this.dependencies.now,
       });
       const result = await stagePaidBatch({
@@ -233,6 +276,7 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
         estimate.outstanding.filter((row) => launch.has(row.id)).map((row) => `model:${row.id}`),
         analysis.artifact
       );
+      if (this.modelScope) this.modelScope = { ...this.modelScope, modelRun: 'completed' };
       this.invalidatePaidEstimate();
       return analysis;
     } catch (error) {

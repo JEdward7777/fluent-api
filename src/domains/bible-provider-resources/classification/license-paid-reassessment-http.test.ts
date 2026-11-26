@@ -239,3 +239,180 @@ it('uses the approved partial cache and counts a retry as another attempt', asyn
     await f.cleanup();
   }
 });
+
+it('keeps an explicitly selected fresh estimate scoped through refresh and rejects superseded authorization', async () => {
+  const f = await makeCommandFixture(false);
+  const [selected, other] = f.artifact.classifications;
+  const id = licenseKeyDigest(selected.normalizedText);
+  const otherId = licenseKeyDigest(other.normalizedText);
+  const app = await start(f, `--rerun-model=${id}`);
+  try {
+    const cache = createRequestCache(f.options.cacheDir);
+    for (let index = 1; index <= f.options.sampleCount; index++)
+      await cache.write(
+        buildLicenseSampleRequest(
+          selected.exampleNotice!,
+          'google',
+          f.options.model.slice(7),
+          index
+        ),
+        '{"rationale":"Cached fixture.","decision":"allowed"}'
+      );
+    const loaded = await app.operate('inspect');
+    expect(loaded.paidEstimate.expectedUncachedRequests).toBe(0);
+    let revision = loaded.contentRevision;
+    const list = (await app.api('review')).body;
+    for (const key of [id, otherId]) {
+      const edit = await app.api('review/draft', {
+        kind: 'patch',
+        id: key,
+        mutationId: crypto.randomUUID(),
+        epoch: list.epoch,
+        contentRevision: revision,
+        status: 'forbidden',
+        reviewComment: `Exact comment for ${key}`,
+        touched: true,
+      });
+      expect(edit.status).toBe(200);
+      revision = edit.body.contentRevision;
+    }
+    const select = async (key: string) =>
+      (
+        await app.api('review/rerun', {
+          configurationRevision: loaded.configurationRevision,
+          contentRevision: revision,
+          operationId: crypto.randomUUID(),
+          kind: 'model',
+          id: key,
+        })
+      ).body;
+    const first = await select(id);
+    const refresh = {
+      configurationRevision: first.configurationRevision,
+      contentRevision: revision,
+      loadRevision: first.loadRevision,
+      estimateRevision: first.estimateRevision,
+      model: first.model,
+      sampleCount: first.sampleCount + 1,
+      noCache: false,
+      cacheDir: first.cacheDir,
+    };
+    expect(first.paidEstimate).toMatchObject({
+      expectedUncachedRequests: first.sampleCount,
+      cacheReadEnabled: false,
+      selection: { id, kind: 'model' },
+      outstanding: [{ id, human: true }],
+    });
+    const request = {
+      configurationRevision: first.configurationRevision,
+      contentRevision: revision,
+      estimateRevision: first.estimateRevision,
+      kind: 'model',
+      id: otherId,
+      operationId: crypto.randomUUID(),
+    };
+    const accepted = await app.api('review/rerun', request);
+    expect(accepted.status).toBe(200);
+    const otherQuote = accepted.body;
+    expect(await app.api('review/rerun', request)).toEqual(accepted);
+    expect(
+      (await app.api('review/rerun', { ...request, estimateRevision: otherQuote.estimateRevision }))
+        .status
+    ).toBe(409);
+    expect(
+      (await app.api('review/rerun', { ...request, operationId: crypto.randomUUID(), id })).status
+    ).toBe(409);
+    expect((await app.api('ai/estimate', refresh)).status).toBe(409);
+    expect(
+      (
+        await app.api('ai/estimate', {
+          ...refresh,
+          estimateRevision: otherQuote.estimateRevision,
+          reassessmentScopeRevision: first.reassessmentScopeRevision,
+        })
+      ).status
+    ).toBe(409);
+    expect((await app.api('setup')).body.paidEstimate).toEqual(otherQuote.paidEstimate);
+    const again = await select(id);
+    const latest = (
+      await app.api('ai/estimate', { ...refresh, estimateRevision: again.estimateRevision })
+    ).body;
+    const repeated = await app.api('analysis', {
+      operationId: crypto.randomUUID(),
+      configurationRevision: latest.configurationRevision,
+    });
+    await expect
+      .poll(async () => (await app.api(`operations/${repeated.body.operationId}`)).body.state)
+      .toBe('succeeded');
+    const estimate = (await app.api('setup')).body.paidEstimate;
+    expect(estimate).toMatchObject({
+      expectedUncachedRequests: refresh.sampleCount,
+      selection: { id, kind: 'model' },
+      outstanding: [{ id, human: true }],
+    });
+    const pay = async (fingerprint: string, confirmation: string) => {
+      const operationId = crypto.randomUUID();
+      expect(
+        (
+          await app.api('paid', {
+            operationId,
+            configurationRevision: latest.configurationRevision,
+            paid: {
+              fingerprint,
+              maximumRequests: refresh.sampleCount,
+              replacementConfirmations: [confirmation],
+            },
+          })
+        ).status
+      ).toBe(202);
+      return () => app.api(`operations/${operationId}`).then((response) => response.body.state);
+    };
+    await expect
+      .poll(
+        await pay(
+          first.paidEstimate.fingerprint,
+          first.paidEstimate.outstanding[0].replacementConfirmation
+        )
+      )
+      .toBe('failed');
+    expect(f.dependencies.transport).not.toHaveBeenCalled();
+    for (const key of [id, otherId])
+      expect((await app.api(`review/${key}`)).body).toMatchObject({
+        status: 'forbidden',
+        pending: true,
+        reviewComment: `Exact comment for ${key}`,
+      });
+    await expect
+      .poll(await pay(estimate.fingerprint, estimate.outstanding[0].replacementConfirmation))
+      .toBe('succeeded');
+    expect(f.dependencies.transport).toHaveBeenCalledTimes(refresh.sampleCount);
+    const after = (await app.api('setup')).body;
+    expect(after.selectedPaid).toMatchObject({
+      selectedModel: {
+        id,
+        decision: 'allowed',
+        freshSamples: refresh.sampleCount,
+        reusedSamples: 0,
+      },
+    });
+    const finished = await app.api('ai/estimate', {
+      ...refresh,
+      configurationRevision: after.configurationRevision,
+      contentRevision: after.contentRevision,
+      estimateRevision: after.estimateRevision,
+    });
+    expect(finished.body.paidEstimate).toMatchObject({
+      selection: { id, kind: 'model' },
+      expectedUncachedRequests: 0,
+    });
+    expect(f.dependencies.transport).toHaveBeenCalledTimes(refresh.sampleCount);
+    expect((await app.api(`review/${otherId}`)).body).toMatchObject({
+      status: 'forbidden',
+      pending: true,
+      reviewComment: `Exact comment for ${otherId}`,
+    });
+  } finally {
+    await app.close();
+    await f.cleanup();
+  }
+});

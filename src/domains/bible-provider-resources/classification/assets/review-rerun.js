@@ -31,12 +31,20 @@ function confirmReplacement(kind) {
   });
 }
 
-export function reviewRerunActions(item, { selectRerun, isBusy, showError }) {
+export function reviewRerunActions(item, { selectRerun, isBusy, openEstimate, getSetup }) {
   const actions = document.createElement('div');
   actions.className = 'actions';
+  const outcome = document.createElement('p');
+  outcome.dataset.rerunStatus = '';
+  outcome.setAttribute('role', 'status');
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.dataset.openEstimate = '';
+  open.textContent = 'View AI estimate';
+  open.addEventListener('click', openEstimate);
   for (const [kind, label] of [
     ['rule', 'Reevaluate this row with rules'],
-    ['model', 'Prepare model reassessment'],
+    ['model', 'Reassess with AI'],
   ]) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -48,11 +56,16 @@ export function reviewRerunActions(item, { selectRerun, isBusy, showError }) {
       if (isBusy()) return;
       button.dataset.running = 'true';
       button.disabled = true;
+      outcome.textContent =
+        kind === 'model'
+          ? 'Preparing the estimate for this notice…'
+          : 'Checking this notice against the rules…';
       try {
         request ??= {
           operationId: crypto.randomUUID(),
           configurationRevision: item.configurationRevision,
           contentRevision: item.contentRevision,
+          estimateRevision: getSetup().estimateRevision,
           id: item.id,
           kind,
         };
@@ -63,15 +76,19 @@ export function reviewRerunActions(item, { selectRerun, isBusy, showError }) {
           request = {
             ...request,
             operationId: crypto.randomUUID(),
+            estimateRevision: result.estimateRevision,
             confirmation: replacement.confirmation,
             ...(accepted ? {} : { cancel: true }),
           };
-          await selectRerun(request);
+          const changed = await selectRerun(request);
+          outcome.textContent = reassessmentStatus(request, changed.paidEstimate);
+        } else {
+          outcome.textContent = reassessmentStatus(request, result.paidEstimate);
         }
         request = undefined;
       } catch (error) {
         if (error.requestRejected) request = undefined;
-        showError(error.message);
+        outcome.textContent = error.message;
       } finally {
         delete button.dataset.running;
         button.disabled = isBusy();
@@ -79,6 +96,8 @@ export function reviewRerunActions(item, { selectRerun, isBusy, showError }) {
     });
     actions.append(button);
   }
+  actions.append(open, outcome);
+  syncRerunOutcome(actions, item.id, getSetup());
   return actions;
 }
 
@@ -96,10 +115,48 @@ export function syncRerunButtons(detail, unavailable) {
     button.disabled = unavailable || button.dataset.running === 'true';
 }
 
+export function syncRerunOutcome(detail, id, setup) {
+  const label = detail.querySelector('[data-rerun-status]');
+  if (!label) return;
+  const estimate = setup.paidEstimate;
+  const selected = setup.selectedModelId === id;
+  const operation = setup.selectedPaid?.selectedModel?.id === id && setup.selectedPaid;
+  const offer = selected && estimate?.selection?.id === id;
+  const open = detail.querySelector('[data-open-estimate]');
+  open.hidden = !offer || !estimate.expectedUncachedRequests;
+  const parts = [];
+  if (operation) {
+    const { attempts } = operation.progress;
+    const result = operation.selectedModel;
+    if (operation.state === 'succeeded')
+      parts.push(
+        `Reassessment complete. Decision: ${result.decision}. ${result.freshSamples} fresh samples, ${result.reusedSamples} reused. ${attempts} model attempts.`
+      );
+    else if (operation.state === 'failed')
+      parts.push(`${operation.error} Decision kept. ${attempts} model attempts started.`);
+    else parts.push(`Running the selected reassessment. ${attempts} model attempts started.`);
+  }
+  if (setup.canceledModelId === id && !operation)
+    parts.push(
+      setup.reassessmentSourceChange
+        ? 'The source changed and closed this reassessment.'
+        : 'Canceled the reassessment. Your decision was kept.'
+    );
+  if (offer && (!operation || operation.state === 'failed'))
+    parts.push(reassessmentStatus(estimate.selection, estimate));
+  if (parts.length) {
+    label.textContent = parts.join(' ');
+    label.dataset.scoped = 'true';
+  } else if (label.dataset.scoped) {
+    label.textContent = '';
+    delete label.dataset.scoped;
+  }
+}
+
 export function reassessmentStatus(request, estimate) {
-  if (request.cancel) return 'Human review kept.';
+  if (request.cancel) return 'Selection closed. The current decision was kept.';
   if (estimate?.replacements.length) return 'Confirm replacement of this human decision.';
   if (estimate?.expectedUncachedRequests)
-    return `Reassessment needs ${estimate.expectedUncachedRequests} uncached model requests. No requests were sent.`;
+    return `This notice needs ${estimate.expectedUncachedRequests} fresh model requests. ${estimate.cost.reason} Review the estimate before running paid classification.`;
   return ruleNonmatchMessage(estimate) || 'Free reassessment complete.';
 }

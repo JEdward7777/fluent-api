@@ -8,6 +8,7 @@ import {
   workflowStatus,
 } from './analysis-progress.js';
 import { createDraftDatabaseTest } from './database-test.js';
+import { createEstimateRefresh, olderSetup } from './estimate-refresh.js';
 import { createStageNavigation, renderSetupContext, trackActionFocus } from './guide.js';
 import { createPaidControls } from './paid-controls.js';
 import {
@@ -41,7 +42,7 @@ if (launchedToken)
 const status = document.getElementById('status');
 const form = document.getElementById('setup');
 const inspect = document.getElementById('inspect');
-const analyze = document.getElementById('analyze');
+const paid = document.getElementById('paid');
 const stop = document.getElementById('stop');
 const inspection = document.getElementById('inspection');
 const databaseTest = document.getElementById('database-test');
@@ -52,6 +53,7 @@ let setup;
 let dirty = '';
 let applyingSettings = false;
 let practiceBusy = false;
+let estimateRefresh;
 let sessionUnconfirmed = false;
 
 const getSetup = () => setup;
@@ -76,6 +78,7 @@ const analysisProgress = createAnalysisProgress(getSetup, render, () => sessionU
 function mayObserve() {
   return (
     setup &&
+    !estimateRefresh.running &&
     !applyingSettings &&
     !practiceBusy &&
     !sessionUnconfirmed &&
@@ -91,7 +94,9 @@ const evidenceChanges = () => pending('ai');
 const saveChanges = () => pending('save');
 
 function settingsRequestActive(next = setup) {
-  return applyingSettings || draftDatabase.running || next?.testingDatabase;
+  return (
+    estimateRefresh.running || applyingSettings || draftDatabase.running || next?.testingDatabase
+  );
 }
 
 function workbenchBusy(next) {
@@ -124,9 +129,19 @@ const stages = createStageNavigation(form, {
   onVisit: observer.refresh,
   syncRoleActions,
   onStage: visitStage,
-  hasAiDraft: () => Boolean(pending('ai')),
+  hasAiDraft: () => Boolean(pending('ai')) || estimateRefresh.blocked,
 });
-const paidControls = createPaidControls(getSetup, syncSettingsActions, start);
+const paidControls = createPaidControls(getSetup, syncSettingsActions, start, selectRerun);
+estimateRefresh = createEstimateRefresh({
+  getSetup,
+  read: drafts.readDraft,
+  restoreAi: (next) => drafts.restore('ai', next),
+  dirty: evidenceChanges,
+  request,
+  render: (next) => render(next, false, undefined, true),
+  available: () => !workbenchBusy(setup) && !settingsRequestActive() && !hasUnsavedReviewDraft(),
+  sync: syncSessionControls,
+});
 function syncSettingsActions(next) {
   const busy = workbenchBusy(next);
   syncSettingsFields(
@@ -142,16 +157,19 @@ function syncSettingsActions(next) {
     { load: loadChanges(), analysis: evidenceChanges(), source: form.elements.source.value },
     hasUnsavedReviewDraft()
   );
-  paidControls.update(next, actions.analyze);
+  paidControls.update(next, actions.analyze && !estimateRefresh.blocked, estimateRefresh.message());
   inspect.disabled =
     !actions.inspect || (form.elements.source.value === 'database' && drafts.conflicted('source'));
-  analyze.disabled = !actions.analyze;
-  analyze.hidden = !next.analysis || next.practice || Boolean(next.paidEstimate);
   inspection.hidden = !next.inspected;
   inspection.textContent = inspectionSummary(next, evidenceChanges());
 }
 
 const renderGuide = (next) => stages.update(next);
+function syncSessionControls() {
+  syncSettingsActions(setup);
+  syncReviewAvailability(setup);
+  renderGuide(setup);
+}
 const captureFocus = trackActionFocus();
 const operationFocus = trackOperationFocus(captureFocus, status);
 
@@ -188,7 +206,7 @@ function syncReviewAvailability(next) {
   syncPracticeDraftControls();
   setReviewBusy(
     workbenchBusy(next) || practiceBusy || settingsRequestActive(next),
-    Boolean(evidenceChanges())
+    Boolean(evidenceChanges()) || estimateRefresh.edited
   );
 }
 
@@ -196,51 +214,36 @@ function checkPendingSettings() {
   const changes = pending();
   if (changes !== dirty) {
     dirty = changes;
-    syncSettingsActions(setup);
-    syncReviewAvailability(setup);
-    renderGuide(setup);
+    syncSessionControls();
   }
   return Boolean(changes);
 }
 
 initReview(
   request,
-  async (body) => {
-    return request('review/draft', 'POST', body);
-  },
+  (body) => request('review/draft', 'POST', body),
   () => {
-    syncPracticeDraftControls();
-    if (setup) {
-      syncSettingsActions(setup);
-      renderExactPreview(setup);
-      renderSave(setup);
-      renderGuide(setup);
-    }
+    if (!setup) return;
+    estimateRefresh.schedule();
+    syncSessionControls();
   },
-  async (body) => {
-    if (evidenceChanges()) throw new Error('Apply or restore AI settings before reassessment.');
-    const next = await request('review/rerun', 'POST', body);
-    if (
-      next.configurationRevision < setup.configurationRevision ||
-      (next.configurationRevision === setup.configurationRevision &&
-        next.contentRevision < setup.contentRevision)
-    )
-      throw Object.assign(new Error('The review changed. Select reassessment again.'), {
-        requestRejected: true,
-      });
-    render(next);
-    if (!evidenceChanges()) status.textContent = reassessmentStatus(body, next.paidEstimate);
-    return next;
-  },
-  (next) => render(next, false, undefined, true)
+  selectRerun,
+  (next) => render(next, false, undefined, true),
+  () => stages.navigate('ai')
 );
+async function selectRerun(body) {
+  const next = await estimateRefresh.select(body);
+  status.textContent = reassessmentStatus(body, next.paidEstimate);
+  return next;
+}
 function render(raw, populate = false, accepted, passive = false) {
+  if (olderSetup(setup, raw)) return;
   observer.remember(raw);
   const next = withTabSaveOutcome(raw, setup);
   sessionUnconfirmed = false;
   if (setup?.loadRevision !== next.loadRevision || setup?.contentRevision !== next.contentRevision)
     form.elements.discardReviewedState.checked = false;
-  drafts.refresh(setup, next, populate, accepted);
+  drafts.refresh(setup, next, populate, accepted, estimateRefresh.rebase(next));
   setup = next;
   if (!passive || !hasUnsavedReviewDraft()) updateReview(next, !passive);
   draftDatabase.syncFields(appliedConnection());
@@ -271,6 +274,7 @@ function render(raw, populate = false, accepted, passive = false) {
   syncReviewAvailability(next);
   renderGuide(next);
   schedulePreview();
+  estimateRefresh.schedule();
   if (!analysisProgress.starting) operationFocus.observe(next.latestOperation);
 }
 const { refresh, pollEvidence } = createEvidencePolling(getSetup, request, render, () => {
@@ -281,11 +285,13 @@ const { refresh, pollEvidence } = createEvidencePolling(getSetup, request, rende
   status.dataset.state = 'error';
   status.textContent = message;
   operationFocus.fail();
-  syncSettingsActions(setup);
-  syncReviewAvailability(setup);
-  renderGuide(setup);
+  syncSessionControls();
 });
 form.addEventListener('input', (event) => {
+  if (event.target.closest('label')?.dataset.stage === 'ai') {
+    paidControls.resetConsent();
+    estimateRefresh.change(event.target.name);
+  }
   draftDatabase.syncFields(appliedConnection());
   if (databaseSettings.contains(event.target)) {
     draftDatabase.invalidate();
@@ -307,6 +313,7 @@ document.addEventListener('pointerdown', checkPendingSettings, true);
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (stages.current === 'load') return start('inspect');
+  if (stages.current !== 'save') return;
   if (!setup || applySettings.disabled || !checkPendingSettings() || !stages.validate()) return;
   const focusError = captureFocus();
   try {
@@ -367,7 +374,7 @@ databaseTest.addEventListener('click', async () => {
   );
 });
 async function start(kind, paidBody) {
-  if (hasUnsavedReviewDraft() || (kind === 'inspect' ? inspect.disabled : analyze.disabled)) return;
+  if (hasUnsavedReviewDraft() || (kind === 'inspect' ? inspect.disabled : paid.disabled)) return;
   if (
     !setup ||
     workbenchBusy(setup) ||
@@ -399,7 +406,6 @@ async function start(kind, paidBody) {
   }
 }
 inspect.addEventListener('click', () => start('inspect'));
-analyze.addEventListener('click', () => start('analysis'));
 stop.addEventListener('click', async () => {
   if (stop.disabled || sessionUnconfirmed) return;
   const focusError = captureFocus();

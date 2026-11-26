@@ -109,7 +109,7 @@ export class LicenseWorkflow extends LicenseSourceReconciliation {
       this.previewResult = undefined;
       this.configurationRevision++;
       this.contentRevision = 0;
-      this.invalidatePaidEstimate();
+      this.resetModelSelection();
       this.completedLaunchSelections.clear();
       this.resetDrafts();
       this.state = 'configuring';

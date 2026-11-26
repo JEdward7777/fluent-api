@@ -104,6 +104,13 @@ export function createStageNavigation(
       if (link.dataset.route === stage) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     }
+    for (const id of ['paid', 'paid-reason'])
+      document
+        .getElementById(id)
+        .classList.toggle(
+          'stage-hidden',
+          stage !== 'ai' && !(stage === 'load' && !aiAvailable && (next.analysis || next.practice))
+        );
     const reviewReady = document.getElementById('review-ready');
     reviewReady.hidden = !next.analysis || stage === 'review';
     reviewReady.textContent = `Review available · ${next.analysis?.rows ?? 0} rows`;
@@ -173,10 +180,20 @@ export function createStageNavigation(
     navigate(new URL(location.href).searchParams.get('stage') ?? 'load', true)
   );
   return {
+    navigate,
     get current() {
       return stage;
     },
     update(next) {
+      const change = next.reassessmentSourceChange;
+      const notice = document.getElementById('reassessment-source-change');
+      notice.hidden = !change;
+      if (change) {
+        notice.textContent =
+          change.outcome === 'retained'
+            ? `After source reconciliation, “${change.notice}” is still selected. Review its new estimate before starting paid classification.`
+            : `${change.outcome === 'replaced' ? 'Loading the new source' : 'Reconciling the source'} closed the reassessment for “${change.notice}”. Estimates now cover the loaded source until you select a row.`;
+      }
       needsAi =
         !next.practice &&
         Boolean(
@@ -184,12 +201,20 @@ export function createStageNavigation(
           (next.analysis && !next.paidEstimate && !next.sourceDraftPending) ||
           (next.latestOperation?.kind === 'paid' && next.latestOperation.state === 'running')
         );
-      aiAvailable = needsAi || (!next.practice && !next.sourceDraftPending && hasAiDraft());
+      aiAvailable =
+        needsAi ||
+        (!next.practice && !next.sourceDraftPending && (next.selectedModelId || hasAiDraft()));
       document.getElementById('ai-state').textContent = needsAi
         ? ''
         : aiAvailable
-          ? 'Unapplied AI settings'
-          : 'No AI work needed';
+          ? next.selectedModelId
+            ? 'Selected reassessment'
+            : 'Updating AI settings'
+          : next.practice
+            ? 'Offline practice cannot call the model.'
+            : next.analysis
+              ? 'No model requests are needed.'
+              : 'Load a source for its estimate.';
       if (!initialized) {
         configureStageHelp(next.practice);
         const requested = new URL(location.href).searchParams.get('stage');

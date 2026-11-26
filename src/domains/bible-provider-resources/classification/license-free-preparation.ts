@@ -16,6 +16,7 @@ export interface FreeSelection {
   id: string;
   kind: 'rule' | 'model';
   confirmation?: string;
+  modelRun?: 'fresh' | 'completed';
 }
 
 export async function stageFreePreparation(input: {
@@ -31,7 +32,8 @@ export async function stageFreePreparation(input: {
   now?: () => string;
 }) {
   const { artifact, options, drafts, selection } = input;
-  const cache = options.noCache ? undefined : createRequestCache(options.cacheDir);
+  const cache =
+    options.noCache || selection?.modelRun ? undefined : createRequestCache(options.cacheDir);
   const responses = new Map<string, string>();
   const eligible = new Map(input.eligibility.map((row) => [row.normalizedText, row]));
   const free: LicenseEligibilityRow[] = [];
@@ -56,6 +58,7 @@ export async function stageFreePreparation(input: {
     const id = licenseKeyDigest(row.normalizedText);
     if (selection && selection.id !== id) continue;
     found = true;
+    if (selection?.modelRun === 'completed') continue;
     const values = drafts.values(row);
     const human = values.reviewState === 'human_reviewed' || row.source === 'manual';
     const plan = eligible.get(row.normalizedText);
@@ -194,7 +197,7 @@ export async function stageFreePreparation(input: {
         ])
       ),
       selection: selection ? { id: selection.id, kind: selection.kind } : null,
-      cacheReadEnabled: !options.noCache,
+      cacheReadEnabled: Boolean(cache),
       provider: 'google',
       model,
       sampleCount: options.sampleCount,

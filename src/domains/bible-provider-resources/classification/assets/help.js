@@ -64,7 +64,7 @@ const help = [
   ],
   [
     '#setup [name="samples"]',
-    'Number of model votes for each selected model key. Free preparation applies complete cached votes and estimates missing samples.',
+    'Number of model votes for each selected model key. Load can reuse cached votes. Reassess with AI requests fresh samples for the selected notice.',
   ],
   [
     '#setup [name="cacheDir"]',

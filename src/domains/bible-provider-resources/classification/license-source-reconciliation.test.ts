@@ -168,6 +168,17 @@ it('rejects a stale HTTP reconciliation and retains deleted rows until explicitl
       contentRevision: ack.body.contentRevision,
       reviewedBy: 'Reviewer',
     };
+    const quote = (
+      await app.api('review/rerun', {
+        kind: 'model',
+        id,
+        operationId: crypto.randomUUID(),
+        configurationRevision: loaded.configurationRevision,
+        contentRevision: ack.body.contentRevision,
+        estimateRevision: loaded.estimateRevision,
+      })
+    ).body;
+    expect(quote.selectedModelId).toBe(id);
     const incoming = createLicenseArtifact({
       ...f.artifact,
       classifications: f.artifact.classifications.slice(0, 2),
@@ -189,12 +200,23 @@ it('rejects a stale HTTP reconciliation and retains deleted rows until explicitl
       409
     );
     expect((await app.api(`review/${id}`)).body.reviewComment).toBe('Keep pending evidence');
+    const rejected = (await app.api('setup')).body;
+    expect(rejected.paidEstimate).toEqual(quote.paidEstimate);
+    expect(rejected.estimateRevision).toBe(quote.estimateRevision);
     const refreshed = (await app.api('source/reconcile', {})).body;
     expect((await app.api('source/reconcile', { token: refreshed.token, choices })).status).toBe(
       200
     );
     const accepted = (await app.api('setup')).body;
-    expect(accepted.sourceChanged).toBe(false);
+    expect(accepted).toMatchObject({
+      sourceChanged: false,
+      selectedModelId: null,
+      canceledModelId: id,
+      paidEstimate: null,
+      reassessmentSourceChange: { id, notice: row.exampleNotice, outcome: 'closed' },
+    });
+    expect(accepted.estimateRevision).toBeGreaterThan(quote.estimateRevision);
+    expect(f.dependencies.transport).not.toHaveBeenCalled();
     expect(accepted.analysis.pendingReviews).toBe(0);
     expect(accepted.inspected.sourceHash).toBe(
       createHash('sha256')
@@ -228,6 +250,16 @@ it.each(['source', 'working', 'source-with-mark', 'proposed'] as const)(
         contentRevision: list.contentRevision,
         mutationId: crypto.randomUUID(),
       });
+      const selected = (
+        await app.api('review/rerun', {
+          kind: 'model',
+          id,
+          operationId: crypto.randomUUID(),
+          configurationRevision: setup.configurationRevision,
+          contentRevision: ack.body.contentRevision,
+          estimateRevision: setup.estimateRevision,
+        })
+      ).body;
       const external = recordHumanLicenseDecision(
         f.artifact,
         incoming.normalizedText,
@@ -256,6 +288,36 @@ it.each(['source', 'working', 'source-with-mark', 'proposed'] as const)(
       );
       const next = (await app.api('setup')).body;
       expect(next.analysis.pendingReviews).toBe(choice === 'source' ? 0 : 1);
+      expect(next).toMatchObject({
+        selectedModelId: id,
+        canceledModelId: null,
+        paidEstimate: null,
+        reassessmentSourceChange: { id, notice: sticky.exampleNotice, outcome: 'retained' },
+      });
+      expect(next.estimateRevision).toBeGreaterThan(selected.estimateRevision);
+      const latest = (
+        await app.api('ai/estimate', {
+          model: next.model,
+          sampleCount: next.sampleCount,
+          cacheDir: next.cacheDir,
+          noCache: next.noCache,
+          configurationRevision: next.configurationRevision,
+          contentRevision: next.contentRevision,
+          loadRevision: next.loadRevision,
+          estimateRevision: next.estimateRevision,
+        })
+      ).body.paidEstimate;
+      expect(latest).toMatchObject({
+        expectedUncachedRequests: next.sampleCount,
+        selection: { id, kind: 'model' },
+        outstanding: [{ id, human: choice !== 'source' }],
+      });
+      expect(latest.fingerprint).not.toBe(selected.paidEstimate.fingerprint);
+      if (choice !== 'source')
+        expect(latest.outstanding[0].replacementConfirmation).not.toBe(
+          selected.paidEstimate.outstanding[0].replacementConfirmation
+        );
+      expect(f.dependencies.transport).not.toHaveBeenCalled();
       const plan = await app.api('preview', {
         configurationRevision: next.configurationRevision,
         contentRevision: next.contentRevision,

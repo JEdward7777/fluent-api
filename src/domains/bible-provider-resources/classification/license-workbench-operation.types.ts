@@ -7,6 +7,13 @@ export interface VisibleOperation {
   configurationRevision?: number;
   contentRevision?: number;
   error?: string;
+  selectedModel?: {
+    id: string;
+    notice: string;
+    decision?: string;
+    freshSamples?: number;
+    reusedSamples?: number;
+  };
   progress?: {
     attempts: number;
     completedRows: number;

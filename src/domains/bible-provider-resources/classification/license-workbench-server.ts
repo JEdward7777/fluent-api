@@ -18,10 +18,12 @@ import { draftCommandSchema } from './license-review-drafts';
 import { describeLicenseReportPath } from './license-reviewer-container';
 import { LicenseWorkbenchDatabaseError } from './license-workbench-database-error';
 import { DatabaseTestUnavailableError } from './license-workbench-database-tests';
+import { licenseWorkbenchBrowserError } from './license-workbench-error';
 import { registerReportViews } from './license-workbench-reports';
 import { reviewQuerySchema } from './license-workbench-review';
 import {
   databaseConnectionSchema,
+  estimateSettingsSchema,
   inspectOperationSchema,
   operationSchema,
   paidOperationSchema,
@@ -34,6 +36,7 @@ const assetDirectory = join(dirname(fileURLToPath(import.meta.url)), 'assets');
 const assets = new Map<string, readonly [string, string]>([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
+  ['/estimate-refresh.js', ['estimate-refresh.js', 'text/javascript; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/paid-controls.js', ['paid-controls.js', 'text/javascript; charset=utf-8']],
   ['/analysis-progress.js', ['analysis-progress.js', 'text/javascript; charset=utf-8']],
@@ -122,6 +125,15 @@ function createLicenseWorkbenchApp(
   app.get('/api/operations/:id', (c) => {
     const operation = session.operation(c.req.param('id'));
     return operation ? c.json(operation) : c.text('Unknown operation', 404);
+  });
+  app.post('/api/ai/estimate', async (c) => {
+    const parsed = estimateSettingsSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Check the model, sample count and cache settings.', 400);
+    try {
+      return c.json(await session.refreshEstimate(parsed.data));
+    } catch (error) {
+      return c.text(licenseWorkbenchBrowserError(error), 409);
+    }
   });
   app.post('/api/setup', async (c) => {
     const parsed = setupSchema.safeParse(await c.req.json().catch(() => null));
@@ -249,6 +261,7 @@ function createLicenseWorkbenchApp(
         contentRevision: z.number().int().nonnegative(),
         id: z.string().regex(/^[a-f0-9]{64}$/),
         kind: z.enum(['rule', 'model']),
+        estimateRevision: z.number().int().nonnegative().optional(),
         operationId: z.string().uuid().optional(),
         cancel: z.literal(true).optional(),
         confirmation: z

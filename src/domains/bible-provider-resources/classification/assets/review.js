@@ -2,7 +2,12 @@ import { createDraftSync, reviewShortcuts } from './review-edit-feedback.js';
 import { appendEvidence, node } from './review-evidence.js';
 import { initReviewNavigation, reviewQuery, showFilters } from './review-navigation.js';
 import { initReviewPagination } from './review-pagination.js';
-import { reassessmentUnavailable, reviewRerunActions, syncRerunButtons } from './review-rerun.js';
+import {
+  reassessmentUnavailable,
+  reviewRerunActions,
+  syncRerunButtons,
+  syncRerunOutcome,
+} from './review-rerun.js';
 
 const section = document.getElementById('review');
 const form = document.getElementById('review-filter');
@@ -15,6 +20,7 @@ const viewStatus = document.getElementById('review-view-status');
 let request;
 let submitEdit;
 let selectRerun;
+let openEstimate;
 let onDraftChange = () => {};
 let currentSetup;
 let loadedRevision = null;
@@ -240,6 +246,7 @@ function reviewEditor(item, refreshEvidence) {
       } else await sync.command({ kind });
     } finally {
       editBusy = false;
+      syncRerunButtons(detail, rerunUnavailable());
     }
   };
   const mark = button('Mark reviewed (R)', () => run('mark'));
@@ -382,10 +389,8 @@ async function openDetail(id, focus = true, retainEditor = false) {
         reviewRerunActions(item, {
           selectRerun,
           isBusy: rerunUnavailable,
-          showError: (message) => {
-            viewStatus.hidden = false;
-            viewStatus.textContent = message;
-          },
+          openEstimate,
+          getSetup: () => currentSetup,
         })
       );
     viewStatus.hidden = true;
@@ -409,7 +414,8 @@ async function openDetail(id, focus = true, retainEditor = false) {
   }
 }
 
-export function initReview(fetchReview, sendEdit, draftChanged, onRerun, refresh) {
+export function initReview(fetchReview, sendEdit, draftChanged, onRerun, refresh, openAiEstimate) {
+  openEstimate = openAiEstimate;
   refreshSetup = refresh;
   request = fetchReview;
   submitEdit = sendEdit;
@@ -436,6 +442,7 @@ export function updateReview(setup, focus = true) {
   if (previous !== view) showFilters(form, view);
   updateEditorControls();
   syncRerunButtons(detail, rerunUnavailable());
+  syncRerunOutcome(detail, detail.dataset.rowId, setup);
   section.hidden = !setup.analysis;
   if (!setup.analysis) {
     listRequest++;

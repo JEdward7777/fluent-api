@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 
+import { createEstimateRefresh } from './assets/estimate-refresh.js';
 import { createDraftSync } from './assets/review-edit-feedback.js';
 import { initReviewNavigation } from './assets/review-navigation.js';
 
@@ -106,3 +107,103 @@ it('consumes one navigation intent while the row acknowledgement is outstanding'
     vi.unstubAllGlobals();
   }
 });
+
+it.each(['disjoint', 'conflicting', 'retargeted', 'reselected'])(
+  'rebases only locally edited AI fields after %s changes in another tab',
+  async (mode) => {
+    vi.useFakeTimers();
+    const retry = new EventTarget();
+    const scopeNotice = {};
+    vi.stubGlobal('document', {
+      getElementById: (id) => (id === 'retry-estimate' ? retry : scopeNotice),
+    });
+    vi.stubGlobal('window', { setTimeout, clearTimeout });
+    let current = {
+      state: 'reviewing',
+      analysis: {},
+      paidEstimate: {},
+      configurationRevision: 1,
+      estimateRevision: 1,
+      loadRevision: 1,
+      contentRevision: 1,
+      selectedModelId: 'row',
+      reassessmentScopeRevision: 1,
+      model: 'google:original',
+      sampleCount: 3,
+      noCache: false,
+      cacheDir: null,
+    };
+    const remote = {
+      ...current,
+      model: 'google:updated',
+      configurationRevision: 2,
+      estimateRevision: 2,
+      sampleCount: ['conflicting', 'retargeted'].includes(mode) ? 5 : 3,
+      selectedModelId: mode === 'retargeted' ? 'new-row' : current.selectedModelId,
+      reassessmentScopeRevision: ['retargeted', 'reselected'].includes(mode) ? 3 : 1,
+    };
+    const restoreAi = vi.fn();
+    const request = vi.fn(async (path, _method, body) => {
+      if (path === 'setup') return remote;
+      if (body.configurationRevision === 1) throw new Error('Configuration changed');
+      return { ...remote, ...body, configurationRevision: 3, estimateRevision: 3 };
+    });
+    try {
+      const refresh = createEstimateRefresh({
+        getSetup: () => current,
+        // This tab only touched Samples. Its old model must never be posted against the new revision.
+        read: () => ({ ...current, model: 'google:original', sampleCount: 4 }),
+        dirty: () => false,
+        restoreAi,
+        available: () => true,
+        sync: () => refresh.message(),
+        render: (next) => {
+          refresh.rebase(next);
+          current = next;
+        },
+        request,
+      });
+      refresh.change('samples');
+      await vi.advanceTimersByTimeAsync(1000);
+      if (['retargeted', 'reselected'].includes(mode)) {
+        expect(restoreAi).toHaveBeenCalledWith(remote);
+        expect(refresh.edited).toBe(false);
+        expect(scopeNotice.textContent).toContain('Pending AI settings for row row were cleared.');
+        expect(scopeNotice.textContent).toContain(
+          `current estimate is for row ${remote.selectedModelId}.`
+        );
+        expect(retry.hidden).toBe(true);
+        retry.dispatchEvent(new Event('click'));
+        await vi.advanceTimersByTimeAsync(500);
+        expect(request).toHaveBeenCalledTimes(2);
+        return;
+      }
+      expect(restoreAi).not.toHaveBeenCalled();
+      if (mode === 'conflicting') {
+        expect(request).toHaveBeenCalledTimes(2);
+        expect(current.sampleCount).toBe(5);
+        expect(refresh.message()).toContain(
+          'Samples changed to 5 in the session. Your form shows 4'
+        );
+        expect(retry.hidden).toBe(false);
+        retry.dispatchEvent(new Event('click'));
+        await vi.advanceTimersByTimeAsync(500);
+      }
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(request).toHaveBeenLastCalledWith(
+        'ai/estimate',
+        'POST',
+        expect.objectContaining({
+          configurationRevision: 2,
+          estimateRevision: 2,
+          model: 'google:updated',
+          sampleCount: 4,
+        })
+      );
+      expect(refresh.blocked).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  }
+);
