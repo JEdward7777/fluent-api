@@ -223,6 +223,9 @@ export function createEstimateRefresh({
     change,
     schedule,
     rebase,
+    get changingSettingsOrSelection() {
+      return selecting || edits.size > 0;
+    },
     get edited() {
       return edits.size > 0;
     },

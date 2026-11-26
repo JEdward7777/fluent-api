@@ -13,18 +13,28 @@ const normalPreview = document.getElementById('normal-preview');
 const previewResult = document.getElementById('preview-result');
 export function renderExactPreview(
   next,
-  { dirty, practiceBusy, sessionUnconfirmed, settingsBusy, readiness }
+  { dirty, practiceBusy, sessionUnconfirmed, settingsBusy, savedViewBusy, readiness }
 ) {
   normalPreview.hidden = next.practice || (!next.analysis && !next.saveOutcome);
   const blocked = hasUnsavedReviewDraft() || sessionUnconfirmed || saveStatusUnconfirmed() || dirty;
-  const unavailable =
-    blocked ||
-    practiceBusy ||
-    settingsBusy ||
-    (readiness && next.state !== 'saved') ||
-    !reviewerMatchesPreview(next);
-  renderReportControls(next, unavailable);
-  syncSaveChanges(next, unavailable);
+  const viewBlocked = blocked || practiceBusy || !reviewerMatchesPreview(next);
+  const unavailable = viewBlocked || settingsBusy || (readiness && next.state !== 'saved');
+  const receipt = next.sessionSave;
+  const sameSave =
+    receipt?.state === 'succeeded' &&
+    receipt.result?.previewToken === next.preview?.token &&
+    receipt.configurationRevision === next.configurationRevision &&
+    receipt.operationId === next.saveOutcome?.operationId;
+  const readable =
+    !next.practice &&
+    !next.activeOperationId &&
+    !next.sourceChanged &&
+    (next.preview?.saved
+      ? sameSave && !viewBlocked && !savedViewBusy
+      : next.state === 'previewed' && !unavailable);
+  const viewToken = readable ? next.preview?.token : undefined;
+  renderReportControls(next, unavailable, viewToken);
+  syncSaveChanges(viewToken, next.preview?.conflicts.length);
   const technical = document.getElementById('preview-technical');
   technical.hidden = !next.preview || unavailable || !['saved', 'previewed'].includes(next.state);
   if (!technical.hidden)

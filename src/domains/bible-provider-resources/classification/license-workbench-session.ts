@@ -437,6 +437,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     this.latestSaveOperationId = body.operationId;
     const changes = preview.plan.jsonChanges;
     const receipt = {
+      previewToken: preview.token,
       reviewer: preview.reviewer,
       reviewedAt: preview.reviewedAt,
       reviewContentHash: preview.plan.reviewContentHash,

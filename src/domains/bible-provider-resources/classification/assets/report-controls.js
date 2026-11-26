@@ -9,8 +9,8 @@ const confirmationPath = document.getElementById('report-confirm-path');
 const view = document.getElementById('report-dialog');
 const download = document.getElementById('report-download');
 const current = document.getElementById('current-report');
-let openCurrent;
 let previewKey = '';
+let currentViewToken;
 let blocked = false;
 let generation = 0;
 let attempt;
@@ -68,7 +68,7 @@ export function invalidateReportSelection() {
   }
 }
 
-export function renderReportControls(next, workflowBlocked) {
+export function renderReportControls(next, workflowBlocked, viewToken) {
   const nextKey = ['saved', 'previewed'].includes(next.state) ? (next.preview?.token ?? '') : '';
   const nextBlocked = Boolean(workflowBlocked || next.activeOperationId);
   const previousPath = path.value;
@@ -77,11 +77,12 @@ export function renderReportControls(next, workflowBlocked) {
   previewKey = nextKey;
   blocked = nextBlocked;
   if (changed) invalidateReportSelection();
-  current.querySelector('summary').textContent =
-    next.state === 'saved' ? 'View report from completed Save' : 'View report, results and impact';
-  current.hidden = !previewKey || blocked || next.practice;
-  if (current.hidden) current.open = false;
-  if (changed && current.open) openCurrent();
+  if (currentViewToken !== viewToken) current.open = false;
+  currentViewToken = viewToken;
+  current.hidden = !viewToken;
+  current.querySelector('summary').textContent = next.preview?.saved
+    ? 'View report from completed Save'
+    : 'View report, results and impact';
   renderControls();
 }
 
@@ -206,9 +207,9 @@ export function initReportControls(request, getSetup, recover, token, settingsPe
     form.requestSubmit();
     form.remove();
   }
-  openCurrent = () => {
+  const openCurrent = () => {
     if (current.open && !current.hidden)
-      openReport({ id: previewKey, current: 'true' }, 'current-report-frame');
+      openReport({ id: currentViewToken, current: 'true' }, 'current-report-frame');
   };
   current.addEventListener('toggle', openCurrent);
   document.getElementById('report-open').addEventListener('click', () => {
@@ -247,7 +248,7 @@ export function initReportControls(request, getSetup, recover, token, settingsPe
     if (!current.hidden)
       void downloadReport(
         currentDownload,
-        `current-report/${previewKey}/${type}`,
+        `current-report/${currentViewToken}/${type}`,
         `license-impact.${type === 'html' ? 'html' : 'md'}`,
         document.getElementById('current-report-status')
       );

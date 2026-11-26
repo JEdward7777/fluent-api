@@ -41,6 +41,12 @@ async function reportEntryExists(path: string) {
   }
 }
 
+function readablePreview(workflow: LicenseWorkflow | undefined, token: string) {
+  const preview =
+    workflow?.status.state === 'previewed' ? workflow.previewed : workflow?.savedPreview;
+  return preview?.token === token ? preview : undefined;
+}
+
 export class LicenseWorkbenchReports {
   private readonly plans = new Map<string, ReportPlan>();
   private readonly operations = new Map<
@@ -52,14 +58,8 @@ export class LicenseWorkbenchReports {
   >();
 
   currentChanges(workflow: LicenseWorkflow | undefined, token: string, databaseLabel: string) {
-    const preview = workflow?.previewed;
-    if (
-      !preview ||
-      preview.token !== token ||
-      preview.plan.conflicts.length ||
-      !['saved', 'previewed'].includes(workflow!.status.state)
-    )
-      return undefined;
+    const preview = readablePreview(workflow, token);
+    if (!preview || preview.plan.conflicts.length) return undefined;
     return licenseSaveChanges(preview, databaseLabel);
   }
 
@@ -69,14 +69,8 @@ export class LicenseWorkbenchReports {
     token: string,
     format: 'html' | 'markdown'
   ) {
-    const preview = workflow?.previewed;
-    if (
-      practice ||
-      !preview ||
-      preview.token !== token ||
-      !['saved', 'previewed'].includes(workflow?.status.state ?? '')
-    )
-      return undefined;
+    const preview = readablePreview(workflow, token);
+    if (practice || !preview) return undefined;
     return format === 'html'
       ? renderLicenseHtml(preview.reports.model)
       : renderLicenseMarkdown(preview.reports.model);

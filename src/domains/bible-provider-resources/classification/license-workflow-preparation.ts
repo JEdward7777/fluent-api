@@ -5,7 +5,7 @@ import type { LicenseArtifact } from '../license-artifact.schemas';
 import type { LicenseCommandOptions } from './license-command-options';
 import type { FreeSelection } from './license-free-preparation';
 import type { PaidAuthorization } from './license-paid-batch';
-import type { LicenseInspection } from './license-workflow.types';
+import type { LicenseInspection, LicensePreview } from './license-workflow.types';
 
 import { displayLicenseNotice, isLicenseNoticeUnavailable } from '../license-normalizer';
 import {
@@ -120,11 +120,23 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
     this.resetModelSelection();
   }
 
+  private savedPreviewDuringEstimate?: LicensePreview;
+
+  // A quote can read the completed Save while it recomputes the paid estimate.
+  // Promoting any changed rows invalidates previewResult before publishing them.
+  get savedPreview() {
+    return this.state === 'saved' || this.previewResult === this.savedPreviewDuringEstimate
+      ? this.previewResult
+      : undefined;
+  }
+
   async prepareFree(contentRevision: number, selection?: FreeSelection, renewEstimate = false) {
     this.requireContentRevision(this.configurationRevision, contentRevision);
     if (this.busyDone || !['inspected', 'reviewing', 'saved', 'previewed'].includes(this.state))
       throw new Error('Cannot prepare assessment while an operation runs');
     const prior = this.state;
+    if (prior === 'saved' && renewEstimate && !selection)
+      this.savedPreviewDuringEstimate = this.previewResult;
     this.state = 'analyzing';
     this.stopAnalysisRequested = false;
     this.beginBusy();
@@ -140,6 +152,7 @@ export abstract class LicenseWorkflowPreparation extends LicenseWorkflowReview {
             : undefined;
       return this.paidEstimate!;
     } finally {
+      this.savedPreviewDuringEstimate = undefined;
       if (this.state === 'analyzing') this.state = prior;
       this.endBusy();
     }

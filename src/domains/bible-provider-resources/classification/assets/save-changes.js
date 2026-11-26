@@ -60,15 +60,8 @@ function destinationView(destination) {
   return section;
 }
 
-export function syncSaveChanges(next, blocked) {
-  const key =
-    !blocked &&
-    !next.practice &&
-    !next.activeOperationId &&
-    ['saved', 'previewed'].includes(next.state) &&
-    !next.preview?.conflicts.length
-      ? next.preview?.token
-      : null;
+export function syncSaveChanges(viewToken, conflicts) {
+  const key = conflicts ? undefined : viewToken;
   if (token !== key) {
     generation++;
     snapshot = undefined;

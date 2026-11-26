@@ -97,13 +97,8 @@ const loadChanges = () => pending('load');
 const evidenceChanges = () => pending('ai');
 const saveChanges = () => pending('save');
 
-function settingsRequestActive(next = setup) {
-  return (
-    estimateRefresh.running ||
-    saveSettings.running ||
-    draftDatabase.running ||
-    next?.testingDatabase
-  );
+function settingsRequestActive(next = setup, estimateBusy = estimateRefresh.running) {
+  return estimateBusy || saveSettings.running || draftDatabase.running || next?.testingDatabase;
 }
 
 function workbenchBusy(next) {
@@ -205,6 +200,11 @@ const previewFlags = () => ({
   sessionUnconfirmed,
   readiness: savePreview.reason(setup),
   settingsBusy: settingsRequestActive(),
+  savedViewBusy:
+    savePreview.blocked ||
+    saveSubmitting() ||
+    analysisProgress.starting ||
+    settingsRequestActive(setup, estimateRefresh.changingSettingsOrSelection),
 });
 savePreview = createSavePreview({
   getSetup,

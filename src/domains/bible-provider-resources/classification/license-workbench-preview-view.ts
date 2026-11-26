@@ -21,6 +21,7 @@ export function licenseWorkbenchPreviewView(input: {
   const review = checkLicenseArtifactReview(preview.candidate.artifact);
   return {
     token: preview.token,
+    saved: workflow?.savedPreview === preview,
     reviewer: preview.reviewer,
     reviewedAt: preview.reviewedAt,
     configurationRevision,

@@ -24,6 +24,7 @@ export interface VisibleOperation {
   reconciliation?: LicenseReconciliation;
   recovery?: LicenseWriteRecovery;
   result?: {
+    previewToken: string;
     reviewer: string;
     reviewedAt?: string;
     reviewContentHash: string;
