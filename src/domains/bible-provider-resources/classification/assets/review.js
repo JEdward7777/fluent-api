@@ -1,7 +1,15 @@
+import { reviewAddress } from './review-address.js';
 import { createDraftSync, reviewShortcuts } from './review-edit-feedback.js';
-import { appendEvidence, node } from './review-evidence.js';
-import { initReviewNavigation, reviewQuery, showFilters } from './review-navigation.js';
-import { initReviewPagination } from './review-pagination.js';
+import { appendEvidence, node, reviewChip } from './review-evidence.js';
+import {
+  bindReviewLink,
+  initReviewNavigation,
+  keepEditorPosition,
+  reviewLink,
+  reviewQuery,
+  showFilters,
+} from './review-navigation.js';
+import { initReviewPagination, renderReviewRows } from './review-pagination.js';
 import {
   reassessmentUnavailable,
   reviewRerunActions,
@@ -51,7 +59,16 @@ const navigation = initReviewNavigation(
 
 export const { pushStage } = navigation;
 
-const pagination = initReviewPagination(section, (page, size) => navigation.goTo(page, size));
+const pageAddress = (page) => reviewAddress({ ...renderedView, page, row: null });
+const pagination = initReviewPagination(
+  section,
+  (page, size) => navigation.goTo(page, size),
+  pageAddress
+);
+const backLinks = ['back-results-top', 'back-results-bottom'].map((id) =>
+  document.getElementById(id)
+);
+for (const link of backLinks) bindReviewLink(link, navigation.backToResults);
 
 function setDraftDirty(value) {
   if (editDirty === value) return;
@@ -75,42 +92,7 @@ async function loadRows(view, focusRow) {
       throw new Error('Review changed. Reload to see the current results.');
     const { page, total, allCount } = result;
     navigation.setPage(view, page);
-    rows.replaceChildren();
-    for (const item of result.rows) {
-      const tr = node('tr');
-      const action = reviewLink(item.preview, () => navigation.openRow(item.id));
-      action.dataset.rowId = item.id;
-
-      const preview = node('td');
-      preview.append(action, node('small', `Row ID: ${item.id}`));
-      preview.dataset.label = 'Original notice preview';
-      tr.append(
-        preview,
-        node(
-          'td',
-          item.bibleNames.slice(0, 3).join(', ') +
-            (item.bibleCount > 3 ? ` +${item.bibleCount - 3}` : '')
-        ),
-        node('td', item.source),
-        node('td', item.status),
-        node('td'),
-        node(
-          'td',
-          item.sampleCount
-            ? `${item.votes.allowed} allowed / ${item.votes.forbidden} forbidden / ${item.votes.unknown} unknown`
-            : 'No model votes'
-        )
-      );
-      for (const [cell, label] of [...tr.children]
-        .slice(1)
-        .map((cell, index) => [
-          cell,
-          ['Affected Bibles', 'Source', 'Decision', 'Review state', 'Saved model votes'][index],
-        ]))
-        cell.dataset.label = label;
-      tr.children[4].append(reviewChip(item));
-      rows.append(tr);
-    }
+    renderReviewRows(rows, result.rows, view, navigation.openRow);
     summary.textContent = `${total} of ${allCount} classifications · ${result.remaining} left${filtered(view) ? ' (filtered)' : ''}. ${result.context.disclaimer}`;
     pagination.render(result);
     if (!result.rows.length) {
@@ -134,25 +116,6 @@ async function loadRows(view, focusRow) {
           : error.message;
     }
   }
-}
-function reviewChip(item) {
-  const label =
-    { human_reviewed: 'Human reviewed', llm_reviewed: 'AI reviewed' }[item.reviewState] ??
-    'Unreviewed';
-  return node(
-    'span',
-    label + (item.pending ? ' · Unsaved' : ''),
-    `review-chip ${item.reviewState ?? 'unreviewed'}`
-  );
-}
-function reviewLink(label, go) {
-  const link = node('a', label);
-  link.href = '?stage=review';
-  link.addEventListener('click', (event) => {
-    event.preventDefault();
-    void go();
-  });
-  return link;
 }
 function reviewEditor(item, refreshEvidence) {
   const editor = node('section', undefined, 'review-editor');
@@ -286,7 +249,7 @@ function reviewEditor(item, refreshEvidence) {
     node('summary', 'Keyboard shortcuts'),
     node(
       'p',
-      'J / K: next / previous. A / F / U: Allowed / Forbidden / Unknown. R: mark reviewed. Shift+Enter: mark reviewed and next. Ctrl+Backspace: revert. Escape: back to results. While typing, text editing keys keep their ordinary behavior. Tab leaves the field.'
+      'J / K: next / previous. A / F / U: Allowed / Forbidden / Unknown. R: mark reviewed. Shift+Enter: mark reviewed and next. Ctrl+Backspace: revert. Escape: back to results. Shift+Enter also works in Permission and Optional comment. Other editing keys keep their ordinary behavior. Tab leaves the field.'
     )
   );
   editor.append(
@@ -315,6 +278,11 @@ function reviewEditor(item, refreshEvidence) {
     warning.hidden = !warning.textContent;
     prev.hidden = !item.navigation.previousId;
     following.hidden = !item.navigation.nextId;
+    for (const [link, row] of [
+      [prev, item.navigation.previousId],
+      [following, item.navigation.nextId],
+    ])
+      if (row) link.href = reviewAddress({ ...renderedView, row });
     const locked =
       externalBusy ||
       Boolean(currentSetup.activeOperationId) ||
@@ -348,6 +316,7 @@ function reviewEditor(item, refreshEvidence) {
   shortcut = reviewShortcuts({
     back: navigation.backToResults,
     decision,
+    comment,
     change: () => change('status'),
     mark,
     next,
@@ -358,7 +327,7 @@ function reviewEditor(item, refreshEvidence) {
   update();
   return editor;
 }
-async function openDetail(id, focus = true, retainEditor = false) {
+async function openDetail(id, focus = true, retainEditor = false, restorePosition) {
   const sequence = ++detailRequest;
   try {
     const item = await request(detailPath(id));
@@ -373,12 +342,10 @@ async function openDetail(id, focus = true, retainEditor = false) {
     detail.replaceChildren();
     const title = node('h3', item.originalNoticeLabel.slice(0, 160));
     detail.dataset.rowId = item.id;
-    const back = reviewLink('Back to results (Escape)', () => navigation.backToResults());
     const evidence = node('div', undefined, 'review-evidence');
     const refreshEvidence = appendEvidence(evidence, item);
     detail.append(
       title,
-      back,
       node('p', item.context.disclaimer),
       reviewEditor(item, refreshEvidence),
       evidence
@@ -395,7 +362,10 @@ async function openDetail(id, focus = true, retainEditor = false) {
       );
     viewStatus.hidden = true;
     detail.hidden = false;
-    if (focus && section.getClientRects().length) back.focus();
+    if (focus && section.getClientRects().length) {
+      if (restorePosition) restorePosition(detail.querySelector('.review-editor'));
+      else backLinks[0].focus();
+    }
   } catch (error) {
     if (sequence === detailRequest) {
       if (retainEditor) {
@@ -437,6 +407,10 @@ export function setReviewBusy(busy, settingsChanged = dirtySettings) {
 export function updateReview(setup, focus = true) {
   currentSetup = setup;
   const view = navigation.sync(setup);
+  for (const link of backLinks) {
+    link.hidden = !setup.analysis || !view.row;
+    link.href = reviewAddress({ ...view, row: null });
+  }
   const previous = renderedView;
   renderedView = view;
   if (previous !== view) showFilters(form, view);
@@ -482,13 +456,14 @@ export function updateReview(setup, focus = true) {
       void openDetail(view.row, false, true);
       return;
     }
+    const restorePosition = focusRow && view.row ? keepEditorPosition(detail) : undefined;
     detail.replaceChildren();
     detail.hidden = true;
     results.hidden = Boolean(view.row);
     viewStatus.hidden = !view.row;
     viewStatus.textContent = view.row ? 'Loading classification evidence…' : '';
     updateEditorControls = () => {};
-    if (view.row) void openDetail(view.row, focus);
+    if (view.row) void openDetail(view.row, focus, false, restorePosition);
     else {
       rows.replaceChildren();
       void loadRows(view, focus && focusRow);

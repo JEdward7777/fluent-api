@@ -221,10 +221,12 @@ export function appendEvidence(detail, initial) {
     }
   });
   const buttons = new Map();
-  const label = (kind) =>
-    kind === 'Notice'
-      ? kind
-      : `${kind} (${kind === 'Affected Bibles' ? item.bibles.length : evidenceCount(item)})`;
+  const label = (kind) => {
+    if (kind === 'Notice') return kind;
+    const bibles = kind === 'Affected Bibles';
+    const count = bibles ? item.bibles.length : evidenceCount(item);
+    return `${kind} · ${count} ${bibles ? 'Bible' : 'item'}${count === 1 ? '' : 's'}`;
+  };
   for (const kind of Object.keys(drawerFields)) {
     const button = node('button', label(kind), 'evidence-opener');
     buttons.set(kind, button);
@@ -265,4 +267,15 @@ export function appendEvidence(detail, initial) {
       }
     }
   };
+}
+
+export function reviewChip(item) {
+  const label =
+    { human_reviewed: 'Human reviewed', llm_reviewed: 'AI reviewed' }[item.reviewState] ??
+    'Unreviewed';
+  return node(
+    'span',
+    label + (item.pending ? ' · Unsaved' : ''),
+    `review-chip ${item.reviewState ?? 'unreviewed'}`
+  );
 }

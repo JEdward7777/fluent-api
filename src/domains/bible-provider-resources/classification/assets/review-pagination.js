@@ -1,4 +1,48 @@
-export function initReviewPagination(section, goTo) {
+import { reviewAddress } from './review-address.js';
+import { node, reviewChip } from './review-evidence.js';
+import { reviewLink } from './review-navigation.js';
+
+export function renderReviewRows(rows, items, view, openRow) {
+  rows.replaceChildren();
+  for (const item of items) {
+    const tr = node('tr');
+    const action = reviewLink(item.preview, () => openRow(item.id));
+    action.href = reviewAddress({ ...view, row: item.id });
+    action.dataset.rowId = item.id;
+
+    const preview = node('td');
+    preview.append(action, node('small', `Row ID: ${item.id}`));
+    preview.dataset.label = 'Original notice preview';
+    tr.append(
+      preview,
+      node(
+        'td',
+        item.bibleNames.slice(0, 3).join(', ') +
+          (item.bibleCount > 3 ? ` +${item.bibleCount - 3}` : '')
+      ),
+      node('td', item.source),
+      node('td', item.status),
+      node('td'),
+      node(
+        'td',
+        item.sampleCount
+          ? `${item.votes.allowed} allowed / ${item.votes.forbidden} forbidden / ${item.votes.unknown} unknown`
+          : 'No model votes'
+      )
+    );
+    for (const [cell, label] of [...tr.children]
+      .slice(1)
+      .map((cell, index) => [
+        cell,
+        ['Affected Bibles', 'Source', 'Decision', 'Review state', 'Saved model votes'][index],
+      ]))
+      cell.dataset.label = label;
+    tr.children[4].append(reviewChip(item));
+    rows.append(tr);
+  }
+}
+
+export function initReviewPagination(section, goTo, pageAddress) {
   let currentPage = 0;
   const pagers = [...section.querySelectorAll('.review-pager')].map((group) => {
     const previous = group.querySelector('[name="previous"]');
@@ -8,10 +52,12 @@ export function initReviewPagination(section, goTo) {
     const input = jump.elements.page;
     const submit = jump.querySelector('button');
     previous.addEventListener('click', (event) => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       if (previous.hasAttribute('href')) goTo(currentPage - 1);
     });
     next.addEventListener('click', (event) => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       if (next.hasAttribute('href')) goTo(currentPage + 1);
     });
@@ -36,7 +82,7 @@ export function initReviewPagination(section, goTo) {
         [next, page < pageCount],
       ]) {
         link.setAttribute('aria-disabled', String(!enabled));
-        if (enabled) link.href = '?stage=review';
+        if (enabled) link.href = pageAddress(link === previous ? page - 1 : page + 1);
         else link.removeAttribute('href');
       }
       input.max = String(pageCount);

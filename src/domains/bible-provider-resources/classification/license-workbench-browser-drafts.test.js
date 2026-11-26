@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 
 import { createEstimateRefresh } from './assets/estimate-refresh.js';
-import { createDraftSync } from './assets/review-edit-feedback.js';
+import { createDraftSync, reviewShortcuts } from './assets/review-edit-feedback.js';
 import { initReviewNavigation } from './assets/review-navigation.js';
 
 function gate() {
@@ -207,3 +207,92 @@ it.each(['disjoint', 'conflicting', 'retargeted', 'reselected'])(
     }
   }
 );
+
+it('transfers only review navigation through a shared address and a delayed source load', () => {
+  const row = 'a'.repeat(64);
+  const query = new URLSearchParams({
+    stage: 'review',
+    row,
+    search: 'filtered & paged',
+    source: 'rule',
+    status: 'unknown',
+    reviewState: 'unreviewed',
+    page: '3',
+    pageSize: '10',
+    password: 'discard',
+    reviewComment: 'unpublished',
+    token: 'discard',
+  });
+  const location = new URL(`http://localhost/?${query}`);
+  const history = {
+    state: null,
+    replaceState(state, _, url) {
+      this.state = structuredClone(state);
+      location.href = new URL(url, location);
+    },
+  };
+  const field = () => new EventTarget();
+  const form = Object.assign(field(), {
+    elements: { search: field(), status: field(), source: field(), reviewState: field() },
+  });
+  vi.stubGlobal('window', new EventTarget());
+  vi.stubGlobal('location', location);
+  vi.stubGlobal('history', history);
+  try {
+    const navigation = initReviewNavigation(form, vi.fn(), vi.fn());
+    const launchId = crypto.randomUUID();
+    const cold = navigation.sync({ launchId, loadRevision: 1 });
+    expect(cold).toMatchObject({ row, search: 'filtered & paged', pageSize: 10, page: 3 });
+    for (const key of ['password', 'reviewComment', 'token'])
+      expect(location.searchParams.has(key)).toBe(false);
+    for (const key of ['row', 'status', 'reviewState', 'pageSize', 'page', 'source', 'search'])
+      expect(location.searchParams.get(key)).toBe(query.get(key));
+    const loaded = navigation.sync({ launchId, loadRevision: 2, analysis: {} });
+    expect(loaded.row).toBe(row);
+    const replaced = navigation.sync({ launchId, loadRevision: 3, analysis: {} });
+    expect(replaced.row).toBeNull();
+    expect(location.search).toBe('?stage=review');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('reserves Shift+Enter in the comment and permission fields while preserving native editing', () => {
+  const field = () => {
+    const element = { closest: () => element };
+    return element;
+  };
+  const comment = field();
+  const decision = field();
+  const next = { click: vi.fn() };
+  let modal = false;
+  vi.stubGlobal('document', { querySelector: () => modal });
+  try {
+    const shortcut = reviewShortcuts({ comment, decision, next });
+    function press(target, key, modifiers = {}) {
+      const preventDefault = vi.fn();
+      shortcut({ key, target, preventDefault, ...modifiers });
+      return preventDefault.mock.calls.length;
+    }
+    for (const target of [comment, decision]) {
+      expect(press(target, 'Enter', { shiftKey: true })).toBe(1);
+      expect(press(target, 'Enter')).toBe(0);
+      expect(press(target, 'r')).toBe(0);
+      expect(press(target, 'Backspace', { ctrlKey: true })).toBe(0);
+      for (const guard of [
+        { ctrlKey: true },
+        { repeat: true },
+        { isComposing: true },
+        { keyCode: 229 },
+      ])
+        expect(press(target, 'Enter', { shiftKey: true, ...guard })).toBe(0);
+    }
+    modal = true;
+    expect(press(comment, 'Enter', { shiftKey: true })).toBe(0);
+    modal = false;
+    expect(press(field(), 'Enter', { shiftKey: true })).toBe(0);
+    expect(next.click).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

@@ -348,14 +348,19 @@ table {
   width: 32%;
 }
 #review th:nth-child(2) {
-  width: 28%;
+  width: 18%;
 }
 #review th:nth-child(3),
 #review th:nth-child(4),
 #review td:nth-child(3),
 #review td:nth-child(4) {
-  min-width: 7rem;
   white-space: nowrap;
+}
+@media (width > 38rem) {
+  #review :is(th, td):nth-child(n + 5) {
+    min-width: 10rem;
+    overflow-wrap: normal;
+  }
 }
 th,
 td {

@@ -18,6 +18,7 @@ import {
   syncPracticeDraftControls as updatePracticeDraftControls,
 } from './preview-ui.js';
 import { initReportControls, invalidateReportSelection } from './report-controls.js';
+import { openWorkbenchSession, requestWorkbenchLauncher } from './review-address.js';
 import { reassessmentStatus } from './review-rerun.js';
 import {
   hasUnsavedReviewDraft,
@@ -34,11 +35,7 @@ import {
   syncSettingsFields,
 } from './settings-draft.js';
 
-const launchedToken = window.location.hash.slice(1);
-if (launchedToken) window.sessionStorage.setItem('license-workbench-token', launchedToken);
-const token = launchedToken || window.sessionStorage.getItem('license-workbench-token');
-if (launchedToken)
-  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+const token = openWorkbenchSession();
 const status = document.getElementById('status');
 const form = document.getElementById('setup');
 const inspect = document.getElementById('inspect');
@@ -500,13 +497,13 @@ initAttestation(
 );
 initReportControls(request, getSetup, recoverActionFailure, token, saveChanges);
 if (!token) {
-  status.textContent = 'Open the printed local URL, including its session token after #.';
+  status.textContent = requestWorkbenchLauncher();
 } else {
   try {
     render(await request('setup'), true);
     if (setup.activeOperationId || setup.testingDatabase) await pollEvidence();
   } catch (error) {
     status.dataset.state = 'error';
-    status.textContent = error.message;
+    status.textContent = error.status === 403 ? requestWorkbenchLauncher() : error.message;
   }
 }

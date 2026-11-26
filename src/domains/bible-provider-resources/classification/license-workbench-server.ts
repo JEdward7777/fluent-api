@@ -50,6 +50,7 @@ const assets = new Map<string, readonly [string, string]>([
   ['/review.js', ['review.js', 'text/javascript; charset=utf-8']],
   ['/review-edit-feedback.js', ['review-edit-feedback.js', 'text/javascript; charset=utf-8']],
   ['/review-pagination.js', ['review-pagination.js', 'text/javascript; charset=utf-8']],
+  ['/review-address.js', ['review-address.js', 'text/javascript; charset=utf-8']],
   ['/review-navigation.js', ['review-navigation.js', 'text/javascript; charset=utf-8']],
   ['/review-rerun.js', ['review-rerun.js', 'text/javascript; charset=utf-8']],
   ['/save.js', ['save.js', 'text/javascript; charset=utf-8']],

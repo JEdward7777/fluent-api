@@ -138,7 +138,7 @@ export function createDraftSync(
   };
 }
 
-export function reviewShortcuts({ back, decision, change, mark, next, revert, move }) {
+export function reviewShortcuts({ back, decision, comment, change, mark, next, revert, move }) {
   return (event) => {
     if (
       event.defaultPrevented ||
@@ -156,23 +156,26 @@ export function reviewShortcuts({ back, decision, change, mark, next, revert, mo
       void back();
       return;
     }
+    const editing = event.target.closest?.(
+      'textarea,input,select,[contenteditable]:not([contenteditable=false])'
+    );
     if (
-      event.target.closest?.('textarea,input,select,[contenteditable]:not([contenteditable=false])')
-    )
+      event.shiftKey &&
+      !event.ctrlKey &&
+      key === 'enter' &&
+      (!editing || editing === comment || editing === decision)
+    ) {
+      event.preventDefault();
+      next.click();
       return;
+    }
+    if (editing) return;
     if (event.ctrlKey && !event.shiftKey && key === 'backspace') {
       event.preventDefault();
       revert.click();
       return;
     }
-    if (event.ctrlKey) return;
-    if (event.shiftKey) {
-      if (key === 'enter') {
-        event.preventDefault();
-        next.click();
-      }
-      return;
-    }
+    if (event.ctrlKey || event.shiftKey) return;
     const choice = { a: 'allowed', f: 'forbidden', u: 'unknown' }[key];
     if (choice && !decision.disabled) {
       event.preventDefault();

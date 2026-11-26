@@ -52,7 +52,7 @@ export function createStageNavigation(
 ) {
   const links = [...document.querySelectorAll('[data-route]')];
   const nextLink = document.getElementById('stage-next');
-  const statusLinks = [...document.querySelectorAll('.stage-links a')];
+  const statusLinks = [...document.querySelectorAll('.stage-links a:not(#back-results-top)')];
   const heading = document.getElementById('setup-heading');
   let stage = 'load';
   let initialized = false;
@@ -63,6 +63,9 @@ export function createStageNavigation(
 
   function display(next) {
     if (!next) return;
+    const waiting = !next.analysis && new URL(location.href).searchParams.get('stage') === 'review';
+    document.getElementById('shared-review-wait').hidden = !waiting;
+    document.getElementById('shared-review').hidden = false;
     const role =
       stage === 'save'
         ? 'destination'
@@ -152,14 +155,15 @@ export function createStageNavigation(
       history.replaceState(history.state, '', fallback);
     }
     onVisit();
-    if (target === stage) {
+    const requested = new URL(location.href).searchParams.get('stage');
+    if (target === stage && (!requested || requested === target)) {
       if (!traversal) onStage(stage);
       return;
     }
     const url = new URL(location.href);
     url.searchParams.set('stage', target);
     if (!traversal && !(await pushStage(url))) return;
-    stage = target;
+    stage = target === 'review' && !getSetup().analysis ? 'load' : target;
     display(getSetup());
     heading.focus();
     onStage(stage);
@@ -224,8 +228,11 @@ export function createStageNavigation(
             : next.state === 'uncertain'
               ? 'save'
               : 'load';
+        if (requested !== stage) history.replaceState(history.state, '', `?stage=${stage}`);
         initialized = true;
       }
+      if (new URL(location.href).searchParams.get('stage') === 'review')
+        stage = next.analysis ? 'review' : 'load';
       display(next);
     },
     validate() {

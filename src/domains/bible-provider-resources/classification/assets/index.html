@@ -39,6 +39,18 @@
         <h2 id="setup-heading" tabindex="-1">Load</h2>
         <p id="stage-instructions">Choose a source and load its free evidence.</p>
 
+        <p id="shared-review-wait" class="notice" role="status" hidden>
+          Load your source to open the requested review.
+        </p>
+        <details data-stage="load" id="shared-review" hidden>
+          <summary>Open a shared review</summary>
+          <form id="shared-review-form">
+            <label>Shared review address <input name="address" type="url" required /></label>
+            <p>You can use an address from a different local port. It opens against your source.</p>
+            <button type="submit">Open review</button>
+          </form>
+        </details>
+
         <form id="setup" novalidate hidden>
           <div class="fields">
             <label data-stage="load"
@@ -194,6 +206,7 @@
           <a id="source-test-status" href="?stage=load" hidden></a>
           <a id="destination-test-status" href="?stage=save" hidden></a>
           <a id="review-ready" href="?stage=review" hidden></a>
+          <a data-stage="review" id="back-results-top" hidden>Back to results (Escape)</a>
           <a id="save-ready" href="?stage=save" hidden></a>
         </p>
         <div data-stage="load ai" id="inspection" hidden></div>
@@ -322,6 +335,7 @@
           </div>
           <div id="review-detail" hidden></div>
         </section>
+        <a data-stage="review" id="back-results-bottom" hidden>Back to results</a>
         <a id="stage-next" hidden>Next</a>
         <label data-stage="save" id="save-reviewer-label" hidden
           >Reviewer for pending decisions

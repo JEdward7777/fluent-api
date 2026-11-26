@@ -1,14 +1,11 @@
+import {
+  defaultReview as initial,
+  maxSearchLength,
+  readReview,
+  reviewAddress,
+  validReview,
+} from './review-address.js';
 const stateKey = 'licenseReviewNavigationV2';
-const initial = {
-  search: '',
-  status: 'all',
-  source: 'all',
-  reviewState: 'all',
-  page: 1,
-  pageSize: 25,
-  row: null,
-};
-const maxSearchLength = 500;
 function validEntry(entry) {
   const uuid = /^[\da-f-]{36}$/;
   const row = /^[\da-f]{64}$/;
@@ -19,17 +16,9 @@ function validEntry(entry) {
     Number.isSafeInteger(entry.index) &&
     entry.index >= 0 &&
     Number.isSafeInteger(entry.configuration) &&
-    typeof entry.search === 'string' &&
-    entry.search.length <= maxSearchLength &&
-    ['all', 'allowed', 'forbidden', 'unknown'].includes(entry.status) &&
-    ['all', 'table', 'rule', 'gemini', 'manual'].includes(entry.source) &&
-    ['all', 'unreviewed', 'llm_reviewed', 'human_reviewed'].includes(entry.reviewState) &&
-    [1, 10, 25, 50, 100].includes(entry.pageSize) &&
-    Number.isSafeInteger(entry.page) &&
-    entry.page > 0 &&
-    (entry.row === null ||
-      (row.test(entry.row) &&
-        Number.isSafeInteger(entry.listIndex) &&
+    validReview(entry) &&
+    (entry.listIndex == null ||
+      (Number.isSafeInteger(entry.listIndex) &&
         entry.listIndex >= 0 &&
         entry.listIndex < entry.index)) &&
     (entry.anchor == null || row.test(entry.anchor))
@@ -61,6 +50,22 @@ export function showFilters(form, view) {
   banner.textContent = active.length ? `Filtered view · ${active.join(' · ')}` : '';
 }
 
+export function keepEditorPosition(detail) {
+  const editor = detail.querySelector('.review-editor');
+  if (!editor || !editor.getClientRects().length) return;
+  const controls = (element) => [
+    ...element.querySelectorAll('button, a, select, textarea, summary'),
+  ];
+  const index = controls(editor).indexOf(document.activeElement);
+  const top = (index < 0 ? editor : document.activeElement).getBoundingClientRect().top;
+  return (next) => {
+    const target = controls(next)[index];
+    const focus = target?.getClientRects().length ? target : next.querySelector('button');
+    focus.focus({ preventScroll: true });
+    window.scrollBy(0, (index < 0 ? next : focus).getBoundingClientRect().top - top);
+  };
+}
+
 export function initReviewNavigation(form, onNavigate, flush) {
   let entry;
   let dirty = false;
@@ -70,7 +75,14 @@ export function initReviewNavigation(form, onNavigate, flush) {
     const value = history.state?.[stateKey];
     return validEntry(value) ? value : undefined;
   };
-  const write = (method, url = location.href) => history[method]({ [stateKey]: entry }, '', url);
+  const write = (method, url = location.href) => {
+    const stage = new URL(url, location.href).searchParams.get('stage');
+    history[method](
+      { [stateKey]: entry },
+      '',
+      stage ? reviewAddress(entry, stage) : location.pathname
+    );
+  };
   const notify = () => {
     window.dispatchEvent(new Event('review-location'));
     onNavigate();
@@ -112,13 +124,11 @@ export function initReviewNavigation(form, onNavigate, flush) {
   }
   function back() {
     if (!entry.row) return false;
-    if (entry.listIndex < entry.index) {
+    if (entry.listIndex != null && entry.listIndex < entry.index) {
       traversal = { destination: entry.listIndex };
       history.go(entry.listIndex - entry.index);
     } else {
-      entry = { ...entry, row: null };
-      write('replaceState');
-      onNavigate();
+      push({ row: null, listIndex: null });
     }
     return true;
   }
@@ -199,19 +209,23 @@ export function initReviewNavigation(form, onNavigate, flush) {
   };
   return {
     sync(setup) {
+      const firstVisit = !entry;
       entry ??= read();
-      if (
-        entry?.launchId !== setup.launchId ||
-        entry.configuration !== setup.loadRevision ||
-        (!setup.analysis && entry.row)
-      ) {
+      const newLaunch = entry?.launchId !== setup.launchId;
+      if (newLaunch || entry.configuration !== setup.loadRevision) {
+        const params = new URL(location.href).searchParams;
+        const requested = newLaunch ? readReview(params) : entry.awaitingSource ? entry : initial;
         entry = {
-          ...initial,
+          ...requested,
+          awaitingSource: !setup.analysis && params.get('stage') === 'review',
           launchId: setup.launchId,
           configuration: setup.loadRevision,
-          chain: entry?.chain ?? crypto.randomUUID(),
-          index: entry?.index ?? 0,
+          chain: newLaunch ? crypto.randomUUID() : entry.chain,
+          index: newLaunch ? 0 : entry.index,
         };
+        write('replaceState');
+      } else if (firstVisit || (entry.awaitingSource && setup.analysis)) {
+        if (setup.analysis) entry.awaitingSource = false;
         write('replaceState');
       }
       return entry;
@@ -236,7 +250,7 @@ export function initReviewNavigation(form, onNavigate, flush) {
       }, ready);
     },
     forgetRow() {
-      entry = { ...entry, row: null };
+      entry = { ...entry, row: null, listIndex: null };
       write('replaceState');
       onNavigate();
     },
@@ -252,4 +266,18 @@ export function initReviewNavigation(form, onNavigate, flush) {
       else window.removeEventListener('beforeunload', beforeUnload);
     },
   };
+}
+
+export function reviewLink(label, go) {
+  const link = document.createElement('a');
+  link.textContent = label;
+  bindReviewLink(link, go);
+  return link;
+}
+export function bindReviewLink(link, go) {
+  link.addEventListener('click', (event) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    void go();
+  });
 }
