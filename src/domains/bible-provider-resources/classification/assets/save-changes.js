@@ -1,3 +1,5 @@
+import { node } from './review-evidence.js';
+
 const dialog = document.getElementById('changes-drawer');
 const button = document.getElementById('view-changes');
 const download = document.getElementById('changes-download');
@@ -7,28 +9,22 @@ let token;
 let snapshot;
 let generation = 0;
 
-function element(tag, text) {
-  const node = document.createElement(tag);
-  node.textContent = text;
-  return node;
-}
-
 function recordView(row) {
-  const details = element('details', '');
+  const details = node('details', '');
   details.append(
-    element('summary', `${row.operation} · ${row.group} · ${row.key || '(empty notice)'}`)
+    node('summary', `${row.operation} · ${row.group} · ${row.key || '(empty notice)'}`)
   );
   details.addEventListener('toggle', () => {
     if (!details.open || details.childElementCount > 1) return;
-    if (row.decision) details.append(element('p', row.decision));
+    if (row.decision) details.append(node('p', row.decision));
     for (const [side, title] of [
       ['before', 'Before'],
       ['after', 'After'],
     ]) {
       const position = row[`${side}Index`];
       details.append(
-        element('h4', title + (position == null ? '' : ` · position ${position + 1}`)),
-        element('pre', row[side] === null ? 'Absent' : JSON.stringify(row[side], null, 2))
+        node('h4', title + (position == null ? '' : ` · position ${position + 1}`)),
+        node('pre', row[side] === null ? 'Absent' : JSON.stringify(row[side], null, 2))
       );
     }
   });
@@ -36,11 +32,11 @@ function recordView(row) {
 }
 
 function destinationView(destination) {
-  const section = element('section', '');
-  section.append(element('h3', `${destination.kind} · ${destination.target}`));
+  const section = node('section', '');
+  section.append(node('h3', `${destination.kind} · ${destination.target}`));
   if (destination.kind === 'Database')
     section.append(
-      element(
+      node(
         'p',
         'Policy columns are shown below. PostgreSQL sets the creation and update timestamps at write time.'
       )
@@ -48,13 +44,13 @@ function destinationView(destination) {
   const changed = destination.records.filter(
     (row) => !['Preserve', 'Unchanged'].includes(row.operation)
   );
-  section.append(element('p', `${changed.length} changed records.`), ...changed.map(recordView));
+  section.append(node('p', `${changed.length} changed records.`), ...changed.map(recordView));
   const retained = destination.records.filter((row) =>
     ['Preserve', 'Unchanged'].includes(row.operation)
   );
   if (retained.length) {
-    const details = element('details', '');
-    details.append(element('summary', `Preserved and unchanged records (${retained.length})`));
+    const details = node('details', '');
+    details.append(node('summary', `Preserved and unchanged records (${retained.length})`));
     details.addEventListener('toggle', () => {
       if (details.open && details.childElementCount === 1)
         details.append(...retained.map(recordView));
@@ -121,7 +117,7 @@ export function initSaveChanges(request, stale) {
       const url = URL.createObjectURL(
         new Blob([`${JSON.stringify(current, null, 2)}\n`], { type: 'application/json' })
       );
-      const link = element('a', '');
+      const link = node('a', '');
       link.href = url;
       link.download = 'license-destination-changes.json';
       link.click();

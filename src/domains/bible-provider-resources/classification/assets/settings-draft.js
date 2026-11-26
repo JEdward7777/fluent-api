@@ -295,9 +295,7 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
     restore(stage, applied = getSetup()) {
       for (const [name, key, , owner] of settingFields)
         if (stage === owner) displaySetting(form, applied, name, key);
-      if (stage === 'load') form.elements.discardReviewedState.checked = false;
-      const role = stage === 'load' ? 'source' : stage === 'save' ? 'destination' : null;
-      if (role) this.restoreConnection(role);
+      if (stage === 'save') this.restoreConnection('destination');
     },
   };
 }
