@@ -26,7 +26,12 @@ import {
   updateReview,
 } from './review.js';
 import { initSave, renderSave, saveStatusUnconfirmed, withTabSaveOutcome } from './save.js';
-import { pendingSettings, roleConnectionDrafts, syncSettingsFields } from './settings-draft.js';
+import {
+  pendingSettings,
+  roleConnectionDrafts,
+  stageSettingsActions,
+  syncSettingsFields,
+} from './settings-draft.js';
 
 const launchedToken = window.location.hash.slice(1);
 if (launchedToken) window.sessionStorage.setItem('license-workbench-token', launchedToken);
@@ -41,8 +46,6 @@ const stop = document.getElementById('stop');
 const inspection = document.getElementById('inspection');
 const databaseTest = document.getElementById('database-test');
 const applySettings = document.getElementById('apply-settings');
-const restoreSettings = document.getElementById('restore-settings');
-const settingsChangeStatus = document.getElementById('settings-change-status');
 const databaseSettings = document.getElementById('database-settings');
 const settingsActionsHelp = document.getElementById('settings-actions-help');
 let setup;
@@ -84,8 +87,8 @@ function mayObserve() {
 const drafts = roleConnectionDrafts(form, draftDatabase, getSetup, checkPendingSettings);
 const { appliedConnection, pending } = drafts;
 const loadChanges = () => pending('load');
-const evidenceChanges = () => pending('load', 'ai');
-const saveChanges = () => pending('load', 'save');
+const evidenceChanges = () => pending('ai');
+const saveChanges = () => pending('save');
 
 function settingsRequestActive(next = setup) {
   return applyingSettings || draftDatabase.running || next?.testingDatabase;
@@ -104,6 +107,16 @@ function workbenchBusy(next) {
   );
 }
 
+const syncRoleActions = stageSettingsActions(
+  form,
+  drafts,
+  (next) => workbenchBusy(next) || settingsRequestActive(next),
+  () => {
+    draftDatabase.syncFields(appliedConnection());
+    checkPendingSettings();
+    render(setup);
+  }
+);
 const stages = createStageNavigation(form, {
   getSetup,
   pushStage,
@@ -118,40 +131,26 @@ function syncSettingsActions(next) {
   const busy = workbenchBusy(next);
   syncSettingsFields(
     form,
-    (busy && !observer.observingOperation) || applyingSettings,
+    (busy && (!observer.observingOperation || drafts.loading)) || applyingSettings,
     next.practice
   );
   const blocked = busy || settingsRequestActive(next);
   syncRoleActions(next, stages.current);
-  restoreSettings.disabled = blocked;
   const actions = evidenceActions(
     next,
     blocked,
-    { load: loadChanges(), analysis: evidenceChanges() },
+    { load: loadChanges(), analysis: evidenceChanges(), source: form.elements.source.value },
     hasUnsavedReviewDraft()
   );
   paidControls.update(next, actions.analyze);
-  inspect.disabled = !actions.inspect;
+  inspect.disabled =
+    !actions.inspect || (form.elements.source.value === 'database' && drafts.conflicted('source'));
   analyze.disabled = !actions.analyze;
+  analyze.hidden = !next.analysis || next.practice || Boolean(next.paidEstimate);
   inspection.hidden = !next.inspected;
   inspection.textContent = inspectionSummary(next, evidenceChanges());
 }
 
-function syncRoleActions(next, stage) {
-  const blocked = workbenchBusy(next) || settingsRequestActive(next);
-  databaseTest.disabled =
-    blocked || drafts.conflicted(drafts.role) || next.practice || next.state === 'uncertain';
-  const role = stage === 'load' ? 'source' : stage === 'save' ? 'destination' : null;
-  const conflicted =
-    role && ['database', 'both'].includes(form.elements[role].value) && drafts.conflicted(role);
-  applySettings.disabled = blocked || conflicted;
-  const changes = pending(stage);
-  settingsChangeStatus.textContent = conflicted
-    ? drafts.conflict
-    : changes
-      ? `Pending settings changes: ${changes}. Apply or restore this stage’s settings.`
-      : '';
-}
 const renderGuide = (next) => stages.update(next);
 const captureFocus = trackActionFocus();
 const operationFocus = trackOperationFocus(captureFocus, status);
@@ -219,8 +218,7 @@ initReview(
     }
   },
   async (body) => {
-    if (evidenceChanges())
-      throw new Error('Apply or restore source and AI settings before reassessment.');
+    if (evidenceChanges()) throw new Error('Apply or restore AI settings before reassessment.');
     const next = await request('review/rerun', 'POST', body);
     if (
       next.configurationRevision < setup.configurationRevision ||
@@ -247,9 +245,8 @@ function render(raw, populate = false, accepted, passive = false) {
   if (!passive || !hasUnsavedReviewDraft()) updateReview(next, !passive);
   draftDatabase.syncFields(appliedConnection());
   form.hidden = false;
-  renderSetupContext(form, next);
+  renderSetupContext(form, next, drafts.readDraft());
   dirty = pending();
-  document.getElementById('discard-label').hidden = !next.analysis;
   const busy = workbenchBusy(next);
   syncSettingsActions(next);
   databaseTest.hidden = next.practice;
@@ -294,21 +291,22 @@ form.addEventListener('input', (event) => {
     draftDatabase.invalidate();
     renderGuide(setup);
   }
+  if (stages.current === 'load' && event.target !== form.elements.discardReviewedState) {
+    drafts.rejectLoad();
+    form.elements.discardReviewedState.checked = false;
+  }
   checkPendingSettings();
+  renderSetupContext(form, setup, drafts.readDraft());
 });
-form.addEventListener('change', checkPendingSettings);
+form.addEventListener('change', (event) => {
+  checkPendingSettings();
+  if (event.target === form.elements.source) syncSettingsActions(setup);
+});
 document.addEventListener('focusin', checkPendingSettings);
 document.addEventListener('pointerdown', checkPendingSettings, true);
-restoreSettings.addEventListener('click', () => {
-  if (!setup || restoreSettings.disabled) return;
-  drafts.restore(stages.current);
-  draftDatabase.syncFields(appliedConnection());
-  checkPendingSettings();
-  renderGuide(setup);
-  status.textContent = 'Applied settings restored for this stage.';
-});
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (stages.current === 'load') return start('inspect');
   if (!setup || applySettings.disabled || !checkPendingSettings() || !stages.validate()) return;
   const focusError = captureFocus();
   try {
@@ -374,7 +372,7 @@ async function start(kind, paidBody) {
     !setup ||
     workbenchBusy(setup) ||
     settingsRequestActive() ||
-    (kind === 'inspect' ? loadChanges() : evidenceChanges())
+    (kind === 'inspect' ? !stages.validate() : evidenceChanges())
   )
     return;
   const body = paidBody ?? {
@@ -382,6 +380,7 @@ async function start(kind, paidBody) {
     configurationRevision: setup.configurationRevision,
     ...drafts.discardConfirmation(),
   };
+  if (kind === 'inspect') body.sourceSettings = drafts.submitLoad(body.operationId);
   operationFocus.start(body.operationId);
   const begin = async () => {
     await request(kind, 'POST', body);
@@ -391,6 +390,7 @@ async function start(kind, paidBody) {
     await analysisProgress.start(kind, begin, pollEvidence);
   } catch (error) {
     if (sessionUnconfirmed) return;
+    if (kind === 'inspect' && error.requestRejected) drafts.rejectLoad(body.operationId);
     status.dataset.state = 'error';
     status.textContent = error.message;
     operationFocus.fail();

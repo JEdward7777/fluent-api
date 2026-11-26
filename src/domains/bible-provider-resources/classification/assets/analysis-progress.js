@@ -120,11 +120,11 @@ export function workflowStatus(next, { busy, dirty, starting }) {
     return next.practice
       ? `Practice analysis ready: ${next.analysis.rows} rows. Review the evidence below, then save only to scratch.`
       : `Review available for ${next.analysis.rows} rows. Open a row to inspect its evidence.`;
-  if (next.state === 'inspected') return 'Inputs inspected. Prepare free evidence to continue.';
+
   if (dirty) return `Unapplied settings: ${dirty}.`;
   return next.readyForInspect
     ? 'Settings ready. Load the source.'
-    : 'Choose settings and click Apply settings.';
+    : 'Choose a source, then load it to prepare its evidence.';
 }
 
 export function evidenceActions(next, blocked, dirtySettings, dirtyRow) {
@@ -132,9 +132,12 @@ export function evidenceActions(next, blocked, dirtySettings, dirtyRow) {
   return {
     inspect:
       available &&
-      !dirtySettings.load &&
-      next.readyForInspect &&
-      (next.sourceDraftPending || ['configuring', 'error'].includes(next.state)),
+      next.state !== 'uncertain' &&
+      (dirtySettings.source === undefined ? next.readyForInspect : Boolean(dirtySettings.source)) &&
+      (Boolean(dirtySettings.load) ||
+        next.sourceDraftPending ||
+        (next.practice && next.state === 'inspected' && !next.analysis) ||
+        ['configuring', 'error'].includes(next.state)),
     analyze:
       available &&
       !dirtySettings.analysis &&
@@ -159,11 +162,10 @@ export function inspectionSummary(next, dirtySettings) {
   if (next.practice) return `${inventory} Offline practice uses saved evidence.`;
   if (dirtySettings)
     return `${inventory} Apply or restore your settings to see the current estimate.`;
-  if (next.sourceDraftPending)
-    return `${inventory} Inspect the newly selected source for its estimate.`;
+  if (next.sourceDraftPending) return `${inventory} Load the selected source for its estimate.`;
   const estimate = next.paidEstimate;
   if (!estimate || estimate.contentRevision !== next.contentRevision)
-    return `${inventory} The estimate needs refreshing. Click Prepare free evidence to recalculate it.`;
+    return `${inventory} The estimate needs refreshing. Open AI classification to refresh it.`;
   const nonmatch = ruleNonmatchMessage(estimate);
   const requests = estimate.expectedUncachedRequests;
   const scope = estimate.selection ? 'Selected row' : 'Loaded source';

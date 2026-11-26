@@ -446,9 +446,7 @@ export function updateReview(setup, focus = true) {
     activeSync = undefined;
     updateEditorControls = () => {};
     rows.replaceChildren();
-    summary.textContent = setup.practice
-      ? 'Prepare free evidence to review the practice rows.'
-      : 'Inspect a source to review its classifications.';
+    summary.textContent = 'Load a source to review its classifications.';
     detail.replaceChildren();
     detail.hidden = true;
     results.hidden = false;

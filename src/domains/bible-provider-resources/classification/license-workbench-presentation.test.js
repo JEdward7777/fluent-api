@@ -158,7 +158,7 @@ it.each([
   expect(workflowStatus({ ...view, latestOperation: failure }, {})).toBe(failure.error);
 });
 
-it('merges another tab’s pristine settings without clearing the active source test or local edits', () => {
+function settingsForm() {
   const form = { elements: {} };
   for (const name of [
     'source',
@@ -185,6 +185,7 @@ it('merges another tab’s pristine settings without clearing the active source 
   ])
     form.elements[name] = {
       value: '',
+      closest: () => ({ dataset: { stage: ['source', 'input'].includes(name) ? 'load' : 'save' } }),
       type: ['force', 'noCache', 'preserve'].includes(name)
         ? 'checkbox'
         : name === 'samples'
@@ -192,6 +193,11 @@ it('merges another tab’s pristine settings without clearing the active source 
           : 'text',
     };
   form.elements.databaseRole = { value: 'source', addEventListener: vi.fn() };
+  return form;
+}
+
+it('merges another tab’s pristine settings without clearing the active source test or local edits', () => {
+  const form = settingsForm();
   const environment = { mode: 'environment' };
   const prior = {
     configurationRevision: 1,
@@ -219,7 +225,70 @@ it('merges another tab’s pristine settings without clearing the active source 
   expect(database.invalidate.mock.calls).toEqual([['destination'], ['source']]);
 });
 
+it.each([false, true])(
+  'recognizes its own source publication only at its exact source revision (superseded %s)',
+  (superseded) => {
+    const form = settingsForm();
+    const env = { mode: 'environment' };
+    const initial = {
+      source: 'database',
+      reportFormats: 'none',
+      configurationRevision: 1,
+      sourceRevision: 1,
+      sourceConnectionRevision: 1,
+      loadRevision: 1,
+      sourceDatabaseConnection: env,
+      destinationDatabaseConnection: env,
+    };
+    const db = {
+      read: () => ({
+        mode: form.elements.databaseMode.value,
+        host: form.elements.databaseHost.value,
+        password: form.elements.databasePassword.value,
+      }),
+      invalidate: vi.fn(),
+    };
+    let current = initial;
+    const drafts = roleConnectionDrafts(form, db, () => current, vi.fn());
+    drafts.refresh(undefined, current, true);
+    form.elements.databaseMode.value = 'session';
+    form.elements.databaseHost.value = 'first';
+    form.elements.databasePassword.value = 'entered-secret';
+    drafts.submitLoad('mine');
+    const connection = {
+      mode: 'session',
+      host: superseded ? 'other' : 'first',
+      passwordRetained: true,
+    };
+    const publishing = {
+      ...initial,
+      configurationRevision: 2,
+      sourceRevision: superseded ? 3 : 2,
+      sourceConnectionRevision: 2,
+      loadRevision: 2,
+      sourceDatabaseConnection: connection,
+      lastSourceLoad: { operationId: 'mine', sourceRevision: 2 },
+      latestOperation: { operationId: 'mine', state: superseded ? 'succeeded' : 'running' },
+    };
+    drafts.refresh(current, publishing, false);
+    current = publishing;
+    expect(drafts.conflicted('source')).toBe(superseded);
+    expect(form.elements.databasePassword.value).toBe(superseded ? 'entered-secret' : '');
+    form.elements.databaseHost.value = 'newer-local-draft';
+    drafts.refresh(
+      current,
+      { ...publishing, latestOperation: { operationId: 'mine', state: 'succeeded' } },
+      false
+    );
+    expect(form.elements.databaseHost.value).toBe('newer-local-draft');
+  }
+);
+
 it.each([
+  [
+    { state: 'inspected', practice: true, readyForInspect: true, analysis: null },
+    { inspect: true, analyze: true },
+  ],
   [
     { state: 'reviewing', readyForInspect: true, sourceDraftPending: true },
     { inspect: true, analyze: false },

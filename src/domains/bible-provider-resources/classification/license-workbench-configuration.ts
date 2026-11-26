@@ -9,7 +9,7 @@ import type { WorkbenchDatabase } from './license-workbench-database';
 import type { RecordedOperation } from './license-workbench-operation.types';
 import type { LicenseRerunSelection } from './license-workbench-rerun';
 import type { LicenseReviewQuery } from './license-workbench-review';
-import type { setupSchema } from './license-workbench-schema';
+import type { inspectOperationSchema, setupSchema } from './license-workbench-schema';
 import type { LicenseWorkflow } from './license-workflow';
 import type { LicenseWorkflowDependencies } from './license-workflow.types';
 
@@ -55,20 +55,64 @@ export class LicenseWorkbenchConfiguration {
   protected destinationRevision = 1;
   private aiRevision = 1;
   protected loadRevision = 0;
+  private lastSourceLoad?: { operationId: string; sourceRevision: number };
   protected loadedOptions?: LicenseCommandOptions;
   protected loadedConnection?: WorkbenchDatabase;
   protected discardRevision?: number;
+  protected candidateSource(draft?: z.infer<typeof inspectOperationSchema>['sourceSettings']) {
+    if (this.practiceMode && draft?.source === 'database')
+      throw new Error('Practice requires a JSON source');
+    const options = draft
+      ? {
+          ...this.options,
+          source: draft.source,
+          ...(draft.source === 'json' && !this.practiceMode ? { input: draft.input } : {}),
+        }
+      : this.options;
+    const connection =
+      draft?.source === 'database' && draft.connection
+        ? selectWorkbenchDatabase(this.databaseConnection, draft.connection)
+        : this.databaseConnection;
+    const practicePath =
+      this.practiceMode && draft?.source === 'json'
+        ? draft.input === 'Bundled example'
+          ? null
+          : draft.input
+        : this.selectedPracticePath;
+    const replacesLoaded = this.practiceMode
+      ? this.loadedPracticePath !== undefined && this.loadedPracticePath !== practicePath
+      : Boolean(
+          this.loadedOptions &&
+          (this.loadedOptions.source !== options.source ||
+            (options.source === 'database'
+              ? !isDeepStrictEqual(this.loadedConnection, connection)
+              : this.loadedOptions.input !== options.input))
+        );
+    return { options, connection, practicePath, replacesLoaded };
+  }
+  protected acceptSource(
+    source: ReturnType<LicenseWorkbenchConfiguration['candidateSource']>,
+    operationId: string
+  ) {
+    const connectionChanged = !isDeepStrictEqual(this.databaseConnection, source.connection);
+    const changed =
+      connectionChanged ||
+      this.options.source !== source.options.source ||
+      this.options.input !== source.options.input ||
+      this.selectedPracticePath !== source.practicePath;
+    if (connectionChanged) this.sourceConnectionRevision++;
+    if (changed) {
+      this.sourceRevision++;
+      this.databaseTests.appliedStatus = 'untested';
+    }
+    this.lastSourceLoad = { operationId, sourceRevision: this.sourceRevision };
+    this.databaseConnection = source.connection;
+    this.selectedPracticePath = source.practicePath;
+    this.options = source.options;
+    return changed;
+  }
   protected get sourceDraftPending() {
-    if (this.practiceMode)
-      return (
-        this.loadedPracticePath !== undefined &&
-        this.loadedPracticePath !== this.selectedPracticePath
-      );
-    if (!this.loadedOptions) return false;
-    if (this.loadedOptions.source !== this.options.source) return true;
-    return this.options.source === 'database'
-      ? !isDeepStrictEqual(this.loadedConnection, this.databaseConnection)
-      : this.loadedOptions.input !== this.options.input;
+    return this.candidateSource().replacesLoaded;
   }
   protected preparing = false;
   protected async reserve<T>(work: () => Promise<T>) {
@@ -147,6 +191,7 @@ export class LicenseWorkbenchConfiguration {
       destinationRevision: this.destinationRevision,
       aiRevision: this.aiRevision,
       loadRevision: this.loadRevision,
+      lastSourceLoad: this.lastSourceLoad,
       sourceDatabaseTarget: workbenchDatabaseIdentity(this.databaseConnection),
       destinationDatabaseTarget: workbenchDatabaseIdentity(this.destinationConnection),
       sourceDatabaseConnection: visibleWorkbenchDatabase(this.databaseConnection),

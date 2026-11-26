@@ -22,6 +22,7 @@ import { registerReportViews } from './license-workbench-reports';
 import { reviewQuerySchema } from './license-workbench-review';
 import {
   databaseConnectionSchema,
+  inspectOperationSchema,
   operationSchema,
   paidOperationSchema,
   setupSchema,
@@ -166,9 +167,12 @@ function createLicenseWorkbenchApp(
   });
   for (const kind of ['inspect', 'analysis', 'paid'] as const) {
     app.post(`/api/${kind}`, async (c) => {
-      const parsed = (kind === 'paid' ? paidOperationSchema : operationSchema).safeParse(
-        await c.req.json().catch(() => null)
-      );
+      const schema = {
+        inspect: inspectOperationSchema,
+        analysis: operationSchema,
+        paid: paidOperationSchema,
+      }[kind];
+      const parsed = schema.safeParse(await c.req.json().catch(() => null));
       if (!parsed.success) return c.text('Invalid operation fields', 400);
       try {
         return c.json(session.start(kind, parsed.data), 202);

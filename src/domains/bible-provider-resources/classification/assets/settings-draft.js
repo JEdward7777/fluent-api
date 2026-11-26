@@ -136,6 +136,7 @@ export function changedConnection(current, entered) {
 
 export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
   let databaseRole = 'source';
+  let submittedLoad;
   let roleDrafts = {};
   const conflicts = new Set();
   const appliedConnection = () => getSetup()?.[`${databaseRole}DatabaseConnection`];
@@ -194,6 +195,22 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
         role: connection ? role : null,
       };
     },
+    get loading() {
+      return Boolean(submittedLoad);
+    },
+    submitLoad(id) {
+      const { body, fields, role } = this.stageSubmission('load');
+      submittedLoad = { id, fields, role, loadRevision: getSetup().loadRevision };
+      const source = body.source;
+      if (source === 'database') return { source, connection: body.sourceDatabaseConnection };
+      return {
+        source,
+        input: getSetup().practice ? body.input.trim() || 'Bundled example' : body.input,
+      };
+    },
+    rejectLoad(id = submittedLoad?.id) {
+      if (submittedLoad?.id === id) submittedLoad = undefined;
+    },
     appliedConnection,
     discardConfirmation() {
       const setup = getSetup();
@@ -232,6 +249,19 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
       }
     },
     refresh(prior, next, populate, accepted) {
+      if (submittedLoad) {
+        const receipt = next.lastSourceLoad;
+        if (receipt?.operationId === submittedLoad.id) {
+          if (receipt.sourceRevision === next.sourceRevision) accepted = submittedLoad;
+          submittedLoad = undefined;
+        } else if (
+          next.loadRevision > submittedLoad.loadRevision ||
+          (next.latestOperation?.operationId === submittedLoad.id &&
+            next.latestOperation.state === 'failed')
+        ) {
+          submittedLoad = undefined;
+        }
+      }
       for (const role of ['source', 'destination']) {
         const revision = `${role}Revision`;
         if (prior && prior[revision] !== next[revision]) draftDatabase.invalidate(role);
@@ -249,19 +279,66 @@ export function roleConnectionDrafts(form, draftDatabase, getSetup, onChange) {
         for (const [name, key] of accepted?.fields ?? []) displaySetting(form, next, name, key);
       }
     },
+    restoreConnection(role) {
+      conflicts.delete(role);
+      delete roleDrafts[role];
+      draftDatabase.invalidate(role);
+      if (databaseRole === role) populateConnection(form, getSetup()[`${role}DatabaseConnection`]);
+    },
     restore(stage) {
       const applied = getSetup();
       for (const [name, key, , owner] of settingFields)
         if (stage === owner) displaySetting(form, applied, name, key);
       if (stage === 'load') form.elements.discardReviewedState.checked = false;
       const role = stage === 'load' ? 'source' : stage === 'save' ? 'destination' : null;
-      if (role) {
-        conflicts.delete(role);
-        delete roleDrafts[role];
-        draftDatabase.invalidate(role);
-        if (databaseRole === role) populateConnection(form, applied[`${role}DatabaseConnection`]);
-      }
+      if (role) this.restoreConnection(role);
     },
+  };
+}
+
+export function stageSettingsActions(form, drafts, isBlocked, onRestore) {
+  const restoreSettings = document.getElementById('restore-settings');
+  const applySettings = document.getElementById('apply-settings');
+  const databaseTest = document.getElementById('database-test');
+  const settingsChangeStatus = document.getElementById('settings-change-status');
+  const reload = document.getElementById('reload-source-connection');
+  let currentStage = 'load';
+  reload.addEventListener('click', () => {
+    drafts.restoreConnection('source');
+    onRestore();
+  });
+  restoreSettings.addEventListener('click', () => {
+    drafts.restore(currentStage);
+    onRestore();
+    document.getElementById('status').textContent = 'Applied settings restored for this stage.';
+  });
+  return (next, stage) => {
+    currentStage = stage;
+    const blocked = isBlocked(next);
+    restoreSettings.disabled = blocked;
+    reload.disabled = blocked;
+    document.getElementById('discard-label').hidden =
+      !next.analysis ||
+      !(drafts.pending('load') || next.sourceDraftPending) ||
+      ['inspected', 'saved', 'error'].includes(next.state);
+
+    databaseTest.disabled =
+      blocked || drafts.conflicted(drafts.role) || next.practice || next.state === 'uncertain';
+    const role = stage === 'load' ? 'source' : stage === 'save' ? 'destination' : null;
+    const conflicted =
+      role && ['database', 'both'].includes(form.elements[role].value) && drafts.conflicted(role);
+    applySettings.disabled = blocked || conflicted;
+    reload.hidden = !(stage === 'load' && conflicted);
+    const changes = drafts.pending(stage);
+    settingsChangeStatus.textContent = conflicted
+      ? stage === 'load'
+        ? 'The source connection changed in another tab. Review its current settings before re-entering credentials.'
+        : drafts.conflict
+      : stage === 'load' && changes
+        ? 'Load source to use these settings. Your current review stays available until the new source loads.'
+        : changes
+          ? `Pending settings changes: ${changes}. Apply or restore this stage’s settings.`
+          : '';
   };
 }
 

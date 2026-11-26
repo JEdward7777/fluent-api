@@ -1,7 +1,7 @@
 import { equivalentCliCommand } from './settings-draft.js';
 
 const instructions = {
-  load: 'Choose a source, apply changed settings, then load its free evidence.',
+  load: 'Choose a source and load it to prepare its free evidence.',
   ai: 'Check the model, samples and request estimate before starting paid classification.',
   review: 'Open a notice to review its classification and evidence.',
   save: 'Choose a destination and inspect the proposed changes before saving.',
@@ -43,7 +43,7 @@ function configureStageHelp(practice) {
     : 'Load reads selected files, database and request cache as needed.';
   document.getElementById('analysis-help').textContent = practice
     ? 'Practice analysis uses saved JSON evidence without model requests.'
-    : 'Prepare free evidence applies rule matches and complete cached assessments. Missing samples stay unchanged and are counted below. This action sends zero model requests.';
+    : 'Load applies rule matches and complete cached assessments. Missing samples stay unchanged and are counted below. This action sends zero model requests.';
 }
 
 export function createStageNavigation(
@@ -223,7 +223,7 @@ export function createStageNavigation(
   };
 }
 
-export function renderSetupContext(form, next) {
+export function renderSetupContext(form, next, draft) {
   document.getElementById('practice-banner').hidden = !next.practice;
   document.getElementById('cli-details').hidden = next.practice;
   if (next.practice) {
@@ -233,9 +233,21 @@ export function renderSetupContext(form, next) {
       ? `Scratch: ${next.scratch}. Original SHA-256: ${next.originalHash}. Restart with --practice for a fresh session; discard this directory when finished. Practice output is never imported into a real session automatically.`
       : 'Load allocates scratch. Restart with --practice for a fresh session; discard the scratch directory when finished. Practice output is never imported into a real session automatically.';
   }
-  document.getElementById('cli-connection-note').textContent =
-    next.databaseConnection.mode === 'session'
-      ? 'The CLI command below does not transfer this session database or its password. The CLI uses its own environment database connection.'
-      : 'The CLI uses its environment database connection.';
-  document.getElementById('cli-command').textContent = equivalentCliCommand(next);
+  const loaded = next.loadedSource;
+  const database = loaded?.databaseConnection;
+  const loadedLabel =
+    database?.mode === 'session'
+      ? `database ${database.database} at ${database.host}:${database.port}`
+      : 'environment database';
+  document.getElementById('cli-form-note').textContent = loaded
+    ? `Command for the displayed settings. Currently loaded: ${loaded.source === 'json' ? loaded.input : loadedLabel}.`
+    : 'Command for the displayed settings. No source loaded yet.';
+  document.getElementById('cli-connection-note').textContent = ['source', 'destination'].some(
+    (role) =>
+      ['database', 'both'].includes(draft[role]) &&
+      (draft[`${role}DatabaseConnection`] ?? next[`${role}DatabaseConnection`]).mode === 'session'
+  )
+    ? 'The CLI command below does not transfer this session database or its password. The CLI uses its own environment database connection.'
+    : 'The CLI uses its environment database connection.';
+  document.getElementById('cli-command').textContent = equivalentCliCommand(draft);
 }

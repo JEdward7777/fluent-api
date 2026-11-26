@@ -1,10 +1,12 @@
 import type { z } from 'zod';
 
+import { createHash } from 'node:crypto';
+
 import type { PaidAuthorization } from './license-paid-batch';
 import type { LicensePractice } from './license-practice';
 import type { DraftCommand } from './license-review-drafts';
 import type { VisibleOperation } from './license-workbench-operation.types';
-import type { operationSchema } from './license-workbench-schema';
+import type { inspectOperationSchema } from './license-workbench-schema';
 import type { LicenseReviewEdit } from './license-workflow.types';
 
 import { renderLicenseHtml } from '../license-report-html';
@@ -67,7 +69,7 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
   private pendingLoad?: Promise<void>;
   start(
     kind: VisibleOperation['kind'],
-    body: z.infer<typeof operationSchema> & { paid?: PaidAuthorization }
+    body: z.infer<typeof inspectOperationSchema> & { paid?: PaidAuthorization }
   ) {
     const fingerprint = JSON.stringify([
       kind,
@@ -75,6 +77,8 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       Boolean(body.discardReviewedState),
       body.expectedContentRevision,
       body.paid,
+      body.sourceSettings &&
+        createHash('sha256').update(JSON.stringify(body.sourceSettings)).digest('hex'),
     ]);
     if (this.rerunOperations.get(body.operationId))
       throw new Error('Operation ID was reused with different arguments');
@@ -90,14 +94,26 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       throw new Error('Save outcome uncertain; check the actual Save targets before continuing');
     if (body.configurationRevision !== this.visible.configurationRevision)
       throw new Error('Configuration changed; reload setup before continuing');
-    if (!this.options.source) throw new Error('Choose a source');
+    const source = this.candidateSource(body.sourceSettings);
+    if (!source.options.source) throw new Error('Choose a source');
     if (kind === 'analysis' || kind === 'paid') this.requireSelectedSourceLoaded();
+    // An equivalent source submission acknowledges the retained review, including
+    // re-entered DB credentials. A legacy practice inspection still needs analysis.
+    const reuseLoaded =
+      kind === 'inspect' &&
+      body.sourceSettings &&
+      !source.replacesLoaded &&
+      this.workflow &&
+      ((this.practiceMode &&
+        this.workflow.status.state === 'inspected' &&
+        !this.workflow.analyzed) ||
+        (this.workflow.analyzed && !['configuring', 'error'].includes(this.workflow.status.state)));
     let candidate: LicenseWorkflow | undefined;
     let candidatePractice: LicensePractice | undefined;
-    if (kind === 'inspect') {
+    if (kind === 'inspect' && !reuseLoaded) {
       if (
         this.workflow?.analyzed &&
-        !this.sourceDraftPending &&
+        !source.replacesLoaded &&
         !['configuring', 'error'].includes(this.workflow.status.state)
       )
         throw new Error('The selected source is already loaded');
@@ -109,22 +125,25 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
         throw new Error(
           'Discard confirmation is stale. Review the current content revision before replacing this source.'
         );
+      const legacyConfirmation = body.sourceSettings ? undefined : this.discardRevision;
+      const confirmedRevision = body.discardReviewedState
+        ? body.expectedContentRevision
+        : legacyConfirmation;
       if (
         this.workflow?.analyzed &&
         !['inspected', 'saved', 'error'].includes(this.workflow.status.state) &&
-        (body.discardReviewedState ? body.expectedContentRevision : this.discardRevision) !==
-          this.workflow.status.contentRevision
+        confirmedRevision !== this.workflow.status.contentRevision
       )
         throw new Error(
           'Explicit discard acknowledgement for the current content revision is required to load a different source and replace the current review'
         );
     }
-    if (kind === 'inspect' && !this.practiceMode) {
-      candidate = new LicenseWorkflow(this.options, {
+    if (kind === 'inspect' && !reuseLoaded && !this.practiceMode) {
+      candidate = new LicenseWorkflow(source.options, {
         apiKey: this.injected?.apiKey ?? licenseApiKey(),
         database:
           this.injected?.database ??
-          (async () => ownedWorkbenchDatabase(this.databaseConnection, 'source')),
+          (async () => ownedWorkbenchDatabase(source.connection, 'source')),
         destinationDatabase:
           this.injected?.destinationDatabase ??
           this.injected?.database ??
@@ -141,14 +160,14 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
     this.activeOperationId = body.operationId;
     this.latestOperationId = body.operationId;
     const promise = (async () => {
-      if (kind === 'inspect' && this.practiceMode) {
-        candidatePractice = await createLicensePractice(this.selectedPracticePath);
+      if (kind === 'inspect' && !reuseLoaded && this.practiceMode) {
+        candidatePractice = await createLicensePractice(source.practicePath);
         candidate = candidatePractice.workflow;
       }
       const workflow = candidate ?? this.workflow;
       if (!workflow) throw new Error('Inspect inputs before starting analysis');
       const coreRequest = {
-        ...body,
+        operationId: body.operationId,
         configurationRevision: workflow.status.configurationRevision,
       };
       if (kind === 'paid' && body.paid) {
@@ -159,9 +178,16 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
         };
         return workflow.runPaid(body.paid, operation.progress);
       }
-      return kind === 'inspect'
-        ? workflow.inspect(coreRequest)
-        : workflow.startAnalysis(coreRequest);
+      if (kind === 'inspect') {
+        if (reuseLoaded) return workflow.analyzed ?? workflow.startAnalysis(coreRequest);
+        await workflow.inspect(coreRequest);
+        // Practice has an isolated JSON-only workflow. Publish the candidate only once its
+        // saved evidence is reviewable. Legacy two-step clients can still request inspection.
+        if (candidatePractice && body.sourceSettings)
+          await workflow.startAnalysis(workflow.status.configurationRevision);
+        return;
+      }
+      return workflow.startAnalysis(coreRequest);
     })();
     const closeReplacedWorkflow = async (retired?: LicenseWorkflow, practice?: LicensePractice) => {
       try {
@@ -175,7 +201,11 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
       .then(
         async () => {
           if (kind === 'inspect') {
-            this.loadRevision++;
+            const sourceChanged = this.acceptSource(source, body.operationId);
+            if (!reuseLoaded) this.loadRevision++;
+            if ((candidate && this.workflow) || sourceChanged) this.configurationRevision++;
+            if (candidate || sourceChanged) this.reports.clear();
+            this.discardRevision = undefined;
             if (this.options.source === 'database' && !this.destinationInitialized) {
               this.destinationConnection = { ...this.databaseConnection };
               this.destinationInitialized = true;
@@ -186,8 +216,6 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
             if (candidate) {
               const prior = this.workflow;
               const priorPractice = this.practice;
-              if (prior) this.configurationRevision++;
-              this.reports.clear();
               this.workflow = candidate;
               if (candidatePractice) {
                 this.practice = candidatePractice;
@@ -196,7 +224,6 @@ export class LicenseWorkbenchSession extends LicenseWorkbenchConfiguration {
               }
               this.loadedOptions = this.options;
               this.loadedConnection = this.databaseConnection;
-              this.discardRevision = undefined;
               this.latestSaveOperationId = undefined;
               await closeReplacedWorkflow(prior, priorPractice);
             }

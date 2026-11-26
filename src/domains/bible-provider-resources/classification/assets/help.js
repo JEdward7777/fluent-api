@@ -12,7 +12,7 @@ const help = [
     '#setup [name="databaseMode"]',
     {
       source:
-        'Choose the environment or a session connection. Apply source settings, then Load to read the selected database.',
+        'Choose the environment or a session connection. Load source reads the selected database.',
       destination:
         'Choose the environment or a session connection. Apply destination settings to use this database for preview and Save. The loaded source stays in place.',
     },

@@ -66,6 +66,17 @@ export const operationSchema = z
   })
   .strict();
 
+export const inspectOperationSchema = operationSchema.extend({
+  sourceSettings: z
+    .discriminatedUnion('source', [
+      z.object({ source: z.literal('json'), input: path }).strict(),
+      z
+        .object({ source: z.literal('database'), connection: databaseConnectionSchema.optional() })
+        .strict(),
+    ])
+    .optional(),
+});
+
 export const paidOperationSchema = operationSchema
   .pick({ operationId: true, configurationRevision: true })
   .extend({

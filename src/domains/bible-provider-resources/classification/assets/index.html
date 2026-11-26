@@ -74,7 +74,7 @@
           <fieldset id="database-settings">
             <legend id="connection-heading">Source database connection</legend>
             <p>
-              Test the entered connection before applying these settings.
+              Test the entered connection without changing the loaded source or destination.
             </p>
             <div class="fields">
               <label hidden
@@ -114,7 +114,7 @@
             <p id="database-password-note">
               The workbench keeps the password in server session memory. Dots indicate that the password is retained.
               A blank field retains it when the connection details and TLS setting stay the same. Select Clear retained
-              password or switch to the environment connection to remove it when you apply settings.
+              password or switch to the environment connection to remove it when you use the new connection.
             </p>
             <p>
               Connection settings last for this server session. Your browser may offer to remember the username and
@@ -158,7 +158,7 @@
             ><input type="checkbox" name="discardReviewedState" /> Discard unsaved review</label
           >
           <!-- prettier-ignore -->
-          <p id="settings-actions-help">Apply updates settings on this stage.</p>
+          <p data-stage="ai save" id="settings-actions-help">Apply updates settings on this stage.</p>
           <div
             class="actions"
             role="group"
@@ -166,14 +166,20 @@
             aria-describedby="settings-actions-help"
           >
             <button id="database-test" type="button" disabled>Test connection</button>
-            <button id="apply-settings" type="submit">Apply settings</button>
-            <button id="restore-settings" type="button">Restore settings on this stage</button>
+            <button data-stage="load" id="reload-source-connection" type="button" hidden>
+              Use current source connection
+            </button>
+            <button data-stage="ai save" id="apply-settings" type="submit">Apply settings</button>
+            <button data-stage="ai save" id="restore-settings" type="button">
+              Restore settings on this stage
+            </button>
           </div>
           <p id="settings-change-status" role="status"></p>
           <p id="database-test-result" role="status" tabindex="-1"></p>
         </form>
         <details data-stage="load" id="cli-details">
           <summary>Equivalent CLI command</summary>
+          <p id="cli-form-note"></p>
           <p id="cli-connection-note">
             Use these settings in terminal review. The CLI uses its environment database connection.
           </p>
@@ -195,8 +201,8 @@
         </label>
         <div id="analysis-actions" class="actions">
           <button data-stage="load" id="inspect" type="button" disabled>Load source</button>
-          <button data-stage="load ai" id="analyze" aria-describedby="analysis-help" disabled>
-            Prepare free evidence
+          <button data-stage="ai" id="analyze" aria-describedby="analysis-help" disabled>
+            Refresh estimate
           </button>
           <button data-stage="ai" id="paid" type="button" hidden>Run paid classification</button>
           <button data-stage="ai" id="stop" type="button" hidden>Stop after current key</button>
